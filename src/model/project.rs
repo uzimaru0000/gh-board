@@ -42,20 +42,20 @@ pub struct Comment {
     pub created_at: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CardType {
     Issue { state: IssueState },
     PullRequest { state: PrState },
     DraftIssue,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum IssueState {
     Open,
     Closed,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PrState {
     Open,
     Closed,

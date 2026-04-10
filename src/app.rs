@@ -223,6 +223,29 @@ impl App {
                     ));
                 });
             }
+            Command::UpdateCard {
+                content_id,
+                card_type,
+                title,
+                body,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = match card_type {
+                        crate::model::project::CardType::DraftIssue => {
+                            client.update_draft_issue(&content_id, &title, &body).await
+                        }
+                        crate::model::project::CardType::Issue { .. } => {
+                            client.update_issue(&content_id, &title, &body).await
+                        }
+                        crate::model::project::CardType::PullRequest { .. } => {
+                            client.update_pull_request(&content_id, &title, &body).await
+                        }
+                    };
+                    let _ = tx.send(AppEvent::CardUpdated(result.map_err(|e| e.to_string())));
+                });
+            }
             Command::OpenEditor { content } => {
                 self.pending_editor = Some(content);
             }

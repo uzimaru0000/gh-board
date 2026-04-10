@@ -22,6 +22,7 @@ pub enum AppEvent {
     AssigneesLoaded(Result<Vec<(String, String)>, String>),
     LabelToggled(Result<(), String>),
     AssigneeToggled(Result<(), String>),
+    CardUpdated(Result<(), String>),
 }
 
 pub struct EventHandler {

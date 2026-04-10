@@ -16,6 +16,7 @@ pub enum ViewMode {
     Detail,
     RepoSelect,
     CardGrab,
+    EditCard,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,6 +85,23 @@ pub enum CreateCardField {
 pub enum NewCardType {
     Draft,
     Issue,
+}
+
+#[derive(Clone, Debug)]
+pub struct EditCardState {
+    pub content_id: String,
+    pub item_id: String,
+    pub card_type: super::project::CardType,
+    pub title_input: String,
+    pub title_cursor: usize,
+    pub body_input: String,
+    pub focused_field: EditCardField,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EditCardField {
+    Title,
+    Body,
 }
 
 impl Default for CreateCardState {

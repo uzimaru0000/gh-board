@@ -5,9 +5,9 @@ use crate::event::AppEvent;
 use crate::model::project::{Board, Card, ProjectSummary};
 use crate::model::state::{
     ActiveFilter, ConfirmAction, ConfirmState, CreateCardField, CreateCardState, DetailPane,
-    EditItem, FilterState, GrabState, LoadingState, NewCardType, PendingIssueCreate,
-    RepoSelectState, SidebarEditMode, ViewMode, SIDEBAR_ASSIGNEES, SIDEBAR_DELETE, SIDEBAR_LABELS,
-    SIDEBAR_SECTION_COUNT, SIDEBAR_STATUS,
+    EditCardField, EditCardState, EditItem, FilterState, GrabState, LoadingState, NewCardType,
+    PendingIssueCreate, RepoSelectState, SidebarEditMode, ViewMode, SIDEBAR_ASSIGNEES,
+    SIDEBAR_DELETE, SIDEBAR_LABELS, SIDEBAR_SECTION_COUNT, SIDEBAR_STATUS,
 };
 
 pub struct AppState {
@@ -48,6 +48,9 @@ pub struct AppState {
     pub status_select_cursor: usize,
     pub sidebar_edit: Option<SidebarEditMode>,
 
+    // Edit card
+    pub edit_card_state: Option<EditCardState>,
+
     // Card grab
     pub grab_state: Option<GrabState>,
 
@@ -83,6 +86,7 @@ impl AppState {
             status_select_open: false,
             status_select_cursor: 0,
             sidebar_edit: None,
+            edit_card_state: None,
             grab_state: None,
             loading: LoadingState::Idle,
             owner,
@@ -246,6 +250,19 @@ impl AppState {
                     Command::None
                 }
             }
+            AppEvent::CardUpdated(Ok(())) => {
+                // 楽観的更新済み
+                Command::None
+            }
+            AppEvent::CardUpdated(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
             AppEvent::Tick | AppEvent::Resize(_, _) => Command::None,
         }
     }
@@ -308,6 +325,7 @@ impl AppState {
             ViewMode::Detail => self.handle_detail_key(key),
             ViewMode::RepoSelect => self.handle_repo_select_key(key),
             ViewMode::CardGrab => self.handle_card_grab_key(key),
+            ViewMode::EditCard => self.handle_edit_card_key(key),
         }
     }
 
@@ -1344,6 +1362,159 @@ impl AppState {
                     .saturating_add(2)
                     .min(self.detail_max_scroll_x.get());
                 Command::None
+            }
+            KeyCode::Char('e') => self.start_edit_card(),
+            _ => Command::None,
+        }
+    }
+
+    fn start_edit_card(&mut self) -> Command {
+        let card = match self.selected_card_ref() {
+            Some(c) => c,
+            None => return Command::None,
+        };
+        let content_id = match &card.content_id {
+            Some(id) => id.clone(),
+            None => return Command::None,
+        };
+        let item_id = card.item_id.clone();
+        let card_type = card.card_type.clone();
+        let title = card.title.clone();
+        let title_cursor = title.len();
+        let body = card.body.clone().unwrap_or_default();
+        self.edit_card_state = Some(EditCardState {
+            content_id,
+            item_id,
+            card_type,
+            title_input: title,
+            title_cursor,
+            body_input: body,
+            focused_field: EditCardField::Title,
+        });
+        self.mode = ViewMode::EditCard;
+        Command::None
+    }
+
+    fn submit_edit_card(&mut self) -> Command {
+        let edit_state = match &self.edit_card_state {
+            Some(s) => s,
+            None => return Command::None,
+        };
+        let title = edit_state.title_input.trim().to_string();
+        if title.is_empty() {
+            return Command::None;
+        }
+        let body = edit_state.body_input.clone();
+        let content_id = edit_state.content_id.clone();
+        let card_type = edit_state.card_type.clone();
+        let item_id = edit_state.item_id.clone();
+
+        // 楽観的更新
+        if let Some(board) = &mut self.board {
+            for col in &mut board.columns {
+                if let Some(card) = col.cards.iter_mut().find(|c| c.item_id == item_id) {
+                    card.title = title.clone();
+                    card.body = Some(body.clone());
+                    break;
+                }
+            }
+        }
+
+        self.mode = ViewMode::Detail;
+        self.edit_card_state = None;
+        Command::UpdateCard {
+            content_id,
+            card_type,
+            title,
+            body,
+        }
+    }
+
+    fn handle_edit_card_key(&mut self, key: KeyEvent) -> Command {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.should_quit = true;
+            return Command::None;
+        }
+
+        if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return self.submit_edit_card();
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = ViewMode::Detail;
+                self.edit_card_state = None;
+                Command::None
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                if let Some(ref mut state) = self.edit_card_state {
+                    state.focused_field = match state.focused_field {
+                        EditCardField::Title => EditCardField::Body,
+                        EditCardField::Body => EditCardField::Title,
+                    };
+                }
+                Command::None
+            }
+            _ => {
+                let focused = self
+                    .edit_card_state
+                    .as_ref()
+                    .map(|s| s.focused_field.clone());
+                match focused {
+                    Some(EditCardField::Title) => self.handle_edit_card_title_key(key),
+                    Some(EditCardField::Body) => self.handle_edit_card_body_key(key),
+                    None => Command::None,
+                }
+            }
+        }
+    }
+
+    fn handle_edit_card_title_key(&mut self, key: KeyEvent) -> Command {
+        let state = match self.edit_card_state.as_mut() {
+            Some(s) => s,
+            None => return Command::None,
+        };
+        match key.code {
+            KeyCode::Backspace => {
+                if state.title_cursor > 0 {
+                    let prev = prev_char_pos(&state.title_input, state.title_cursor);
+                    state.title_input.drain(prev..state.title_cursor);
+                    state.title_cursor = prev;
+                }
+                Command::None
+            }
+            KeyCode::Left => {
+                if state.title_cursor > 0 {
+                    state.title_cursor =
+                        prev_char_pos(&state.title_input, state.title_cursor);
+                }
+                Command::None
+            }
+            KeyCode::Right => {
+                if state.title_cursor < state.title_input.len() {
+                    state.title_cursor =
+                        next_char_pos(&state.title_input, state.title_cursor);
+                }
+                Command::None
+            }
+            KeyCode::Char(c) => {
+                state.title_input.insert(state.title_cursor, c);
+                state.title_cursor += c.len_utf8();
+                Command::None
+            }
+            _ => Command::None,
+        }
+    }
+
+    fn handle_edit_card_body_key(&mut self, key: KeyEvent) -> Command {
+        match key.code {
+            KeyCode::Enter => {
+                let content = self
+                    .edit_card_state
+                    .as_ref()
+                    .map(|s| s.body_input.clone())
+                    .unwrap_or_default();
+                Command::OpenEditor { content }
             }
             _ => Command::None,
         }
@@ -3791,5 +3962,268 @@ mod tests {
         // DraftIssue は content_id が None なので編集不可
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
         assert_eq!(cmd, Command::None);
+    }
+
+    // ========== カード編集 ==========
+
+    fn make_draft_card(item_id: &str, title: &str, body: &str) -> Card {
+        Card {
+            item_id: item_id.into(),
+            content_id: Some(format!("draft_{item_id}")),
+            title: title.into(),
+            number: None,
+            card_type: CardType::DraftIssue,
+            assignees: vec![],
+            labels: vec![],
+            url: None,
+            body: Some(body.into()),
+            comments: vec![],
+        }
+    }
+
+    #[test]
+    fn test_detail_e_on_draft_enters_edit_mode() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_draft_card("1", "Draft Card", "Draft body")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::EditCard);
+        let edit = state.edit_card_state.as_ref().unwrap();
+        assert_eq!(edit.title_input, "Draft Card");
+        assert_eq!(edit.body_input, "Draft body");
+        assert_eq!(edit.content_id, "draft_1");
+        assert_eq!(edit.item_id, "1");
+    }
+
+    #[test]
+    fn test_detail_e_on_issue_enters_edit_mode() {
+        let mut card = make_issue_card("1", "Issue Card");
+        card.body = Some("Issue body".into());
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::EditCard);
+        let edit = state.edit_card_state.as_ref().unwrap();
+        assert_eq!(edit.title_input, "Issue Card");
+        assert_eq!(edit.body_input, "Issue body");
+    }
+
+    #[test]
+    fn test_detail_e_without_content_id_is_noop() {
+        // make_card は content_id: None
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "No Content ID")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert!(state.edit_card_state.is_none());
+    }
+
+    #[test]
+    fn test_edit_card_title_input() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_draft_card("1", "Old", "body")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+
+        // Title にフォーカスされている状態で文字入力
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('X'))));
+        let edit = state.edit_card_state.as_ref().unwrap();
+        assert_eq!(edit.title_input, "OldX");
+        assert_eq!(edit.title_cursor, 4);
+    }
+
+    #[test]
+    fn test_edit_card_title_backspace() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_draft_card("1", "ABC", "body")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Backspace)));
+        let edit = state.edit_card_state.as_ref().unwrap();
+        assert_eq!(edit.title_input, "AB");
+        assert_eq!(edit.title_cursor, 2);
+    }
+
+    #[test]
+    fn test_edit_card_tab_switches_field() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_draft_card("1", "T", "body")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+
+        assert_eq!(
+            state.edit_card_state.as_ref().unwrap().focused_field,
+            EditCardField::Title
+        );
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(
+            state.edit_card_state.as_ref().unwrap().focused_field,
+            EditCardField::Body
+        );
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(
+            state.edit_card_state.as_ref().unwrap().focused_field,
+            EditCardField::Title
+        );
+    }
+
+    #[test]
+    fn test_edit_card_body_enter_opens_editor() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_draft_card("1", "T", "existing body")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+
+        // Body にフォーカス
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::OpenEditor {
+                content: "existing body".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_edit_card_ctrl_s_submits() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_draft_card("1", "Old Title", "Old Body")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+
+        // タイトルを変更
+        // カーソルを先頭に移動して全消しして新しいタイトルを入力する代わりに、
+        // 末尾に追記する
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('!'))));
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
+        )));
+        assert_eq!(
+            cmd,
+            Command::UpdateCard {
+                content_id: "draft_1".into(),
+                card_type: CardType::DraftIssue,
+                title: "Old Title!".into(),
+                body: "Old Body".into(),
+            }
+        );
+        // Detail に戻る
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert!(state.edit_card_state.is_none());
+        // 楽観的更新
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.title, "Old Title!");
+        assert_eq!(card.body.as_deref(), Some("Old Body"));
+    }
+
+    #[test]
+    fn test_edit_card_ctrl_s_empty_title_noop() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_draft_card("1", "X", "body")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+
+        // タイトルを空にする
+        state.handle_event(AppEvent::Key(key(KeyCode::Backspace)));
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
+        )));
+        assert_eq!(cmd, Command::None);
+        // EditCard モードのまま
+        assert_eq!(state.mode, ViewMode::EditCard);
+    }
+
+    #[test]
+    fn test_edit_card_esc_cancels() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_draft_card("1", "Original", "body")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+
+        // タイトルを変更してからキャンセル
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('Z'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert!(state.edit_card_state.is_none());
+        // ボードは変更なし
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.title, "Original");
+    }
+
+    #[test]
+    fn test_card_updated_error_reloads() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_draft_card("1", "T", "B")],
+        )]);
+        let mut state = make_state_with_board(board);
+
+        let cmd = state.handle_event(AppEvent::CardUpdated(Err("API error".into())));
+        // start_loading_board が Loading に上書きするのでリロードが走ることを確認
+        assert!(matches!(cmd, Command::LoadBoard { .. }));
     }
 }

@@ -58,6 +58,12 @@ pub enum Command {
         user_id: String,
         add: bool,
     },
+    UpdateCard {
+        content_id: String,
+        card_type: crate::model::project::CardType,
+        title: String,
+        body: String,
+    },
     OpenUrl(String),
     Batch(Vec<Command>),
 }

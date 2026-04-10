@@ -1,0 +1,11 @@
+mutation UpdateDraftIssue($draftIssueId: ID!, $title: String!, $body: String) {
+  updateProjectV2DraftIssue(input: {
+    draftIssueId: $draftIssueId
+    title: $title
+    body: $body
+  }) {
+    draftIssue {
+      id
+    }
+  }
+}

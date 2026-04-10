@@ -130,3 +130,27 @@ pub struct AddAssignees;
     response_derives = "Debug"
 )]
 pub struct RemoveAssignees;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/update_draft_issue.graphql",
+    response_derives = "Debug"
+)]
+pub struct UpdateDraftIssue;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/update_issue.graphql",
+    response_derives = "Debug"
+)]
+pub struct UpdateIssue;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/update_pull_request.graphql",
+    response_derives = "Debug"
+)]
+pub struct UpdatePullRequest;

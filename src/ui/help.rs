@@ -135,6 +135,10 @@ pub fn render(frame: &mut Frame, area: Rect) {
             Span::styled("  Enter/o ", key_style),
             Span::styled("Open in browser", desc_style),
         ]),
+        Line::from(vec![
+            Span::styled("  e       ", key_style),
+            Span::styled("Edit card", desc_style),
+        ]),
         Line::from(""),
         Line::from(Span::styled(
             " Detail View (Sidebar)",

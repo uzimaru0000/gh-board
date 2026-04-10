@@ -79,6 +79,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
               comments(first: 20) { nodes { author { __typename login } body createdAt } }
             }
             ... on DraftIssue {
+              id
               title
               body
             }

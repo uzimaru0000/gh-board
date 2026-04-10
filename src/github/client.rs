@@ -341,6 +341,51 @@ impl GitHubClient {
         Ok(())
     }
 
+    pub async fn update_draft_issue(
+        &self,
+        draft_issue_id: &str,
+        title: &str,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        let vars = update_draft_issue::Variables {
+            draft_issue_id: draft_issue_id.to_string(),
+            title: title.to_string(),
+            body: Some(body.to_string()),
+        };
+        self.query::<UpdateDraftIssue>(vars).await?;
+        Ok(())
+    }
+
+    pub async fn update_issue(
+        &self,
+        issue_id: &str,
+        title: &str,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        let vars = update_issue::Variables {
+            id: issue_id.to_string(),
+            title: title.to_string(),
+            body: Some(body.to_string()),
+        };
+        self.query::<UpdateIssue>(vars).await?;
+        Ok(())
+    }
+
+    pub async fn update_pull_request(
+        &self,
+        pr_id: &str,
+        title: &str,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        let vars = update_pull_request::Variables {
+            pull_request_id: pr_id.to_string(),
+            title: title.to_string(),
+            body: Some(body.to_string()),
+        };
+        self.query::<UpdatePullRequest>(vars).await?;
+        Ok(())
+    }
+
     pub async fn get_board(&self, project_id: &str) -> anyhow::Result<Board> {
         let mut all_items: Vec<ItemNode> = Vec::new();
         let mut cursor: Option<String> = None;
@@ -618,7 +663,7 @@ fn convert_item(item: &ItemNode) -> Card {
         },
         Some(Content::DraftIssue(draft)) => Card {
             item_id: item.id.clone(),
-            content_id: None,
+            content_id: Some(draft.id.clone()),
             title: draft.title.clone(),
             number: None,
             card_type: CardType::DraftIssue,

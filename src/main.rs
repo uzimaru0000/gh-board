@@ -86,7 +86,16 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli) -> 
             events.resume();
 
             if let Ok(new_body) = result {
-                app.state.create_card_state.body_input = new_body;
+                match app.state.mode {
+                    ViewMode::EditCard => {
+                        if let Some(ref mut s) = app.state.edit_card_state {
+                            s.body_input = new_body;
+                        }
+                    }
+                    _ => {
+                        app.state.create_card_state.body_input = new_body;
+                    }
+                }
             }
         }
 
@@ -181,6 +190,13 @@ fn render(frame: &mut Frame, app: &App) {
                     .map(|b| b.repositories.as_slice())
                     .unwrap_or(&[]);
                 ui::repo_select::render(frame, area, repos, rs);
+            }
+        }
+        ViewMode::EditCard => {
+            ui::board::render(frame, main_area, app);
+            ui::statusline::render(frame, area, app);
+            if let Some(ref edit_state) = app.state.edit_card_state {
+                ui::edit_card::render(frame, area, edit_state);
             }
         }
         ViewMode::CardGrab => {
