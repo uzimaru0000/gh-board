@@ -7,6 +7,7 @@ pub enum ViewMode {
     Confirm,
     CreateCard,
     Detail,
+    RepoSelect,
 }
 
 #[derive(Clone, Debug)]
@@ -22,29 +23,50 @@ pub enum ConfirmAction {
 
 #[derive(Clone, Debug)]
 pub struct CreateCardState {
+    pub card_type: NewCardType,
     pub title_input: String,
     pub title_cursor: usize,
     pub body_input: String,
-    pub body_cursor: usize,
     pub focused_field: CreateCardField,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CreateCardField {
+    Type,
     Title,
     Body,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NewCardType {
+    Draft,
+    Issue,
 }
 
 impl Default for CreateCardState {
     fn default() -> Self {
         Self {
+            card_type: NewCardType::Draft,
             title_input: String::new(),
             title_cursor: 0,
             body_input: String::new(),
-            body_cursor: 0,
-            focused_field: CreateCardField::Title,
+            focused_field: CreateCardField::Type,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct RepoSelectState {
+    pub selected_index: usize,
+    pub pending_create: PendingIssueCreate,
+}
+
+#[derive(Clone, Debug)]
+pub struct PendingIssueCreate {
+    pub title: String,
+    pub body: String,
+    pub field_id: String,
+    pub option_id: String,
 }
 
 #[derive(Clone, Debug)]

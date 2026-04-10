@@ -58,3 +58,19 @@ pub struct DeleteCard;
     response_derives = "Debug"
 )]
 pub struct CreateDraftIssue;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/create_issue.graphql",
+    response_derives = "Debug"
+)]
+pub struct CreateIssue;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/add_project_item.graphql",
+    response_derives = "Debug"
+)]
+pub struct AddProjectItem;

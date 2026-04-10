@@ -4,12 +4,12 @@ use tokio::process::Command;
 
 use super::queries::*;
 use crate::model::project::{
-    Board, Card, CardType, Column, Comment, IssueState, Label, PrState, ProjectSummary,
+    Board, Card, CardType, Column, Comment, IssueState, Label, PrState, ProjectSummary, Repository,
 };
 
 // Type aliases for readability
 use project_board::{
-    ProjectBoardNode, ProjectBoardNodeOnProjectV2,
+    ProjectBoardNode,
     ProjectBoardNodeOnProjectV2FieldsNodes as FieldNodes,
     ProjectBoardNodeOnProjectV2FieldsNodesOnProjectV2SingleSelectFieldOptions as SSOption,
     ProjectBoardNodeOnProjectV2ItemsNodes as ItemNode,
@@ -192,11 +192,48 @@ impl GitHubClient {
         Ok(item.id)
     }
 
+    pub async fn create_issue(
+        &self,
+        repository_id: &str,
+        title: &str,
+        body: &str,
+    ) -> anyhow::Result<String> {
+        let vars = create_issue::Variables {
+            repository_id: repository_id.to_string(),
+            title: title.to_string(),
+            body: Some(body.to_string()),
+        };
+        let data = self.query::<CreateIssue>(vars).await?;
+        let issue = data
+            .create_issue
+            .and_then(|p| p.issue)
+            .context("Failed to create issue")?;
+        Ok(issue.id)
+    }
+
+    pub async fn add_project_item(
+        &self,
+        project_id: &str,
+        content_id: &str,
+    ) -> anyhow::Result<String> {
+        let vars = add_project_item::Variables {
+            project_id: project_id.to_string(),
+            content_id: content_id.to_string(),
+        };
+        let data = self.query::<AddProjectItem>(vars).await?;
+        let item = data
+            .add_project_v2_item_by_id
+            .and_then(|p| p.item)
+            .context("Failed to add item to project")?;
+        Ok(item.id)
+    }
+
     pub async fn get_board(&self, project_id: &str) -> anyhow::Result<Board> {
         let mut all_items: Vec<ItemNode> = Vec::new();
         let mut cursor: Option<String> = None;
         let mut title = String::new();
         let mut field_nodes = None;
+        let mut repositories: Vec<Repository> = Vec::new();
 
         loop {
             let vars = project_board::Variables {
@@ -221,6 +258,17 @@ impl GitHubClient {
             if title.is_empty() {
                 title = pv2.title;
                 field_nodes = pv2.fields.nodes;
+                repositories = pv2
+                    .repositories
+                    .nodes
+                    .unwrap_or_default()
+                    .into_iter()
+                    .flatten()
+                    .map(|r| Repository {
+                        id: r.id,
+                        name_with_owner: r.name_with_owner,
+                    })
+                    .collect();
             }
 
             if has_next {
@@ -230,7 +278,7 @@ impl GitHubClient {
             }
         }
 
-        build_board(title, field_nodes, all_items)
+        build_board(title, field_nodes, all_items, repositories)
     }
 }
 
@@ -263,6 +311,7 @@ fn build_board(
     project_title: String,
     field_nodes: Option<Vec<Option<FieldNodes>>>,
     items: Vec<ItemNode>,
+    repositories: Vec<Repository>,
 ) -> anyhow::Result<Board> {
     let field_nodes = field_nodes.unwrap_or_default();
 
@@ -339,6 +388,7 @@ fn build_board(
         project_title,
         status_field_id,
         columns,
+        repositories,
     })
 }
 

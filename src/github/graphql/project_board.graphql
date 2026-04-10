@@ -3,6 +3,12 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
     __typename
     ... on ProjectV2 {
       title
+      repositories(first: 20) {
+        nodes {
+          id
+          nameWithOwner
+        }
+      }
       fields(first: 30) {
         nodes {
           __typename

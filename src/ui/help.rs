@@ -74,7 +74,7 @@ pub fn render(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  n       ", key_style),
-            Span::styled("New draft issue", desc_style),
+            Span::styled("New card (draft/issue)", desc_style),
         ]),
         Line::from(vec![
             Span::styled("  d       ", key_style),

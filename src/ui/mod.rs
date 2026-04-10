@@ -6,4 +6,5 @@ pub mod create_card;
 pub mod filter_bar;
 pub mod help;
 pub mod project_list;
+pub mod repo_select;
 pub mod statusline;

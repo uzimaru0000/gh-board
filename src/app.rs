@@ -7,6 +7,7 @@ use crate::github::client::GitHubClient;
 
 pub struct App {
     pub state: AppState,
+    pub pending_editor: Option<String>,
     github: GitHubClient,
     event_tx: mpsc::UnboundedSender<AppEvent>,
 }
@@ -19,6 +20,7 @@ impl App {
     ) -> Self {
         Self {
             state: AppState::new(owner),
+            pending_editor: None,
             github,
             event_tx,
         }
@@ -118,6 +120,41 @@ impl App {
                     .await;
                     let _ = tx.send(AppEvent::CardCreated(result));
                 });
+            }
+            Command::CreateIssue {
+                project_id,
+                repository_id,
+                title,
+                body,
+                field_id,
+                option_id,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = async {
+                        let issue_id = client
+                            .create_issue(&repository_id, &title, &body)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let item_id = client
+                            .add_project_item(&project_id, &issue_id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        if !option_id.is_empty() {
+                            client
+                                .move_card(&project_id, &item_id, &field_id, &option_id)
+                                .await
+                                .map_err(|e| e.to_string())?;
+                        }
+                        Ok(())
+                    }
+                    .await;
+                    let _ = tx.send(AppEvent::CardCreated(result));
+                });
+            }
+            Command::OpenEditor { content } => {
+                self.pending_editor = Some(content);
             }
             Command::OpenUrl(url) => {
                 let _ = open::that(&url);

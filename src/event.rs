@@ -3,6 +3,7 @@ use std::time::Duration;
 use crossterm::event::{EventStream, KeyEvent};
 use futures::StreamExt;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use crate::model::project::{Board, ProjectSummary};
 
@@ -19,13 +20,31 @@ pub enum AppEvent {
 
 pub struct EventHandler {
     rx: mpsc::UnboundedReceiver<AppEvent>,
+    tx: mpsc::UnboundedSender<AppEvent>,
+    task: JoinHandle<()>,
+    tick_rate: Duration,
 }
 
 impl EventHandler {
     pub fn new(tick_rate: Duration) -> (Self, mpsc::UnboundedSender<AppEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let event_tx = tx.clone();
+        let task = Self::spawn_reader(tick_rate, tx.clone());
 
+        (
+            Self {
+                rx,
+                tx: tx.clone(),
+                task,
+                tick_rate,
+            },
+            tx,
+        )
+    }
+
+    fn spawn_reader(
+        tick_rate: Duration,
+        event_tx: mpsc::UnboundedSender<AppEvent>,
+    ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut reader = EventStream::new();
             let mut tick_interval = tokio::time::interval(tick_rate);
@@ -55,9 +74,15 @@ impl EventHandler {
                     }
                 }
             }
-        });
+        })
+    }
 
-        (Self { rx }, tx)
+    pub fn pause(&mut self) {
+        self.task.abort();
+    }
+
+    pub fn resume(&mut self) {
+        self.task = Self::spawn_reader(self.tick_rate, self.tx.clone());
     }
 
     pub async fn next(&mut self) -> Option<AppEvent> {

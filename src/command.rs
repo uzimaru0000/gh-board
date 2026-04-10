@@ -24,6 +24,17 @@ pub enum Command {
         field_id: String,
         option_id: String,
     },
+    CreateIssue {
+        project_id: String,
+        repository_id: String,
+        title: String,
+        body: String,
+        field_id: String,
+        option_id: String,
+    },
+    OpenEditor {
+        content: String,
+    },
     OpenUrl(String),
     Batch(Vec<Command>),
 }

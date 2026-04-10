@@ -5,7 +5,7 @@ use crate::event::AppEvent;
 use crate::model::project::{Board, Card, ProjectSummary};
 use crate::model::state::{
     ActiveFilter, ConfirmAction, ConfirmState, CreateCardField, CreateCardState, FilterState,
-    LoadingState, ViewMode,
+    LoadingState, NewCardType, RepoSelectState, PendingIssueCreate, ViewMode,
 };
 
 pub struct AppState {
@@ -31,6 +31,9 @@ pub struct AppState {
 
     // Create card
     pub create_card_state: CreateCardState,
+
+    // Repo selection
+    pub repo_select_state: Option<RepoSelectState>,
 
     // Detail view
     pub detail_scroll: usize,
@@ -60,6 +63,7 @@ impl AppState {
             filter: FilterState::default(),
             confirm_state: None,
             create_card_state: CreateCardState::default(),
+            repo_select_state: None,
             detail_scroll: 0,
             detail_scroll_x: 0,
             detail_max_scroll: std::cell::Cell::new(0),
@@ -212,6 +216,7 @@ impl AppState {
             ViewMode::Confirm => self.handle_confirm_key(key),
             ViewMode::CreateCard => self.handle_create_card_key(key),
             ViewMode::Detail => self.handle_detail_key(key),
+            ViewMode::RepoSelect => self.handle_repo_select_key(key),
         }
     }
 
@@ -546,51 +551,72 @@ impl AppState {
             KeyCode::Tab => {
                 self.create_card_state.focused_field =
                     match self.create_card_state.focused_field {
+                        CreateCardField::Type => CreateCardField::Title,
                         CreateCardField::Title => CreateCardField::Body,
+                        CreateCardField::Body => CreateCardField::Type,
+                    };
+            }
+            KeyCode::BackTab => {
+                self.create_card_state.focused_field =
+                    match self.create_card_state.focused_field {
+                        CreateCardField::Type => CreateCardField::Body,
+                        CreateCardField::Title => CreateCardField::Type,
                         CreateCardField::Body => CreateCardField::Title,
                     };
             }
-            KeyCode::Backspace => {
-                let (input, cursor) = self.active_create_field_mut();
+            // Type field: ← → / h l でトグル
+            KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l')
+                if self.create_card_state.focused_field == CreateCardField::Type =>
+            {
+                self.create_card_state.card_type = match self.create_card_state.card_type {
+                    NewCardType::Draft => NewCardType::Issue,
+                    NewCardType::Issue => NewCardType::Draft,
+                };
+            }
+            // Body field: Enter で $EDITOR 起動
+            KeyCode::Enter
+                if self.create_card_state.focused_field == CreateCardField::Body =>
+            {
+                let content = self.create_card_state.body_input.clone();
+                return Command::OpenEditor { content };
+            }
+            // Title field: テキスト編集
+            KeyCode::Backspace
+                if self.create_card_state.focused_field == CreateCardField::Title =>
+            {
+                let cursor = &mut self.create_card_state.title_cursor;
                 if *cursor > 0 {
-                    let prev = prev_char_pos(input, *cursor);
-                    input.drain(prev..*cursor);
+                    let prev = prev_char_pos(&self.create_card_state.title_input, *cursor);
+                    self.create_card_state.title_input.drain(prev..*cursor);
                     *cursor = prev;
                 }
             }
-            KeyCode::Left => {
-                let (input, cursor) = self.active_create_field_mut();
+            KeyCode::Left
+                if self.create_card_state.focused_field == CreateCardField::Title =>
+            {
+                let cursor = &mut self.create_card_state.title_cursor;
                 if *cursor > 0 {
-                    *cursor = prev_char_pos(input, *cursor);
+                    *cursor = prev_char_pos(&self.create_card_state.title_input, *cursor);
                 }
             }
-            KeyCode::Right => {
-                let (input, cursor) = self.active_create_field_mut();
-                if *cursor < input.len() {
-                    *cursor = next_char_pos(input, *cursor);
+            KeyCode::Right
+                if self.create_card_state.focused_field == CreateCardField::Title =>
+            {
+                let cursor = &mut self.create_card_state.title_cursor;
+                if *cursor < self.create_card_state.title_input.len() {
+                    *cursor = next_char_pos(&self.create_card_state.title_input, *cursor);
                 }
             }
-            KeyCode::Char(c) => {
-                let (input, cursor) = self.active_create_field_mut();
-                input.insert(*cursor, c);
+            KeyCode::Char(c)
+                if self.create_card_state.focused_field == CreateCardField::Title =>
+            {
+                let cursor = &mut self.create_card_state.title_cursor;
+                self.create_card_state.title_input.insert(*cursor, c);
                 *cursor += c.len_utf8();
             }
             _ => {}
         }
         Command::None
-    }
-
-    fn active_create_field_mut(&mut self) -> (&mut String, &mut usize) {
-        match self.create_card_state.focused_field {
-            CreateCardField::Title => (
-                &mut self.create_card_state.title_input,
-                &mut self.create_card_state.title_cursor,
-            ),
-            CreateCardField::Body => (
-                &mut self.create_card_state.body_input,
-                &mut self.create_card_state.body_cursor,
-            ),
-        }
     }
 
     fn start_delete_card(&mut self) {
@@ -664,7 +690,6 @@ impl AppState {
             None => return Command::None,
         };
 
-        // カラムのステータスを設定するための情報
         let (field_id, option_id) = match &self.board {
             Some(board) => {
                 let col = board.columns.get(self.selected_column);
@@ -674,15 +699,131 @@ impl AppState {
             None => return Command::None,
         };
 
-        self.mode = ViewMode::Board;
-        self.loading = LoadingState::Loading("Creating card...".into());
+        match self.create_card_state.card_type {
+            NewCardType::Draft => {
+                self.mode = ViewMode::Board;
+                self.loading = LoadingState::Loading("Creating card...".into());
+                Command::CreateCard {
+                    project_id,
+                    title,
+                    body,
+                    field_id,
+                    option_id,
+                }
+            }
+            NewCardType::Issue => {
+                let repos = self
+                    .board
+                    .as_ref()
+                    .map(|b| &b.repositories)
+                    .cloned()
+                    .unwrap_or_default();
 
-        Command::CreateCard {
+                if repos.is_empty() {
+                    self.loading = LoadingState::Error(
+                        "No repositories linked to this project.".into(),
+                    );
+                    return Command::None;
+                }
+
+                if repos.len() == 1 {
+                    self.mode = ViewMode::Board;
+                    self.loading = LoadingState::Loading("Creating issue...".into());
+                    return Command::CreateIssue {
+                        project_id,
+                        repository_id: repos[0].id.clone(),
+                        title,
+                        body,
+                        field_id,
+                        option_id,
+                    };
+                }
+
+                // 複数リポジトリ → セレクタ表示
+                self.repo_select_state = Some(RepoSelectState {
+                    selected_index: 0,
+                    pending_create: PendingIssueCreate {
+                        title,
+                        body,
+                        field_id,
+                        option_id,
+                    },
+                });
+                self.mode = ViewMode::RepoSelect;
+                Command::None
+            }
+        }
+    }
+
+    fn handle_repo_select_key(&mut self, key: KeyEvent) -> Command {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.should_quit = true;
+            return Command::None;
+        }
+
+        let repo_count = self
+            .board
+            .as_ref()
+            .map(|b| b.repositories.len())
+            .unwrap_or(0);
+
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(rs) = &mut self.repo_select_state {
+                    if rs.selected_index + 1 < repo_count {
+                        rs.selected_index += 1;
+                    }
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(rs) = &mut self.repo_select_state {
+                    rs.selected_index = rs.selected_index.saturating_sub(1);
+                }
+            }
+            KeyCode::Enter => {
+                return self.submit_repo_selection();
+            }
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.repo_select_state = None;
+                self.mode = ViewMode::Board;
+            }
+            _ => {}
+        }
+        Command::None
+    }
+
+    fn submit_repo_selection(&mut self) -> Command {
+        let rs = match self.repo_select_state.take() {
+            Some(rs) => rs,
+            None => return Command::None,
+        };
+
+        let project_id = match &self.current_project {
+            Some(p) => p.id.clone(),
+            None => return Command::None,
+        };
+
+        let repository_id = self
+            .board
+            .as_ref()
+            .and_then(|b| b.repositories.get(rs.selected_index))
+            .map(|r| r.id.clone());
+
+        let repository_id = match repository_id {
+            Some(id) => id,
+            None => return Command::None,
+        };
+
+        self.mode = ViewMode::Board;
+        self.loading = LoadingState::Loading("Creating issue...".into());
+
+        Command::CreateIssue {
             project_id,
-            title,
-            body,
-            field_id,
-            option_id,
+            repository_id,
+            title: rs.pending_create.title,
+            body: rs.pending_create.body,
+            field_id: rs.pending_create.field_id,
+            option_id: rs.pending_create.option_id,
         }
     }
 
@@ -915,7 +1056,23 @@ mod tests {
                     cards,
                 })
                 .collect(),
+            repositories: vec![],
         }
+    }
+
+    fn make_board_with_repos(
+        columns: Vec<(&str, &str, Vec<Card>)>,
+        repos: Vec<(&str, &str)>,
+    ) -> Board {
+        let mut board = make_board(columns);
+        board.repositories = repos
+            .into_iter()
+            .map(|(id, name)| Repository {
+                id: id.into(),
+                name_with_owner: name.into(),
+            })
+            .collect();
+        board
     }
 
     fn make_state_with_board(board: Board) -> AppState {
@@ -1765,5 +1922,319 @@ mod tests {
         state.detail_scroll_x = 4;
         state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
         assert_eq!(state.detail_scroll_x, 4);
+    }
+
+    // ========== カード作成: タイプ選択 ==========
+
+    #[test]
+    fn test_create_card_default_type_is_draft() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+
+        // n キーで CreateCard モードへ
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('n'))));
+        assert_eq!(state.mode, ViewMode::CreateCard);
+        assert_eq!(state.create_card_state.card_type, NewCardType::Draft);
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
+    }
+
+    #[test]
+    fn test_create_card_type_toggle() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+
+        // Type フィールドにフォーカスされた状態で → を押す → Issue に切替
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
+        state.handle_event(AppEvent::Key(key(KeyCode::Right)));
+        assert_eq!(state.create_card_state.card_type, NewCardType::Issue);
+
+        // もう一度 → → Draft に戻る
+        state.handle_event(AppEvent::Key(key(KeyCode::Right)));
+        assert_eq!(state.create_card_state.card_type, NewCardType::Draft);
+
+        // ← でも切替可能
+        state.handle_event(AppEvent::Key(key(KeyCode::Left)));
+        assert_eq!(state.create_card_state.card_type, NewCardType::Issue);
+
+        // l でも切替可能
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+        assert_eq!(state.create_card_state.card_type, NewCardType::Draft);
+
+        // h でも切替可能
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('h'))));
+        assert_eq!(state.create_card_state.card_type, NewCardType::Issue);
+    }
+
+    #[test]
+    fn test_create_card_tab_cycles_fields() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+
+        // デフォルトは Type
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
+
+        // Tab → Title
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Title);
+
+        // Tab → Body
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Body);
+
+        // Tab → Type (ラップ)
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
+    }
+
+    #[test]
+    fn test_create_card_backtab_cycles_fields_reverse() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+
+        // デフォルトは Type
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
+
+        // S-Tab → Body (逆方向ラップ)
+        state.handle_event(AppEvent::Key(key(KeyCode::BackTab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Body);
+
+        // S-Tab → Title
+        state.handle_event(AppEvent::Key(key(KeyCode::BackTab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Title);
+
+        // S-Tab → Type
+        state.handle_event(AppEvent::Key(key(KeyCode::BackTab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
+    }
+
+    // ========== カード作成: submit ==========
+
+    #[test]
+    fn test_submit_draft_uses_existing_flow() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state.card_type = NewCardType::Draft;
+        state.create_card_state.title_input = "My Draft".into();
+        state.create_card_state.body_input = "body".into();
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
+        )));
+
+        assert_eq!(
+            cmd,
+            Command::CreateCard {
+                project_id: "proj_1".into(),
+                title: "My Draft".into(),
+                body: "body".into(),
+                field_id: "field_1".into(),
+                option_id: "opt_1".into(),
+            }
+        );
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn test_submit_issue_single_repo_creates_immediately() {
+        let board = make_board_with_repos(
+            vec![("Todo", "opt_1", vec![make_card("1", "A")])],
+            vec![("repo_1", "owner/repo")],
+        );
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state.card_type = NewCardType::Issue;
+        state.create_card_state.title_input = "My Issue".into();
+        state.create_card_state.body_input = "body".into();
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
+        )));
+
+        assert_eq!(
+            cmd,
+            Command::CreateIssue {
+                project_id: "proj_1".into(),
+                repository_id: "repo_1".into(),
+                title: "My Issue".into(),
+                body: "body".into(),
+                field_id: "field_1".into(),
+                option_id: "opt_1".into(),
+            }
+        );
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn test_submit_issue_multiple_repos_opens_selector() {
+        let board = make_board_with_repos(
+            vec![("Todo", "opt_1", vec![make_card("1", "A")])],
+            vec![("repo_1", "owner/repo1"), ("repo_2", "owner/repo2")],
+        );
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state.card_type = NewCardType::Issue;
+        state.create_card_state.title_input = "My Issue".into();
+        state.create_card_state.body_input = "body".into();
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
+        )));
+
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::RepoSelect);
+        assert!(state.repo_select_state.is_some());
+        let rs = state.repo_select_state.as_ref().unwrap();
+        assert_eq!(rs.selected_index, 0);
+        assert_eq!(rs.pending_create.title, "My Issue");
+    }
+
+    #[test]
+    fn test_submit_issue_no_repos_shows_error() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        // repos は空 (make_board はデフォルトで空)
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state.card_type = NewCardType::Issue;
+        state.create_card_state.title_input = "My Issue".into();
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
+        )));
+
+        assert_eq!(cmd, Command::None);
+        assert!(matches!(state.loading, LoadingState::Error(_)));
+    }
+
+    // ========== RepoSelect ==========
+
+    fn setup_repo_select_state() -> AppState {
+        let board = make_board_with_repos(
+            vec![("Todo", "opt_1", vec![make_card("1", "A")])],
+            vec![("repo_1", "owner/repo1"), ("repo_2", "owner/repo2"), ("repo_3", "owner/repo3")],
+        );
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::RepoSelect;
+        state.repo_select_state = Some(RepoSelectState {
+            selected_index: 0,
+            pending_create: PendingIssueCreate {
+                title: "My Issue".into(),
+                body: "body".into(),
+                field_id: "field_1".into(),
+                option_id: "opt_1".into(),
+            },
+        });
+        state
+    }
+
+    #[test]
+    fn test_repo_select_jk_navigation() {
+        let mut state = setup_repo_select_state();
+
+        // j で下に移動
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.repo_select_state.as_ref().unwrap().selected_index, 1);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.repo_select_state.as_ref().unwrap().selected_index, 2);
+
+        // 末尾でクランプ
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.repo_select_state.as_ref().unwrap().selected_index, 2);
+
+        // k で上に移動
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
+        assert_eq!(state.repo_select_state.as_ref().unwrap().selected_index, 1);
+    }
+
+    #[test]
+    fn test_repo_select_enter_creates_issue() {
+        let mut state = setup_repo_select_state();
+
+        // 2番目のリポジトリを選択
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(
+            cmd,
+            Command::CreateIssue {
+                project_id: "proj_1".into(),
+                repository_id: "repo_2".into(),
+                title: "My Issue".into(),
+                body: "body".into(),
+                field_id: "field_1".into(),
+                option_id: "opt_1".into(),
+            }
+        );
+        assert_eq!(state.mode, ViewMode::Board);
+        assert!(state.repo_select_state.is_none());
+    }
+
+    #[test]
+    fn test_repo_select_esc_cancels() {
+        let mut state = setup_repo_select_state();
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+
+        assert_eq!(state.mode, ViewMode::Board);
+        assert!(state.repo_select_state.is_none());
+    }
+
+    // ========== Body: $EDITOR ==========
+
+    #[test]
+    fn test_body_enter_opens_editor() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        state.create_card_state.focused_field = CreateCardField::Body;
+        state.create_card_state.body_input = "existing body".into();
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(
+            cmd,
+            Command::OpenEditor {
+                content: "existing body".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_body_char_input_ignored() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        state.create_card_state.focused_field = CreateCardField::Body;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('x'))));
+
+        assert_eq!(state.create_card_state.body_input, "");
+    }
+
+    #[test]
+    fn test_body_backspace_ignored() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        state.create_card_state.focused_field = CreateCardField::Body;
+        state.create_card_state.body_input = "hello".into();
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Backspace)));
+
+        assert_eq!(state.create_card_state.body_input, "hello");
     }
 }

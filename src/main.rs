@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -71,12 +72,53 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli) -> 
             }
         }
 
+        // $EDITOR でボディ編集
+        if let Some(content) = app.pending_editor.take() {
+            events.pause();
+            disable_raw_mode()?;
+            crossterm::execute!(std::io::stdout(), LeaveAlternateScreen)?;
+
+            let result = run_editor(&content);
+
+            enable_raw_mode()?;
+            crossterm::execute!(std::io::stdout(), EnterAlternateScreen)?;
+            terminal.clear()?;
+            events.resume();
+
+            if let Ok(new_body) = result {
+                app.state.create_card_state.body_input = new_body;
+            }
+        }
+
         if app.state.should_quit {
             break;
         }
     }
 
     Ok(())
+}
+
+fn run_editor(content: &str) -> Result<String> {
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!("gh-board-{}.md", std::process::id()));
+    std::fs::write(&path, content)?;
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    let status = std::process::Command::new(&editor)
+        .arg(&path)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()?;
+
+    let result = if status.success() {
+        std::fs::read_to_string(&path)?
+    } else {
+        content.to_string()
+    };
+
+    let _ = std::fs::remove_file(&path);
+    Ok(result)
 }
 
 fn render(frame: &mut Frame, app: &App) {
@@ -127,6 +169,19 @@ fn render(frame: &mut Frame, app: &App) {
             ui::board::render(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
+        }
+        ViewMode::RepoSelect => {
+            ui::board::render(frame, main_area, app);
+            ui::statusline::render(frame, area, app);
+            if let Some(rs) = &app.state.repo_select_state {
+                let repos = app
+                    .state
+                    .board
+                    .as_ref()
+                    .map(|b| b.repositories.as_slice())
+                    .unwrap_or(&[]);
+                ui::repo_select::render(frame, area, repos, rs);
+            }
         }
     }
 

@@ -11,6 +11,7 @@ pub struct Board {
     pub project_title: String,
     pub status_field_id: String,
     pub columns: Vec<Column>,
+    pub repositories: Vec<Repository>,
 }
 
 #[derive(Clone, Debug)]
@@ -64,4 +65,10 @@ pub enum PrState {
 pub struct Label {
     pub name: String,
     pub color: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct Repository {
+    pub id: String,
+    pub name_with_owner: String,
 }
