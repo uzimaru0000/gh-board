@@ -35,7 +35,7 @@ src/
   github/
     client.rs               # GitHubClient: 認証(gh auth token)、GraphQL実行、Board構築
     queries.rs              # GraphQLQuery derive (型自動生成)
-    graphql/*.graphql        # GraphQLクエリ/ミューテーションファイル (7つ)
+    graphql/*.graphql        # GraphQLクエリ/ミューテーションファイル (8つ)
   model/
     project.rs              # ドメインモデル: Board, Column, Card, CardType, Comment
     state.rs                # ViewMode, LoadingState, FilterState, ConfirmState, CreateCardState
@@ -88,6 +88,10 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 
 ### カード操作
 - H/L: カードを左右のカラムに移動 (updateProjectV2ItemFieldValue mutation)
+- Space: カード選択モード (CardGrab) — 掴んで h/j/k/l でカードを上下左右に移動、Space/Esc で解除
+  - j/k: カラム内の並び替え (updateProjectV2ItemPosition mutation)
+  - h/l: カラム間移動 (元の高さを維持、Batch で MoveCard + ReorderCard)
+  - 選択中は黄色太線ボーダー + 透過影で浮いた見た目
 - n: ドラフトIssue作成 (addProjectV2DraftIssue + ステータス設定の2段階)
 - d: カード削除 (確認ダイアログ付き、deleteProjectV2Item mutation)
 - 楽観的UI更新パターン: API呼び出し前にローカル状態を変更、エラー時はボードリフレッシュ
@@ -118,14 +122,18 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
   - `execute(Command)` で `Command` を実際の副作用 (tokio::spawn 等) に変換
   - ロジックは一切持たない
 
-### 新機能の実装手順 (TDD)
+### 新機能の実装手順 (TDD: テストファースト)
 
-1. **テストを先に書く**: `src/app_state.rs` の `#[cfg(test)] mod tests` にテストを追加
+**必ずテストを先に書いてから実装する。**RED → GREEN → Refactor のサイクルを守ること。
+
+1. **型の土台を用意**: テストのコンパイルに必要な最小限の型 (Command バリアント、ViewMode、AppEvent) を追加し、既存コードにはスタブ (`Command::None` を返す等) を入れてコンパイルを通す
+2. **テストを先に書く (RED)**: `src/app_state.rs` の `#[cfg(test)] mod tests` にテストを追加
    - `AppState::new()` + テスト用の `Board` を構築 (GitHubClient 不要)
    - `handle_event(AppEvent::Key(...))` を呼び、状態変更と返却 `Command` をアサート
-2. **AppState にロジックを実装**: テストが通るまで純粋な状態遷移を実装
-3. **必要なら Command バリアントを追加**: 新しい副作用が必要な場合は `Command` enum に追加
-4. **App.execute() に対応を追加**: 新しい `Command` の実行ロジックを `app.rs` に追加
+   - `cargo test` でテストが **失敗する** ことを確認
+3. **AppState にロジックを実装 (GREEN)**: テストが通るまで純粋な状態遷移を実装
+   - `cargo test` で全テストが **通る** ことを確認
+4. **副作用層を実装**: GraphQL mutation、GitHubClient メソッド、`App.execute()` に対応を追加
 5. **UI を更新**: `src/ui/` の描画関数で `app.state.X` 経由で新しい状態を描画
 
 ### テストの書き方
@@ -146,6 +154,7 @@ assert_eq!(cmd, Command::MoveCard { ... });
 
 ### 注意点
 
+- **テストファースト**: 実装コードより先にテストを書く。テストが失敗 (RED) してから実装に入る
 - UI ファイルから App のフィールドにアクセスする場合は `app.state.X` を使う
 - `AppState` のメソッドは副作用を直接実行せず、必ず `Command` を返すこと
 - `cargo test` で全テストが通ることを確認してからコミットする
@@ -168,7 +177,6 @@ assert_eq!(cmd, Command::MoveCard { ... });
 - 詳細ビューからのカード操作 (ステータス変更、削除、ラベル編集)
 - コメント投稿・編集 (addIssueComment mutation)
 - コメントのページネーション (現在は最大20件)
-- カードの並び替え (ドラッグ&ドロップ的な上下移動)
 - Issue/PR の作成 (DraftIssue → Issue 変換を含む)
 - カスタムフィールド表示・編集 (Priority、Estimate 等)
 - 複数フィルタの組み合わせ (AND/OR)
