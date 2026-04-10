@@ -1,3 +1,10 @@
+#[derive(Clone, Debug)]
+pub struct GrabState {
+    pub origin_column: usize,
+    pub origin_card_index: usize,
+    pub item_id: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ViewMode {
     Board,
