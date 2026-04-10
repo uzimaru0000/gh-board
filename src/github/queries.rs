@@ -74,3 +74,11 @@ pub struct CreateIssue;
     response_derives = "Debug"
 )]
 pub struct AddProjectItem;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/reorder_card.graphql",
+    response_derives = "Debug"
+)]
+pub struct ReorderCard;

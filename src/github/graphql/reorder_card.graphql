@@ -1,0 +1,9 @@
+mutation ReorderCard($projectId: ID!, $itemId: ID!, $afterId: ID) {
+  updateProjectV2ItemPosition(input: {
+    projectId: $projectId
+    itemId: $itemId
+    afterId: $afterId
+  }) {
+    clientMutationId
+  }
+}

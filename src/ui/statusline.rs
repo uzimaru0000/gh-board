@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::model::state::ViewMode;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if area.height < 2 {
@@ -48,10 +49,24 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::raw(" "));
     }
 
-    spans.push(Span::styled(
-        "Enter:detail  H/L:move  n:new  d:delete  /:filter  ?:help  p:projects  r:refresh  q:quit ",
-        Style::default().fg(Color::DarkGray),
-    ));
+    if app.state.mode == ViewMode::CardGrab {
+        spans.push(Span::styled(
+            " GRAB ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            " hjkl:move  Space/Esc:release ",
+            Style::default().fg(Color::DarkGray),
+        ));
+    } else {
+        spans.push(Span::styled(
+            "Enter:detail  Space:grab  H/L:move  n:new  d:delete  /:filter  ?:help  p:projects  r:refresh  q:quit ",
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
 
     let line = Line::from(spans);
     frame.render_widget(line, status_area);

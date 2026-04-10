@@ -1,4 +1,5 @@
 use ratatui::{
+    buffer::Buffer,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders},
@@ -6,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::model::state::ViewMode;
 use crate::ui::card::{CardWidget, CARD_HEIGHT};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -89,6 +91,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             .skip(scroll)
             .take(max_visible);
 
+        let mut grab_shadow_area: Option<Rect> = None;
+
         for (i, (display_idx, &card_idx)) in visible_cards.enumerate() {
             let y = inner.y + (i as u16 * CARD_HEIGHT);
             if y + CARD_HEIGHT > inner.y + inner.height {
@@ -103,13 +107,50 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             };
 
             let selected = is_selected_col && display_idx == app.state.selected_card;
+            let grabbing = app.state.mode == ViewMode::CardGrab && selected;
+
             frame.render_widget(
                 CardWidget {
                     card: &column.cards[card_idx],
                     selected,
+                    grabbing,
                 },
                 card_area,
             );
+
+            if grabbing {
+                grab_shadow_area = Some(card_area);
+            }
         }
+
+        // 影は全カード描画後に描画（次のカードに上書きされないように）
+        if let Some(area) = grab_shadow_area {
+            render_shadow(frame.buffer_mut(), area);
+        }
+    }
+}
+
+fn render_shadow(buf: &mut Buffer, card_area: Rect) {
+    // 既存セルの文字を残しつつ色を暗くして透過風の影にする
+    let shadow_fg = Color::Indexed(245);
+    let shadow_bg = Color::Indexed(238);
+
+    let dim = |buf: &mut Buffer, x: u16, y: u16| {
+        if let Some(cell) = buf.cell_mut((x, y)) {
+            cell.set_fg(shadow_fg);
+            cell.set_bg(shadow_bg);
+        }
+    };
+
+    // 右辺の影
+    let shadow_x = card_area.x + card_area.width;
+    for dy in 1..card_area.height {
+        dim(buf, shadow_x, card_area.y + dy);
+    }
+
+    // 下辺の影
+    let shadow_y = card_area.y + card_area.height;
+    for dx in 1..=card_area.width {
+        dim(buf, card_area.x + dx, shadow_y);
     }
 }

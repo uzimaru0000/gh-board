@@ -164,6 +164,21 @@ impl GitHubClient {
         Ok(())
     }
 
+    pub async fn reorder_card(
+        &self,
+        project_id: &str,
+        item_id: &str,
+        after_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let vars = reorder_card::Variables {
+            project_id: project_id.to_string(),
+            item_id: item_id.to_string(),
+            after_id: after_id.map(String::from),
+        };
+        self.query::<ReorderCard>(vars).await?;
+        Ok(())
+    }
+
     pub async fn delete_card(&self, project_id: &str, item_id: &str) -> anyhow::Result<()> {
         let vars = delete_card::Variables {
             project_id: project_id.to_string(),

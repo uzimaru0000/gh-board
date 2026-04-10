@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{Block, BorderType, Borders, Paragraph, Widget},
 };
 
 use crate::model::project::{Card, CardType, IssueState, PrState};
@@ -13,18 +13,31 @@ pub const CARD_HEIGHT: u16 = 5;
 pub struct CardWidget<'a> {
     pub card: &'a Card,
     pub selected: bool,
+    pub grabbing: bool,
 }
 
 impl Widget for CardWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let border_style = if self.selected {
-            Style::default().fg(Color::Cyan)
+        let (border_style, border_type) = if self.grabbing {
+            (
+                Style::default().fg(Color::Yellow),
+                BorderType::Thick,
+            )
+        } else if self.selected {
+            (
+                Style::default().fg(Color::Cyan),
+                BorderType::Plain,
+            )
         } else {
-            Style::default().fg(Color::DarkGray)
+            (
+                Style::default().fg(Color::DarkGray),
+                BorderType::Plain,
+            )
         };
 
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(border_type)
             .border_style(border_style);
 
         let inner = block.inner(area);

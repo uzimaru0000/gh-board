@@ -8,6 +8,7 @@ pub enum ViewMode {
     CreateCard,
     Detail,
     RepoSelect,
+    CardGrab,
 }
 
 #[derive(Clone, Debug)]

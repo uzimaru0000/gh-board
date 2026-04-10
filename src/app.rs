@@ -153,6 +153,20 @@ impl App {
                     let _ = tx.send(AppEvent::CardCreated(result));
                 });
             }
+            Command::ReorderCard {
+                project_id,
+                item_id,
+                after_id,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client
+                        .reorder_card(&project_id, &item_id, after_id.as_deref())
+                        .await;
+                    let _ = tx.send(AppEvent::CardReordered(result.map_err(|e| e.to_string())));
+                });
+            }
             Command::OpenEditor { content } => {
                 self.pending_editor = Some(content);
             }

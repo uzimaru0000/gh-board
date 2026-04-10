@@ -183,6 +183,10 @@ fn render(frame: &mut Frame, app: &App) {
                 ui::repo_select::render(frame, area, repos, rs);
             }
         }
+        ViewMode::CardGrab => {
+            ui::board::render(frame, main_area, app);
+            ui::statusline::render(frame, area, app);
+        }
     }
 
     // Loading/error overlay

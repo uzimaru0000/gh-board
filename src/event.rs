@@ -16,6 +16,7 @@ pub enum AppEvent {
     CardMoved(Result<(), String>),
     CardDeleted(Result<(), String>),
     CardCreated(Result<(), String>),
+    CardReordered(Result<(), String>),
 }
 
 pub struct EventHandler {

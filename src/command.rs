@@ -35,6 +35,11 @@ pub enum Command {
     OpenEditor {
         content: String,
     },
+    ReorderCard {
+        project_id: String,
+        item_id: String,
+        after_id: Option<String>,
+    },
     OpenUrl(String),
     Batch(Vec<Command>),
 }

@@ -156,6 +156,19 @@ impl AppState {
                 self.loading = LoadingState::Error(e);
                 Command::None
             }
+            AppEvent::CardReordered(Ok(())) => {
+                // 楽観的更新済みなので何もしない
+                Command::None
+            }
+            AppEvent::CardReordered(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
             AppEvent::Tick | AppEvent::Resize(_, _) => Command::None,
         }
     }
@@ -217,6 +230,7 @@ impl AppState {
             ViewMode::CreateCard => self.handle_create_card_key(key),
             ViewMode::Detail => self.handle_detail_key(key),
             ViewMode::RepoSelect => self.handle_repo_select_key(key),
+            ViewMode::CardGrab => self.handle_card_grab_key(key),
         }
     }
 
@@ -326,6 +340,12 @@ impl AppState {
             KeyCode::Char('n') => {
                 self.create_card_state = CreateCardState::default();
                 self.mode = ViewMode::CreateCard;
+                Command::None
+            }
+            KeyCode::Char(' ') => {
+                if self.real_card_index().is_some() {
+                    self.mode = ViewMode::CardGrab;
+                }
                 Command::None
             }
             KeyCode::Char('H') => self.move_card_left(),
@@ -752,6 +772,215 @@ impl AppState {
                 self.mode = ViewMode::RepoSelect;
                 Command::None
             }
+        }
+    }
+
+    fn handle_card_grab_key(&mut self, key: KeyEvent) -> Command {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => self.move_card_down(),
+            KeyCode::Char('k') | KeyCode::Up => self.move_card_up(),
+            KeyCode::Char('h') | KeyCode::Left => self.grab_move_card_horizontal(-1),
+            KeyCode::Char('l') | KeyCode::Right => self.grab_move_card_horizontal(1),
+            KeyCode::Char(' ') | KeyCode::Esc => {
+                self.mode = ViewMode::Board;
+                Command::None
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.should_quit = true;
+                Command::None
+            }
+            _ => Command::None,
+        }
+    }
+
+    fn grab_move_card_horizontal(&mut self, direction: i32) -> Command {
+        let target_column = if direction < 0 {
+            if self.selected_column == 0 {
+                return Command::None;
+            }
+            // "No Status" カラムをスキップ
+            if self
+                .board
+                .as_ref()
+                .map(|b| b.columns[self.selected_column - 1].option_id.is_empty())
+                .unwrap_or(false)
+                && self.selected_column >= 2
+            {
+                self.selected_column - 2
+            } else {
+                self.selected_column - 1
+            }
+        } else {
+            let max = self
+                .board
+                .as_ref()
+                .map(|b| b.columns.len())
+                .unwrap_or(0);
+            if self.selected_column + 1 >= max {
+                return Command::None;
+            }
+            self.selected_column + 1
+        };
+
+        let real_idx = match self.real_card_index() {
+            Some(idx) => idx,
+            None => return Command::None,
+        };
+
+        let board = match &mut self.board {
+            Some(b) => b,
+            None => return Command::None,
+        };
+
+        let src_col = self.selected_column;
+        if src_col == target_column || target_column >= board.columns.len() {
+            return Command::None;
+        }
+
+        let target_option_id = board.columns[target_column].option_id.clone();
+        if target_option_id.is_empty() {
+            return Command::None;
+        }
+        if board.columns[src_col].cards.is_empty() {
+            return Command::None;
+        }
+
+        // 挿入位置: 元のインデックスを維持、ターゲットカラムのカード数でクランプ
+        let target_len = board.columns[target_column].cards.len();
+        let insert_idx = real_idx.min(target_len);
+
+        // afterId の計算 (挿入前のターゲットカラムで計算)
+        let after_id = if insert_idx > 0 {
+            Some(board.columns[target_column].cards[insert_idx - 1].item_id.clone())
+        } else {
+            None
+        };
+
+        // 楽観的UI更新: remove → insert
+        let card = board.columns[src_col].cards.remove(real_idx);
+        let item_id = card.item_id.clone();
+        board.columns[target_column].cards.insert(insert_idx, card);
+
+        let project_id = match &self.current_project {
+            Some(p) => p.id.clone(),
+            None => return Command::None,
+        };
+        let field_id = board.status_field_id.clone();
+
+        // フォーカスを移動先に追従
+        self.selected_column = target_column;
+        if self.filter.active_filter.is_none() {
+            self.selected_card = insert_idx;
+        } else {
+            let new_indices = self.filtered_card_indices(target_column);
+            if let Some(pos) = new_indices.iter().position(|&i| i == insert_idx) {
+                self.selected_card = pos;
+            }
+        }
+        self.mode = ViewMode::CardGrab;
+
+        Command::Batch(vec![
+            Command::MoveCard {
+                project_id: project_id.clone(),
+                item_id: item_id.clone(),
+                field_id,
+                option_id: target_option_id,
+            },
+            Command::ReorderCard {
+                project_id,
+                item_id,
+                after_id,
+            },
+        ])
+    }
+
+    fn move_card_up(&mut self) -> Command {
+        let real_idx = match self.real_card_index() {
+            Some(idx) => idx,
+            None => return Command::None,
+        };
+
+        if real_idx == 0 {
+            return Command::None;
+        }
+
+        let board = match &mut self.board {
+            Some(b) => b,
+            None => return Command::None,
+        };
+
+        let col = self.selected_column;
+
+        let after_id = if real_idx >= 2 {
+            Some(board.columns[col].cards[real_idx - 2].item_id.clone())
+        } else {
+            None
+        };
+
+        let item_id = board.columns[col].cards[real_idx].item_id.clone();
+        board.columns[col].cards.swap(real_idx, real_idx - 1);
+
+        if self.filter.active_filter.is_none() {
+            self.selected_card = self.selected_card.saturating_sub(1);
+        } else {
+            let new_indices = self.filtered_card_indices(col);
+            if let Some(pos) = new_indices.iter().position(|&i| i == real_idx - 1) {
+                self.selected_card = pos;
+            }
+        }
+
+        let project_id = match &self.current_project {
+            Some(p) => p.id.clone(),
+            None => return Command::None,
+        };
+
+        Command::ReorderCard {
+            project_id,
+            item_id,
+            after_id,
+        }
+    }
+
+    fn move_card_down(&mut self) -> Command {
+        let real_idx = match self.real_card_index() {
+            Some(idx) => idx,
+            None => return Command::None,
+        };
+
+        let board = match &mut self.board {
+            Some(b) => b,
+            None => return Command::None,
+        };
+
+        let col = self.selected_column;
+        let card_count = board.columns[col].cards.len();
+
+        if real_idx >= card_count - 1 {
+            return Command::None;
+        }
+
+        let after_id = Some(board.columns[col].cards[real_idx + 1].item_id.clone());
+        let item_id = board.columns[col].cards[real_idx].item_id.clone();
+        board.columns[col].cards.swap(real_idx, real_idx + 1);
+
+        if self.filter.active_filter.is_none() {
+            self.selected_card += 1;
+        } else {
+            let new_indices = self.filtered_card_indices(col);
+            if let Some(pos) = new_indices.iter().position(|&i| i == real_idx + 1) {
+                self.selected_card = pos;
+            }
+        }
+
+        let project_id = match &self.current_project {
+            Some(p) => p.id.clone(),
+            None => return Command::None,
+        };
+
+        Command::ReorderCard {
+            project_id,
+            item_id,
+            after_id,
         }
     }
 
@@ -2236,5 +2465,326 @@ mod tests {
         state.handle_event(AppEvent::Key(key(KeyCode::Backspace)));
 
         assert_eq!(state.create_card_state.body_input, "hello");
+    }
+
+    // ========== カード選択モード (CardGrab) ==========
+
+    #[test]
+    fn test_space_enters_card_grab_mode() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        assert_eq!(state.mode, ViewMode::CardGrab);
+    }
+
+    #[test]
+    fn test_space_no_card_does_nothing() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![]),
+        ]);
+        let mut state = make_state_with_board(board);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn test_space_exits_card_grab_mode() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CardGrab;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn test_esc_exits_card_grab_mode() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CardGrab;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn test_grab_move_card_down() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card("1", "Card A"),
+                make_card("2", "Card B"),
+                make_card("3", "Card C"),
+            ]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CardGrab;
+        state.selected_column = 0;
+        state.selected_card = 0;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+
+        // カード順序: B, A, C
+        let cards = &state.board.as_ref().unwrap().columns[0].cards;
+        assert_eq!(cards[0].title, "Card B");
+        assert_eq!(cards[1].title, "Card A");
+        assert_eq!(cards[2].title, "Card C");
+        assert_eq!(state.selected_card, 1);
+        assert_eq!(state.mode, ViewMode::CardGrab);
+        assert_eq!(
+            cmd,
+            Command::ReorderCard {
+                project_id: "proj_1".into(),
+                item_id: "1".into(),
+                after_id: Some("2".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_grab_move_card_up() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card("1", "Card A"),
+                make_card("2", "Card B"),
+                make_card("3", "Card C"),
+            ]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CardGrab;
+        state.selected_column = 0;
+        state.selected_card = 2;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
+
+        // カード順序: A, C, B
+        let cards = &state.board.as_ref().unwrap().columns[0].cards;
+        assert_eq!(cards[0].title, "Card A");
+        assert_eq!(cards[1].title, "Card C");
+        assert_eq!(cards[2].title, "Card B");
+        assert_eq!(state.selected_card, 1);
+        assert_eq!(
+            cmd,
+            Command::ReorderCard {
+                project_id: "proj_1".into(),
+                item_id: "3".into(),
+                after_id: Some("1".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_grab_move_card_up_to_top() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card("1", "Card A"),
+                make_card("2", "Card B"),
+            ]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CardGrab;
+        state.selected_column = 0;
+        state.selected_card = 1;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
+
+        let cards = &state.board.as_ref().unwrap().columns[0].cards;
+        assert_eq!(cards[0].title, "Card B");
+        assert_eq!(cards[1].title, "Card A");
+        assert_eq!(state.selected_card, 0);
+        assert_eq!(
+            cmd,
+            Command::ReorderCard {
+                project_id: "proj_1".into(),
+                item_id: "2".into(),
+                after_id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_grab_move_card_down_at_bottom() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card("1", "Card A"),
+                make_card("2", "Card B"),
+            ]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CardGrab;
+        state.selected_column = 0;
+        state.selected_card = 1;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(cmd, Command::None);
+        // カード順序は変わらない
+        let cards = &state.board.as_ref().unwrap().columns[0].cards;
+        assert_eq!(cards[0].title, "Card A");
+        assert_eq!(cards[1].title, "Card B");
+    }
+
+    #[test]
+    fn test_grab_move_card_up_at_top() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card("1", "Card A"),
+                make_card("2", "Card B"),
+            ]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CardGrab;
+        state.selected_column = 0;
+        state.selected_card = 0;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn test_grab_move_card_left_same_height() {
+        // Card A は Done の index 1。Todo に移動すると同じ index 1 に挿入される
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("2", "Card B"), make_card("3", "Card C")]),
+            ("Done", "opt_2", vec![make_card("4", "Card D"), make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CardGrab;
+        state.selected_column = 1;
+        state.selected_card = 1;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('h'))));
+
+        // Batch: MoveCard (カラム変更) + ReorderCard (位置指定)
+        assert_eq!(
+            cmd,
+            Command::Batch(vec![
+                Command::MoveCard {
+                    project_id: "proj_1".into(),
+                    item_id: "1".into(),
+                    field_id: "field_1".into(),
+                    option_id: "opt_1".into(),
+                },
+                Command::ReorderCard {
+                    project_id: "proj_1".into(),
+                    item_id: "1".into(),
+                    after_id: Some("2".into()), // Card B (index 0) の後ろ
+                },
+            ])
+        );
+        assert_eq!(state.mode, ViewMode::CardGrab);
+        assert_eq!(state.selected_column, 0);
+        assert_eq!(state.selected_card, 1);
+        let cards = &state.board.as_ref().unwrap().columns[0].cards;
+        assert_eq!(cards[0].title, "Card B");
+        assert_eq!(cards[1].title, "Card A");
+        assert_eq!(cards[2].title, "Card C");
+    }
+
+    #[test]
+    fn test_grab_move_card_right_same_height() {
+        // Card A は Todo の index 0。Done に移動すると index 0 に挿入される
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A"), make_card("2", "Card B")]),
+            ("Done", "opt_2", vec![make_card("3", "Card C"), make_card("4", "Card D")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CardGrab;
+        state.selected_column = 0;
+        state.selected_card = 0;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+
+        assert_eq!(
+            cmd,
+            Command::Batch(vec![
+                Command::MoveCard {
+                    project_id: "proj_1".into(),
+                    item_id: "1".into(),
+                    field_id: "field_1".into(),
+                    option_id: "opt_2".into(),
+                },
+                Command::ReorderCard {
+                    project_id: "proj_1".into(),
+                    item_id: "1".into(),
+                    after_id: None, // 先頭に挿入
+                },
+            ])
+        );
+        assert_eq!(state.mode, ViewMode::CardGrab);
+        assert_eq!(state.selected_column, 1);
+        assert_eq!(state.selected_card, 0);
+        let cards = &state.board.as_ref().unwrap().columns[1].cards;
+        assert_eq!(cards[0].title, "Card A");
+        assert_eq!(cards[1].title, "Card C");
+        assert_eq!(cards[2].title, "Card D");
+    }
+
+    #[test]
+    fn test_grab_move_card_right_clamp_to_end() {
+        // Card A は Todo の index 2。Done はカード1枚なので末尾 (index 1) に挿入
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card("1", "Card X"),
+                make_card("2", "Card Y"),
+                make_card("3", "Card A"),
+            ]),
+            ("Done", "opt_2", vec![make_card("4", "Card Z")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CardGrab;
+        state.selected_column = 0;
+        state.selected_card = 2;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+
+        assert_eq!(
+            cmd,
+            Command::Batch(vec![
+                Command::MoveCard {
+                    project_id: "proj_1".into(),
+                    item_id: "3".into(),
+                    field_id: "field_1".into(),
+                    option_id: "opt_2".into(),
+                },
+                Command::ReorderCard {
+                    project_id: "proj_1".into(),
+                    item_id: "3".into(),
+                    after_id: Some("4".into()), // Card Z の後ろ (末尾)
+                },
+            ])
+        );
+        assert_eq!(state.selected_column, 1);
+        assert_eq!(state.selected_card, 1);
+        let cards = &state.board.as_ref().unwrap().columns[1].cards;
+        assert_eq!(cards[0].title, "Card Z");
+        assert_eq!(cards[1].title, "Card A");
+    }
+
+    #[test]
+    fn test_reorder_error_reloads_board() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+
+        let cmd = state.handle_event(AppEvent::CardReordered(Err("API error".into())));
+
+        // エラー後にリロードが発動するので Loading 状態になる
+        assert!(matches!(state.loading, LoadingState::Loading(_)));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+            }
+        );
     }
 }

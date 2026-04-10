@@ -65,6 +65,10 @@ pub fn render(frame: &mut Frame, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(vec![
+            Span::styled("  Space   ", key_style),
+            Span::styled("Grab card (move mode)", desc_style),
+        ]),
+        Line::from(vec![
             Span::styled("  H       ", key_style),
             Span::styled("Move card left", desc_style),
         ]),
