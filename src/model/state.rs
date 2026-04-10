@@ -11,10 +11,45 @@ pub enum ViewMode {
     CardGrab,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DetailPane {
+    Content,
+    Sidebar,
+}
+
+/// サイドバーのセクション数
+pub const SIDEBAR_SECTION_COUNT: usize = 4;
+/// サイドバーセクションのインデックス
+pub const SIDEBAR_STATUS: usize = 0;
+pub const SIDEBAR_ASSIGNEES: usize = 1;
+pub const SIDEBAR_LABELS: usize = 2;
+pub const SIDEBAR_DELETE: usize = 3;
+
+#[derive(Clone, Debug)]
+pub enum SidebarEditMode {
+    Labels {
+        items: Vec<EditItem>,
+        cursor: usize,
+    },
+    Assignees {
+        items: Vec<EditItem>,
+        cursor: usize,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct EditItem {
+    pub id: String,
+    pub name: String,
+    pub color: Option<String>,
+    pub applied: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct ConfirmState {
     pub action: ConfirmAction,
     pub title: String,
+    pub return_to: ViewMode,
 }
 
 #[derive(Clone, Debug)]

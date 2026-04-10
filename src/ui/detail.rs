@@ -4,13 +4,16 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Padding, Paragraph},
     Frame,
 };
 
 use crate::app::App;
 use crate::model::project::{CardType, IssueState, PrState};
+use crate::model::state::{
+    DetailPane, SIDEBAR_ASSIGNEES, SIDEBAR_DELETE, SIDEBAR_LABELS, SIDEBAR_STATUS,
+};
 use crate::ui::card::parse_hex_color;
 
 /// A line tagged as either table content (horizontally scrollable) or normal text (wrappable).
@@ -60,6 +63,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let block_title = format!(" {type_icon}{number_str}{} ", card.title);
 
+    let sidebar_focused = app.state.detail_pane == DetailPane::Sidebar;
+    let border_color = if sidebar_focused {
+        Color::DarkGray
+    } else {
+        Color::Cyan
+    };
+
     let block = Block::default()
         .title(block_title)
         .title_style(
@@ -68,25 +78,106 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(border_color));
 
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    if inner.height < 2 || inner.width == 0 {
+    if inner.height < 2 || inner.width < 4 {
         return;
     }
 
-    // Split inner area: scrollable content + fixed footer
-    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
-    let content_area = chunks[0];
-    let footer_area = chunks[1];
-    let content_width = content_area.width as usize;
+    // ── 2-column layout: content (left) + sidebar (right) + footer ──
+    let vert_chunks =
+        Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let main_area = vert_chunks[0];
+    let footer_area = vert_chunks[1];
 
-    // ── Build tagged lines ──
+    // サイドバー幅: 最小24、全体の30%上限
+    let sidebar_width = (main_area.width as usize * 30 / 100).max(24).min(main_area.width as usize - 4) as u16;
+    let horiz_chunks = Layout::horizontal([
+        Constraint::Min(1),
+        Constraint::Length(sidebar_width),
+    ])
+    .split(main_area);
+    let left_area = horiz_chunks[0];
+    let right_area = horiz_chunks[1];
+
+    // ── Left pane: body + comments ──
+    render_content_pane(frame, left_area, app, card);
+
+    // ── Right pane: sidebar ──
+    render_sidebar(frame, right_area, app);
+
+    // ── Footer ──
+    let hint_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::DarkGray);
+    let footer = if app.state.sidebar_edit.is_some() {
+        Line::from(vec![
+            Span::styled("j/k", hint_style),
+            Span::styled(":nav  ", desc_style),
+            Span::styled("Enter/Space", hint_style),
+            Span::styled(":toggle  ", desc_style),
+            Span::styled("Esc", hint_style),
+            Span::styled(":close", desc_style),
+        ])
+    } else if sidebar_focused {
+        Line::from(vec![
+            Span::styled("Tab", hint_style),
+            Span::styled(":content  ", desc_style),
+            Span::styled("j/k", hint_style),
+            Span::styled(":nav  ", desc_style),
+            Span::styled("Enter", hint_style),
+            Span::styled(":select  ", desc_style),
+            Span::styled("d", hint_style),
+            Span::styled(":delete  ", desc_style),
+            Span::styled("Esc", hint_style),
+            Span::styled(":back", desc_style),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("Tab", hint_style),
+            Span::styled(":sidebar  ", desc_style),
+            Span::styled("j/k", hint_style),
+            Span::styled(":scroll  ", desc_style),
+            Span::styled("h/l", hint_style),
+            Span::styled(":table  ", desc_style),
+            Span::styled("Enter/o", hint_style),
+            Span::styled(":open  ", desc_style),
+            Span::styled("Esc/q", hint_style),
+            Span::styled(":close", desc_style),
+        ])
+    };
+    frame.render_widget(footer, footer_area);
+}
+
+/// 左ペイン: 本文 + コメント
+fn render_content_pane(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    card: &crate::model::project::Card,
+) {
+    let focused = app.state.detail_pane == DetailPane::Content;
+    let border_color = if focused { Color::Cyan } else { Color::DarkGray };
+
+    let block = Block::default()
+        .borders(Borders::RIGHT)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .padding(Padding::horizontal(1));
+
+    let content_inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if content_inner.height == 0 || content_inner.width == 0 {
+        return;
+    }
+
+    let content_width = content_inner.width as usize;
     let mut tagged: Vec<TaggedLine> = Vec::new();
 
-    // Helper to push a non-table line
     let push_text = |tagged: &mut Vec<TaggedLine>, line: Line<'static>| {
         tagged.push(TaggedLine {
             line,
@@ -94,76 +185,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         });
     };
 
-    // State line
-    let (state_label, state_color) = match &card.card_type {
-        CardType::Issue { state } => match state {
-            IssueState::Open => ("Open", Color::Green),
-            IssueState::Closed => ("Closed", Color::Magenta),
-        },
-        CardType::PullRequest { state } => match state {
-            PrState::Open => ("Open", Color::Green),
-            PrState::Closed => ("Closed", Color::Red),
-            PrState::Merged => ("Merged", Color::Magenta),
-        },
-        CardType::DraftIssue => ("Draft", Color::Gray),
-    };
-    push_text(
-        &mut tagged,
-        Line::from(Span::styled(
-            state_label,
-            Style::default()
-                .fg(state_color)
-                .add_modifier(Modifier::BOLD),
-        )),
-    );
-
-    // Assignees
-    if !card.assignees.is_empty() {
-        let text = card
-            .assignees
-            .iter()
-            .map(|a| format!("@{a}"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        push_text(
-            &mut tagged,
-            Line::from(Span::styled(text, Style::default().fg(Color::Yellow))),
-        );
-    }
-
-    // Labels
-    if !card.labels.is_empty() {
-        let spans: Vec<Span> = card
-            .labels
-            .iter()
-            .enumerate()
-            .flat_map(|(i, label)| {
-                let color = parse_hex_color(&label.color).unwrap_or(Color::Gray);
-                let mut spans = vec![Span::styled(
-                    label.name.clone(),
-                    Style::default().fg(Color::Black).bg(color),
-                )];
-                if i < card.labels.len() - 1 {
-                    spans.push(Span::raw(" "));
-                }
-                spans
-            })
-            .collect();
-        push_text(&mut tagged, Line::from(spans));
-    }
-
-    // Separator
-    let separator = Line::from(Span::styled(
-        "─".repeat(content_width),
-        Style::default().fg(Color::DarkGray),
-    ));
-    push_text(&mut tagged, Line::from(""));
-    push_text(&mut tagged, separator.clone());
-    push_text(&mut tagged, Line::from(""));
-
-    // Body (markdown rendered)
+    // Body
     let body_text = card.body.as_deref().unwrap_or("");
-
     if body_text.is_empty() {
         push_text(
             &mut tagged,
@@ -178,6 +201,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // Comments
     if !card.comments.is_empty() {
+        let separator = Line::from(Span::styled(
+            "─".repeat(content_width),
+            Style::default().fg(Color::DarkGray),
+        ));
         push_text(&mut tagged, Line::from(""));
         push_text(&mut tagged, separator);
         push_text(&mut tagged, Line::from(""));
@@ -228,7 +255,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    // ── Process lines: wrap non-table, keep table ──
+    // ── Wrap non-table lines ──
     let mut final_lines: Vec<TaggedLine> = Vec::new();
     for tl in tagged {
         if tl.is_table {
@@ -243,8 +270,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    // ── Compute & store scroll limits ──
-    let content_height = content_area.height as usize;
+    // ── Scroll ──
+    let content_height = content_inner.height as usize;
     let total_lines = final_lines.len();
     let max_scroll = total_lines.saturating_sub(content_height);
     let max_table_width = final_lines
@@ -261,17 +288,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let scroll = app.state.detail_scroll.min(max_scroll);
     let scroll_x = app.state.detail_scroll_x.min(max_scroll_x);
 
-    // ── Render line by line ──
-    let visible = final_lines
-        .into_iter()
-        .skip(scroll)
-        .take(content_height);
+    // ── Render ──
+    let _ = border_color; // フォーカス表示用に将来使用可能
+    let visible = final_lines.into_iter().skip(scroll).take(content_height);
 
     for (i, tl) in visible.enumerate() {
         let line_rect = Rect {
-            x: content_area.x,
-            y: content_area.y + i as u16,
-            width: content_area.width,
+            x: content_inner.x,
+            y: content_inner.y + i as u16,
+            width: content_inner.width,
             height: 1,
         };
         if tl.is_table && line_width(&tl.line) > content_width {
@@ -281,23 +306,255 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             frame.render_widget(tl.line, line_rect);
         }
     }
+}
 
-    // ── Fixed footer ──
-    let hint_style = Style::default()
+/// 右ペイン: サイドバー (Status, Assignees, Labels, Delete)
+fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
+    let card = match app.state.selected_card_ref() {
+        Some(c) => c,
+        None => return,
+    };
+
+    // サイドバー編集モード (ラベル/アサイニー トグルリスト)
+    if let Some(edit) = &app.state.sidebar_edit {
+        render_sidebar_edit(frame, area, edit);
+        return;
+    }
+
+    let focused = app.state.detail_pane == DetailPane::Sidebar;
+    let selected = app.state.sidebar_selected;
+
+    let header_style = Style::default()
         .fg(Color::White)
         .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(Color::DarkGray);
-    let footer = Line::from(vec![
-        Span::styled("Esc/q", hint_style),
-        Span::styled(":close  ", desc_style),
-        Span::styled("Enter/o", hint_style),
-        Span::styled(":open in browser  ", desc_style),
-        Span::styled("j/k", hint_style),
-        Span::styled(":scroll  ", desc_style),
-        Span::styled("h/l", hint_style),
-        Span::styled(":table scroll", desc_style),
-    ]);
-    frame.render_widget(footer, footer_area);
+    let dim_style = Style::default().fg(Color::DarkGray);
+    let selected_marker = if focused { "▶ " } else { "  " };
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // ── Status section ──
+    let status_header_style = if focused && selected == SIDEBAR_STATUS {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        header_style
+    };
+    lines.push(Line::from(Span::styled("Status", status_header_style)));
+
+    let board = app.state.board.as_ref();
+    let current_col_name = board
+        .and_then(|b| b.columns.get(app.state.selected_column))
+        .map(|c| c.name.as_str())
+        .unwrap_or("?");
+
+    if app.state.status_select_open {
+        // ドロップダウン表示
+        if let Some(board) = board {
+            for (i, col) in board.columns.iter().enumerate() {
+                if col.option_id.is_empty() {
+                    continue; // "No Status" をスキップ
+                }
+                let is_cursor = i == app.state.status_select_cursor;
+                let is_current = i == app.state.selected_column;
+                let marker = if is_cursor { "▶ " } else { "  " };
+                let style = if is_cursor {
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else if is_current {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                lines.push(Line::from(Span::styled(
+                    format!("{marker}{}", col.name),
+                    style,
+                )));
+            }
+        }
+    } else {
+        let marker = if focused && selected == SIDEBAR_STATUS {
+            selected_marker
+        } else {
+            "  "
+        };
+        let (state_label, state_color) = match &card.card_type {
+            CardType::Issue { state } => match state {
+                IssueState::Open => ("Open", Color::Green),
+                IssueState::Closed => ("Closed", Color::Magenta),
+            },
+            CardType::PullRequest { state } => match state {
+                PrState::Open => ("Open", Color::Green),
+                PrState::Closed => ("Closed", Color::Red),
+                PrState::Merged => ("Merged", Color::Magenta),
+            },
+            CardType::DraftIssue => ("Draft", Color::Gray),
+        };
+        lines.push(Line::from(vec![
+            Span::styled(marker.to_string(), dim_style),
+            Span::styled(
+                current_col_name.to_string(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled(
+                format!(" ({state_label})"),
+                Style::default().fg(state_color),
+            ),
+        ]));
+    }
+    lines.push(Line::from(""));
+
+    // ── Assignees section ──
+    let assignee_header_style = if focused && selected == SIDEBAR_ASSIGNEES {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        header_style
+    };
+    lines.push(Line::from(Span::styled("Assignees", assignee_header_style)));
+    if card.assignees.is_empty() {
+        lines.push(Line::from(Span::styled("  --", dim_style)));
+    } else {
+        for assignee in &card.assignees {
+            lines.push(Line::from(Span::styled(
+                format!("  @{assignee}"),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
+    }
+    lines.push(Line::from(""));
+
+    // ── Labels section ──
+    let label_header_style = if focused && selected == SIDEBAR_LABELS {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        header_style
+    };
+    lines.push(Line::from(Span::styled("Labels", label_header_style)));
+    if card.labels.is_empty() {
+        lines.push(Line::from(Span::styled("  --", dim_style)));
+    } else {
+        for label in &card.labels {
+            let color = parse_hex_color(&label.color).unwrap_or(Color::Gray);
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    label.name.clone(),
+                    Style::default().fg(Color::Black).bg(color),
+                ),
+            ]));
+        }
+    }
+    lines.push(Line::from(""));
+
+    let block = Block::default().padding(Padding::horizontal(1));
+    let inner = block.inner(area);
+    let btn_width = inner.width as usize;
+
+    // ── Delete button ──
+    let is_delete_focused = focused && selected == SIDEBAR_DELETE;
+    let btn_bg = if is_delete_focused {
+        Color::Red
+    } else {
+        Color::DarkGray
+    };
+    let edge_style = Style::default().fg(btn_bg);
+    let fill_style = Style::default().fg(Color::White).bg(btn_bg);
+    let label = "Delete";
+    let pad_total = btn_width.saturating_sub(label.len());
+    let pad_left = pad_total / 2;
+    let pad_right = pad_total - pad_left;
+    lines.push(Line::from(Span::styled(
+        "▄".repeat(btn_width),
+        edge_style,
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("{}{label}{}", " ".repeat(pad_left), " ".repeat(pad_right)),
+        fill_style,
+    )));
+    lines.push(Line::from(Span::styled(
+        "▀".repeat(btn_width),
+        edge_style,
+    )));
+
+    frame.render_widget(block, area);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// サイドバー編集モードのトグルリスト描画
+fn render_sidebar_edit(
+    frame: &mut Frame,
+    area: Rect,
+    edit: &crate::model::state::SidebarEditMode,
+) {
+    use crate::model::state::SidebarEditMode;
+
+    let (title, items, cursor) = match edit {
+        SidebarEditMode::Labels { items, cursor } => ("Labels", items.as_slice(), *cursor),
+        SidebarEditMode::Assignees { items, cursor } => ("Assignees", items.as_slice(), *cursor),
+    };
+
+    let header_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let dim_style = Style::default().fg(Color::DarkGray);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        format!("{title}  (Enter: toggle, Esc: close)"),
+        header_style,
+    )));
+    lines.push(Line::from(""));
+
+    for (i, item) in items.iter().enumerate() {
+        let is_cursor = i == cursor;
+        let check = if item.applied { "[x]" } else { "[ ]" };
+        let marker = if is_cursor { "▶" } else { " " };
+
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        spans.push(Span::styled(
+            format!("{marker} {check} "),
+            if is_cursor {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                dim_style
+            },
+        ));
+
+        if let Some(color_hex) = &item.color {
+            let color = parse_hex_color(color_hex).unwrap_or(Color::Gray);
+            spans.push(Span::styled(
+                item.name.clone(),
+                Style::default().fg(Color::Black).bg(color),
+            ));
+        } else {
+            spans.push(Span::styled(
+                format!("@{}", item.name),
+                if is_cursor {
+                    Style::default().fg(Color::White)
+                } else {
+                    Style::default().fg(Color::Yellow)
+                },
+            ));
+        }
+
+        lines.push(Line::from(spans));
+    }
+
+    if items.is_empty() {
+        lines.push(Line::from(Span::styled("  (none available)", dim_style)));
+    }
+
+    let block = Block::default().padding(Padding::horizontal(1));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn line_width(line: &Line<'_>) -> usize {

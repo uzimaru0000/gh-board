@@ -5,10 +5,11 @@ use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::model::project::{Board, ProjectSummary};
+use crate::model::project::{Board, Label, ProjectSummary};
 
 pub enum AppEvent {
     Key(KeyEvent),
+    #[allow(dead_code)]
     Resize(u16, u16),
     Tick,
     ProjectsLoaded(Result<Vec<ProjectSummary>, String>),
@@ -17,6 +18,10 @@ pub enum AppEvent {
     CardDeleted(Result<(), String>),
     CardCreated(Result<(), String>),
     CardReordered(Result<(), String>),
+    LabelsLoaded(Result<Vec<Label>, String>),
+    AssigneesLoaded(Result<Vec<(String, String)>, String>),
+    LabelToggled(Result<(), String>),
+    AssigneeToggled(Result<(), String>),
 }
 
 pub struct EventHandler {

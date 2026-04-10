@@ -57,23 +57,25 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
           content {
             __typename
             ... on Issue {
+              id
               title
               number
               state
               url
               body
               assignees(first: 5) { nodes { login } }
-              labels(first: 10) { nodes { name color } }
+              labels(first: 10) { nodes { id name color } }
               comments(first: 20) { nodes { author { __typename login } body createdAt } }
             }
             ... on PullRequest {
+              id
               title
               number
               state
               url
               body
               assignees(first: 5) { nodes { login } }
-              labels(first: 10) { nodes { name color } }
+              labels(first: 10) { nodes { id name color } }
               comments(first: 20) { nodes { author { __typename login } body createdAt } }
             }
             ... on DraftIssue {

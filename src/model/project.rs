@@ -24,6 +24,7 @@ pub struct Column {
 #[derive(Clone, Debug)]
 pub struct Card {
     pub item_id: String,
+    pub content_id: Option<String>,
     pub title: String,
     pub number: Option<i32>,
     pub card_type: CardType,
@@ -63,6 +64,7 @@ pub enum PrState {
 
 #[derive(Clone, Debug)]
 pub struct Label {
+    pub id: String,
     pub name: String,
     pub color: String,
 }

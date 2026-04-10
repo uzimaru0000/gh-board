@@ -82,3 +82,51 @@ pub struct AddProjectItem;
     response_derives = "Debug"
 )]
 pub struct ReorderCard;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/repo_labels.graphql",
+    response_derives = "Debug"
+)]
+pub struct RepoLabels;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/assignable_users.graphql",
+    response_derives = "Debug"
+)]
+pub struct AssignableUsers;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/add_labels.graphql",
+    response_derives = "Debug"
+)]
+pub struct AddLabels;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/remove_labels.graphql",
+    response_derives = "Debug"
+)]
+pub struct RemoveLabels;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/add_assignees.graphql",
+    response_derives = "Debug"
+)]
+pub struct AddAssignees;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/remove_assignees.graphql",
+    response_derives = "Debug"
+)]
+pub struct RemoveAssignees;

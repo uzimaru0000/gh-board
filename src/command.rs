@@ -40,6 +40,24 @@ pub enum Command {
         item_id: String,
         after_id: Option<String>,
     },
+    FetchLabels {
+        owner: String,
+        repo: String,
+    },
+    FetchAssignees {
+        owner: String,
+        repo: String,
+    },
+    ToggleLabel {
+        content_id: String,
+        label_id: String,
+        add: bool,
+    },
+    ToggleAssignee {
+        content_id: String,
+        user_id: String,
+        add: bool,
+    },
     OpenUrl(String),
     Batch(Vec<Command>),
 }

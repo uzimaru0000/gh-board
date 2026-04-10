@@ -167,6 +167,62 @@ impl App {
                     let _ = tx.send(AppEvent::CardReordered(result.map_err(|e| e.to_string())));
                 });
             }
+            Command::FetchLabels { owner, repo } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.get_repo_labels(&owner, &repo).await;
+                    let _ = tx.send(AppEvent::LabelsLoaded(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::FetchAssignees { owner, repo } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.get_assignable_users(&owner, &repo).await;
+                    let _ = tx.send(AppEvent::AssigneesLoaded(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::ToggleLabel {
+                content_id,
+                label_id,
+                add,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = if add {
+                        client.add_labels(&content_id, vec![label_id]).await
+                    } else {
+                        client.remove_labels(&content_id, vec![label_id]).await
+                    };
+                    let _ = tx.send(AppEvent::LabelToggled(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::ToggleAssignee {
+                content_id,
+                user_id,
+                add,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = if add {
+                        client.add_assignees(&content_id, vec![user_id]).await
+                    } else {
+                        client.remove_assignees(&content_id, vec![user_id]).await
+                    };
+                    let _ = tx.send(AppEvent::AssigneeToggled(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
             Command::OpenEditor { content } => {
                 self.pending_editor = Some(content);
             }

@@ -243,6 +243,104 @@ impl GitHubClient {
         Ok(item.id)
     }
 
+    pub async fn get_repo_labels(
+        &self,
+        owner: &str,
+        name: &str,
+    ) -> anyhow::Result<Vec<Label>> {
+        let vars = repo_labels::Variables {
+            owner: owner.to_string(),
+            name: name.to_string(),
+        };
+        let data = self.query::<RepoLabels>(vars).await?;
+        let repo = data.repository.context("Repository not found")?;
+        Ok(repo
+            .labels
+            .and_then(|l| l.nodes)
+            .unwrap_or_default()
+            .into_iter()
+            .flatten()
+            .map(|l| Label {
+                id: l.id,
+                name: l.name,
+                color: l.color,
+            })
+            .collect())
+    }
+
+    pub async fn get_assignable_users(
+        &self,
+        owner: &str,
+        name: &str,
+    ) -> anyhow::Result<Vec<(String, String)>> {
+        let vars = assignable_users::Variables {
+            owner: owner.to_string(),
+            name: name.to_string(),
+        };
+        let data = self.query::<AssignableUsers>(vars).await?;
+        let repo = data.repository.context("Repository not found")?;
+        Ok(repo
+            .assignable_users
+            .nodes
+            .unwrap_or_default()
+            .into_iter()
+            .flatten()
+            .map(|u| (u.id, u.login))
+            .collect())
+    }
+
+    pub async fn add_labels(
+        &self,
+        content_id: &str,
+        label_ids: Vec<String>,
+    ) -> anyhow::Result<()> {
+        let vars = add_labels::Variables {
+            labelable_id: content_id.to_string(),
+            label_ids,
+        };
+        self.query::<AddLabels>(vars).await?;
+        Ok(())
+    }
+
+    pub async fn remove_labels(
+        &self,
+        content_id: &str,
+        label_ids: Vec<String>,
+    ) -> anyhow::Result<()> {
+        let vars = remove_labels::Variables {
+            labelable_id: content_id.to_string(),
+            label_ids,
+        };
+        self.query::<RemoveLabels>(vars).await?;
+        Ok(())
+    }
+
+    pub async fn add_assignees(
+        &self,
+        content_id: &str,
+        assignee_ids: Vec<String>,
+    ) -> anyhow::Result<()> {
+        let vars = add_assignees::Variables {
+            assignable_id: content_id.to_string(),
+            assignee_ids,
+        };
+        self.query::<AddAssignees>(vars).await?;
+        Ok(())
+    }
+
+    pub async fn remove_assignees(
+        &self,
+        content_id: &str,
+        assignee_ids: Vec<String>,
+    ) -> anyhow::Result<()> {
+        let vars = remove_assignees::Variables {
+            assignable_id: content_id.to_string(),
+            assignee_ids,
+        };
+        self.query::<RemoveAssignees>(vars).await?;
+        Ok(())
+    }
+
     pub async fn get_board(&self, project_id: &str) -> anyhow::Result<Board> {
         let mut all_items: Vec<ItemNode> = Vec::new();
         let mut cursor: Option<String> = None;
@@ -411,6 +509,7 @@ fn convert_item(item: &ItemNode) -> Card {
     match &item.content {
         Some(Content::Issue(issue)) => Card {
             item_id: item.id.clone(),
+            content_id: Some(issue.id.clone()),
             title: issue.title.clone(),
             number: Some(issue.number as i32),
             card_type: CardType::Issue {
@@ -433,6 +532,7 @@ fn convert_item(item: &ItemNode) -> Card {
                     n.iter()
                         .flatten()
                         .map(|l| Label {
+                            id: l.id.clone(),
                             name: l.name.clone(),
                             color: l.color.clone(),
                         })
@@ -463,6 +563,7 @@ fn convert_item(item: &ItemNode) -> Card {
         },
         Some(Content::PullRequest(pr)) => Card {
             item_id: item.id.clone(),
+            content_id: Some(pr.id.clone()),
             title: pr.title.clone(),
             number: Some(pr.number as i32),
             card_type: CardType::PullRequest {
@@ -486,6 +587,7 @@ fn convert_item(item: &ItemNode) -> Card {
                     n.iter()
                         .flatten()
                         .map(|l| Label {
+                            id: l.id.clone(),
                             name: l.name.clone(),
                             color: l.color.clone(),
                         })
@@ -516,6 +618,7 @@ fn convert_item(item: &ItemNode) -> Card {
         },
         Some(Content::DraftIssue(draft)) => Card {
             item_id: item.id.clone(),
+            content_id: None,
             title: draft.title.clone(),
             number: None,
             card_type: CardType::DraftIssue,
@@ -527,6 +630,7 @@ fn convert_item(item: &ItemNode) -> Card {
         },
         None => Card {
             item_id: item.id.clone(),
+            content_id: None,
             title: "(no content)".to_string(),
             number: None,
             card_type: CardType::DraftIssue,

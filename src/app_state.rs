@@ -4,8 +4,10 @@ use crate::command::Command;
 use crate::event::AppEvent;
 use crate::model::project::{Board, Card, ProjectSummary};
 use crate::model::state::{
-    ActiveFilter, ConfirmAction, ConfirmState, CreateCardField, CreateCardState, FilterState,
-    LoadingState, NewCardType, RepoSelectState, PendingIssueCreate, ViewMode,
+    ActiveFilter, ConfirmAction, ConfirmState, CreateCardField, CreateCardState, DetailPane,
+    EditItem, FilterState, LoadingState, NewCardType, PendingIssueCreate, RepoSelectState,
+    SidebarEditMode, ViewMode, SIDEBAR_ASSIGNEES, SIDEBAR_DELETE, SIDEBAR_LABELS,
+    SIDEBAR_SECTION_COUNT, SIDEBAR_STATUS,
 };
 
 pub struct AppState {
@@ -40,6 +42,11 @@ pub struct AppState {
     pub detail_scroll_x: usize,
     pub detail_max_scroll: std::cell::Cell<usize>,
     pub detail_max_scroll_x: std::cell::Cell<usize>,
+    pub detail_pane: DetailPane,
+    pub sidebar_selected: usize,
+    pub status_select_open: bool,
+    pub status_select_cursor: usize,
+    pub sidebar_edit: Option<SidebarEditMode>,
 
     // Loading
     pub loading: LoadingState,
@@ -68,6 +75,11 @@ impl AppState {
             detail_scroll_x: 0,
             detail_max_scroll: std::cell::Cell::new(0),
             detail_max_scroll_x: std::cell::Cell::new(0),
+            detail_pane: DetailPane::Content,
+            sidebar_selected: 0,
+            status_select_open: false,
+            status_select_cursor: 0,
+            sidebar_edit: None,
             loading: LoadingState::Idle,
             owner,
         }
@@ -162,6 +174,67 @@ impl AppState {
             }
             AppEvent::CardReordered(Err(e)) => {
                 self.loading = LoadingState::Error(e);
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
+            AppEvent::LabelsLoaded(Ok(labels)) => {
+                // カードの現在のラベルと照合して applied を設定
+                let card_labels: Vec<String> = self
+                    .selected_card_ref()
+                    .map(|c| c.labels.iter().map(|l| l.id.clone()).collect())
+                    .unwrap_or_default();
+                let items: Vec<EditItem> = labels
+                    .into_iter()
+                    .map(|l| EditItem {
+                        applied: card_labels.contains(&l.id),
+                        id: l.id,
+                        name: l.name,
+                        color: Some(l.color),
+                    })
+                    .collect();
+                self.sidebar_edit = Some(SidebarEditMode::Labels { items, cursor: 0 });
+                Command::None
+            }
+            AppEvent::LabelsLoaded(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                self.sidebar_edit = None;
+                Command::None
+            }
+            AppEvent::AssigneesLoaded(Ok(users)) => {
+                let card_assignees: Vec<String> = self
+                    .selected_card_ref()
+                    .map(|c| c.assignees.clone())
+                    .unwrap_or_default();
+                let items: Vec<EditItem> = users
+                    .into_iter()
+                    .map(|(id, login)| EditItem {
+                        applied: card_assignees
+                            .iter()
+                            .any(|a| a.eq_ignore_ascii_case(&login)),
+                        id,
+                        name: login,
+                        color: None,
+                    })
+                    .collect();
+                self.sidebar_edit = Some(SidebarEditMode::Assignees { items, cursor: 0 });
+                Command::None
+            }
+            AppEvent::AssigneesLoaded(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                self.sidebar_edit = None;
+                Command::None
+            }
+            AppEvent::LabelToggled(Ok(())) | AppEvent::AssigneeToggled(Ok(())) => {
+                // 楽観的更新済み
+                Command::None
+            }
+            AppEvent::LabelToggled(Err(e)) | AppEvent::AssigneeToggled(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                // エラー時はボードをリロード
                 if let Some(project) = &self.current_project {
                     let id = project.id.clone();
                     self.start_loading_board(&id)
@@ -334,7 +407,7 @@ impl AppState {
                 Command::None
             }
             KeyCode::Char('d') => {
-                self.start_delete_card();
+                self.start_delete_card(ViewMode::Board);
                 Command::None
             }
             KeyCode::Char('n') => {
@@ -533,18 +606,30 @@ impl AppState {
         match key.code {
             KeyCode::Char('y') => {
                 let cmd = if let Some(state) = self.confirm_state.take() {
-                    match state.action {
+                    let return_to = state.return_to;
+                    let cmd = match state.action {
                         ConfirmAction::DeleteCard { item_id } => self.delete_card(&item_id),
-                    }
+                    };
+                    // 削除後: カードが消えるので Detail には留まれない → Board に戻る
+                    // それ以外の action は return_to に従う
+                    self.mode = match &cmd {
+                        Command::DeleteCard { .. } => ViewMode::Board,
+                        _ => return_to,
+                    };
+                    cmd
                 } else {
                     Command::None
                 };
-                self.mode = ViewMode::Board;
                 cmd
             }
             KeyCode::Char('n') | KeyCode::Esc => {
+                let return_to = self
+                    .confirm_state
+                    .as_ref()
+                    .map(|s| s.return_to.clone())
+                    .unwrap_or(ViewMode::Board);
                 self.confirm_state = None;
-                self.mode = ViewMode::Board;
+                self.mode = return_to;
                 Command::None
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -639,7 +724,7 @@ impl AppState {
         Command::None
     }
 
-    fn start_delete_card(&mut self) {
+    fn start_delete_card(&mut self, return_to: ViewMode) {
         let real_idx = match self.real_card_index() {
             Some(idx) => idx,
             None => return,
@@ -656,6 +741,7 @@ impl AppState {
                     item_id: card.item_id.clone(),
                 },
                 title: card.title.clone(),
+                return_to,
             });
             self.mode = ViewMode::Confirm;
         }
@@ -1112,16 +1198,66 @@ impl AppState {
         }
         self.detail_scroll = 0;
         self.detail_scroll_x = 0;
+        self.detail_pane = DetailPane::Content;
+        self.sidebar_selected = 0;
+        self.status_select_open = false;
+        self.sidebar_edit = None;
         self.mode = ViewMode::Detail;
         Command::None
     }
 
     fn handle_detail_key(&mut self, key: KeyEvent) -> Command {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.should_quit = true;
+            return Command::None;
+        }
+
+        // サイドバー編集モード (ラベル/アサイニー トグルリスト)
+        if self.sidebar_edit.is_some() {
+            return self.handle_sidebar_edit_key(key);
+        }
+
+        // ステータス選択ドロップダウンが開いている場合
+        if self.status_select_open {
+            return self.handle_status_select_key(key);
+        }
+
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Char('q') => {
                 self.mode = ViewMode::Board;
                 Command::None
             }
+            KeyCode::Esc => {
+                if self.detail_pane == DetailPane::Sidebar {
+                    self.detail_pane = DetailPane::Content;
+                } else {
+                    self.mode = ViewMode::Board;
+                }
+                Command::None
+            }
+            KeyCode::Tab => {
+                self.detail_pane = match self.detail_pane {
+                    DetailPane::Content => DetailPane::Sidebar,
+                    DetailPane::Sidebar => DetailPane::Content,
+                };
+                Command::None
+            }
+            KeyCode::BackTab => {
+                self.detail_pane = match self.detail_pane {
+                    DetailPane::Content => DetailPane::Sidebar,
+                    DetailPane::Sidebar => DetailPane::Content,
+                };
+                Command::None
+            }
+            _ => match self.detail_pane {
+                DetailPane::Content => self.handle_detail_content_key(key),
+                DetailPane::Sidebar => self.handle_detail_sidebar_key(key),
+            },
+        }
+    }
+
+    fn handle_detail_content_key(&mut self, key: KeyEvent) -> Command {
+        match key.code {
             KeyCode::Char('o') | KeyCode::Enter => {
                 self.mode = ViewMode::Board;
                 self.open_in_browser()
@@ -1148,11 +1284,259 @@ impl AppState {
                     .min(self.detail_max_scroll_x.get());
                 Command::None
             }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
+            _ => Command::None,
+        }
+    }
+
+    fn handle_detail_sidebar_key(&mut self, key: KeyEvent) -> Command {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.sidebar_selected =
+                    (self.sidebar_selected + 1).min(SIDEBAR_SECTION_COUNT - 1);
+                Command::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.sidebar_selected = self.sidebar_selected.saturating_sub(1);
+                Command::None
+            }
+            KeyCode::Enter => match self.sidebar_selected {
+                SIDEBAR_STATUS => {
+                    self.status_select_open = true;
+                    self.status_select_cursor = self.selected_column;
+                    Command::None
+                }
+                SIDEBAR_LABELS => self.open_label_edit(),
+                SIDEBAR_ASSIGNEES => self.open_assignee_edit(),
+                SIDEBAR_DELETE => {
+                    self.start_delete_card(ViewMode::Detail);
+                    Command::None
+                }
+                _ => Command::None,
+            },
+            KeyCode::Char('d') => {
+                self.start_delete_card(ViewMode::Detail);
                 Command::None
             }
             _ => Command::None,
+        }
+    }
+
+    fn handle_status_select_key(&mut self, key: KeyEvent) -> Command {
+        let column_count = self
+            .board
+            .as_ref()
+            .map(|b| b.columns.len())
+            .unwrap_or(0);
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if self.status_select_cursor + 1 < column_count {
+                    self.status_select_cursor += 1;
+                }
+                Command::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.status_select_cursor = self.status_select_cursor.saturating_sub(1);
+                Command::None
+            }
+            KeyCode::Enter => {
+                self.status_select_open = false;
+                let target = self.status_select_cursor;
+                if target == self.selected_column {
+                    return Command::None;
+                }
+                self.move_card_to_and_follow(target)
+            }
+            KeyCode::Esc => {
+                self.status_select_open = false;
+                Command::None
+            }
+            _ => Command::None,
+        }
+    }
+
+    /// カードを別カラムに移動し、選択状態を移動先に追従させる (詳細ビュー用)
+    fn move_card_to_and_follow(&mut self, target_column: usize) -> Command {
+        let item_id = match self.selected_card_ref() {
+            Some(c) => c.item_id.clone(),
+            None => return Command::None,
+        };
+
+        let cmd = self.move_card_to(target_column);
+        if matches!(cmd, Command::None) {
+            return cmd;
+        }
+
+        // 移動先カラムに追従
+        self.selected_column = target_column;
+        if let Some(board) = &self.board {
+            if let Some(col) = board.columns.get(target_column) {
+                if let Some(real_idx) = col.cards.iter().position(|c| c.item_id == item_id) {
+                    let filtered = self.filtered_card_indices(target_column);
+                    self.selected_card = filtered
+                        .iter()
+                        .position(|&i| i == real_idx)
+                        .unwrap_or(0);
+                }
+            }
+        }
+
+        cmd
+    }
+
+    /// カードの URL からリポジトリの owner/name を抽出
+    fn repo_from_card(&self) -> Option<(String, String)> {
+        let card = self.selected_card_ref()?;
+        let url = card.url.as_deref()?;
+        // https://github.com/{owner}/{repo}/issues/123
+        let parts: Vec<&str> = url.split('/').collect();
+        if parts.len() >= 5 {
+            Some((parts[3].to_string(), parts[4].to_string()))
+        } else {
+            None
+        }
+    }
+
+    fn open_label_edit(&mut self) -> Command {
+        let card = self.selected_card_ref();
+        if card.map(|c| c.content_id.is_none()).unwrap_or(true) {
+            return Command::None; // DraftIssue はラベル編集不可
+        }
+        if let Some((owner, repo)) = self.repo_from_card() {
+            Command::FetchLabels { owner, repo }
+        } else {
+            Command::None
+        }
+    }
+
+    fn open_assignee_edit(&mut self) -> Command {
+        let card = self.selected_card_ref();
+        if card.map(|c| c.content_id.is_none()).unwrap_or(true) {
+            return Command::None; // DraftIssue はアサイニー編集不可
+        }
+        if let Some((owner, repo)) = self.repo_from_card() {
+            Command::FetchAssignees { owner, repo }
+        } else {
+            Command::None
+        }
+    }
+
+    fn handle_sidebar_edit_key(&mut self, key: KeyEvent) -> Command {
+        let edit = match &mut self.sidebar_edit {
+            Some(e) => e,
+            None => return Command::None,
+        };
+
+        let (items_len, cursor) = match edit {
+            SidebarEditMode::Labels { items, cursor } => (items.len(), cursor),
+            SidebarEditMode::Assignees { items, cursor } => (items.len(), cursor),
+        };
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.sidebar_edit = None;
+                Command::None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if *cursor + 1 < items_len {
+                    *cursor += 1;
+                }
+                Command::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                *cursor = cursor.saturating_sub(1);
+                Command::None
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                self.toggle_sidebar_edit_item()
+            }
+            _ => Command::None,
+        }
+    }
+
+    fn toggle_sidebar_edit_item(&mut self) -> Command {
+        let content_id = match self.selected_card_ref() {
+            Some(c) => match &c.content_id {
+                Some(id) => id.clone(),
+                None => return Command::None,
+            },
+            None => return Command::None,
+        };
+
+        let edit = match &mut self.sidebar_edit {
+            Some(e) => e,
+            None => return Command::None,
+        };
+
+        match edit {
+            SidebarEditMode::Labels { items, cursor } => {
+                let idx = *cursor;
+                if let Some(item) = items.get_mut(idx) {
+                    item.applied = !item.applied;
+                    let add = item.applied;
+                    let label_id = item.id.clone();
+                    let label_name = item.name.clone();
+                    let label_color = item.color.clone().unwrap_or_default();
+
+                    // 楽観的 UI 更新: Card のラベルを更新
+                    if let Some(real_idx) = self.real_card_index() {
+                        if let Some(board) = &mut self.board {
+                            if let Some(col) = board.columns.get_mut(self.selected_column) {
+                                if let Some(card) = col.cards.get_mut(real_idx) {
+                                    if add {
+                                        card.labels.push(crate::model::project::Label {
+                                            id: label_id.clone(),
+                                            name: label_name,
+                                            color: label_color,
+                                        });
+                                    } else {
+                                        card.labels.retain(|l| l.id != label_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    return Command::ToggleLabel {
+                        content_id,
+                        label_id,
+                        add,
+                    };
+                }
+                Command::None
+            }
+            SidebarEditMode::Assignees { items, cursor } => {
+                let idx = *cursor;
+                if let Some(item) = items.get_mut(idx) {
+                    item.applied = !item.applied;
+                    let add = item.applied;
+                    let user_id = item.id.clone();
+                    let login = item.name.clone();
+
+                    // 楽観的 UI 更新: Card のアサイニーを更新
+                    if let Some(real_idx) = self.real_card_index() {
+                        if let Some(board) = &mut self.board {
+                            if let Some(col) = board.columns.get_mut(self.selected_column) {
+                                if let Some(card) = col.cards.get_mut(real_idx) {
+                                    if add {
+                                        card.assignees.push(login);
+                                    } else {
+                                        card.assignees.retain(|a| {
+                                            !a.eq_ignore_ascii_case(&login)
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    return Command::ToggleAssignee {
+                        content_id,
+                        user_id,
+                        add,
+                    };
+                }
+                Command::None
+            }
         }
     }
 
@@ -1228,6 +1612,7 @@ mod tests {
     fn make_card(item_id: &str, title: &str) -> Card {
         Card {
             item_id: item_id.into(),
+            content_id: None,
             title: title.into(),
             number: None,
             card_type: CardType::DraftIssue,
@@ -1242,6 +1627,7 @@ mod tests {
     fn make_card_with_labels(item_id: &str, title: &str, labels: Vec<(&str, &str)>) -> Card {
         Card {
             item_id: item_id.into(),
+            content_id: None,
             title: title.into(),
             number: None,
             card_type: CardType::DraftIssue,
@@ -1249,6 +1635,7 @@ mod tests {
             labels: labels
                 .into_iter()
                 .map(|(name, color)| Label {
+                    id: format!("label_{name}"),
                     name: name.into(),
                     color: color.into(),
                 })
@@ -1262,6 +1649,7 @@ mod tests {
     fn make_card_with_assignees(item_id: &str, title: &str, assignees: Vec<&str>) -> Card {
         Card {
             item_id: item_id.into(),
+            content_id: None,
             title: title.into(),
             number: None,
             card_type: CardType::DraftIssue,
@@ -2786,5 +3174,438 @@ mod tests {
                 project_id: "proj_1".into(),
             }
         );
+    }
+
+    // ========== 詳細ビュー: ペイン切り替え ==========
+
+    #[test]
+    fn test_detail_tab_switches_pane() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        assert_eq!(state.detail_pane, DetailPane::Content);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(state.detail_pane, DetailPane::Sidebar);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(state.detail_pane, DetailPane::Content);
+    }
+
+    #[test]
+    fn test_detail_esc_from_sidebar_returns_to_content() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert_eq!(state.detail_pane, DetailPane::Content);
+        assert_eq!(state.mode, ViewMode::Detail);
+    }
+
+    #[test]
+    fn test_detail_esc_from_content_returns_to_board() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    // ========== 詳細ビュー: サイドバーナビゲーション ==========
+
+    #[test]
+    fn test_detail_sidebar_jk_navigation() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        assert_eq!(state.sidebar_selected, 0); // Status
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 1); // Assignees
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 2); // Labels
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 3); // Delete
+
+        // 下限でクランプ
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 3);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
+        assert_eq!(state.sidebar_selected, 2);
+    }
+
+    // ========== 詳細ビュー: ステータス変更 (ドロップダウン) ==========
+
+    #[test]
+    fn test_detail_status_select_opens() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+            ("Done", "opt_2", vec![]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state.sidebar_selected = 0; // Status
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert!(state.status_select_open);
+        assert_eq!(state.status_select_cursor, 0); // 現在のカラム
+    }
+
+    #[test]
+    fn test_detail_status_select_move_and_confirm() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+            ("In Progress", "opt_2", vec![]),
+            ("Done", "opt_3", vec![]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state.sidebar_selected = 0;
+
+        // Enter でドロップダウンを開く
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert!(state.status_select_open);
+
+        // j で "In Progress" に移動
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.status_select_cursor, 1);
+
+        // j でさらに "Done" に移動
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.status_select_cursor, 2);
+
+        // Enter で確定
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert!(!state.status_select_open);
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert_eq!(state.selected_column, 2); // 移動先に追従
+        assert_eq!(state.board.as_ref().unwrap().columns[0].cards.len(), 0);
+        assert_eq!(state.board.as_ref().unwrap().columns[2].cards.len(), 1);
+        assert_eq!(
+            cmd,
+            Command::MoveCard {
+                project_id: "proj_1".into(),
+                item_id: "1".into(),
+                field_id: "field_1".into(),
+                option_id: "opt_3".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_detail_status_select_same_column_noop() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+            ("Done", "opt_2", vec![]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state.sidebar_selected = 0;
+
+        // ドロップダウンを開く
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        // そのまま Enter (同じカラム)
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.board.as_ref().unwrap().columns[0].cards.len(), 1);
+    }
+
+    #[test]
+    fn test_detail_status_select_esc_cancels() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+            ("Done", "opt_2", vec![]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state.sidebar_selected = 0;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert!(state.status_select_open);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert!(!state.status_select_open);
+        assert_eq!(state.detail_pane, DetailPane::Sidebar);
+    }
+
+    // ========== 詳細ビュー: 削除 ==========
+
+    #[test]
+    fn test_detail_sidebar_delete_opens_confirm() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state.sidebar_selected = 3; // Delete
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Confirm);
+        assert!(state.confirm_state.is_some());
+        let cs = state.confirm_state.as_ref().unwrap();
+        assert!(matches!(cs.action, ConfirmAction::DeleteCard { .. }));
+        assert_eq!(cs.return_to, ViewMode::Detail);
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn test_detail_sidebar_d_key_deletes() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state.sidebar_selected = 0; // Status (d はどのセクションでも動く)
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('d'))));
+        assert_eq!(state.mode, ViewMode::Confirm);
+        assert!(state.confirm_state.is_some());
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn test_detail_delete_confirm_yes_returns_to_board() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+
+        // d → Confirm
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('d'))));
+        assert_eq!(state.mode, ViewMode::Confirm);
+
+        // y → 削除実行、Board に戻る
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('y'))));
+        assert_eq!(state.mode, ViewMode::Board);
+        assert_eq!(state.board.as_ref().unwrap().columns[0].cards.len(), 0);
+        assert_eq!(
+            cmd,
+            Command::DeleteCard {
+                project_id: "proj_1".into(),
+                item_id: "1".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_detail_delete_confirm_cancel_returns_to_detail() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+
+        // d → Confirm
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('d'))));
+        assert_eq!(state.mode, ViewMode::Confirm);
+
+        // n → キャンセル、Detail に戻る
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('n'))));
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert_eq!(state.board.as_ref().unwrap().columns[0].cards.len(), 1);
+        assert_eq!(cmd, Command::None);
+    }
+
+    // ========== 詳細ビュー: ラベル編集 ==========
+
+    fn make_issue_card(item_id: &str, title: &str) -> Card {
+        Card {
+            item_id: item_id.into(),
+            content_id: Some(format!("issue_{item_id}")),
+            title: title.into(),
+            number: Some(1),
+            card_type: CardType::Issue {
+                state: crate::model::project::IssueState::Open,
+            },
+            assignees: vec!["alice".into()],
+            labels: vec![Label {
+                id: "lbl_bug".into(),
+                name: "bug".into(),
+                color: "d73a4a".into(),
+            }],
+            url: Some("https://github.com/owner/repo/issues/1".into()),
+            body: None,
+            comments: vec![],
+        }
+    }
+
+    #[test]
+    fn test_detail_label_edit_opens_fetch() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_issue_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state.sidebar_selected = SIDEBAR_LABELS;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::FetchLabels {
+                owner: "owner".into(),
+                repo: "repo".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_detail_label_toggle() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_issue_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+
+        // LabelsLoaded イベントでエディットモードが開く
+        let labels = vec![
+            crate::model::project::Label {
+                id: "lbl_bug".into(),
+                name: "bug".into(),
+                color: "d73a4a".into(),
+            },
+            crate::model::project::Label {
+                id: "lbl_feat".into(),
+                name: "feature".into(),
+                color: "0075ca".into(),
+            },
+        ];
+        state.handle_event(AppEvent::LabelsLoaded(Ok(labels)));
+        assert!(state.sidebar_edit.is_some());
+
+        // bug は既に適用済み、feature は未適用
+        if let Some(SidebarEditMode::Labels { items, .. }) = &state.sidebar_edit {
+            assert!(items[0].applied); // bug
+            assert!(!items[1].applied); // feature
+        } else {
+            panic!("Expected Labels edit mode");
+        }
+
+        // j で feature に移動
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+
+        // Enter で feature をトグル (追加)
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::ToggleLabel {
+                content_id: "issue_1".into(),
+                label_id: "lbl_feat".into(),
+                add: true,
+            }
+        );
+
+        // 楽観的更新: カードにラベルが追加されている
+        let card = state.selected_card_ref().unwrap();
+        assert_eq!(card.labels.len(), 2);
+
+        // Esc で閉じる
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert!(state.sidebar_edit.is_none());
+    }
+
+    #[test]
+    fn test_detail_assignee_toggle() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_issue_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state.sidebar_selected = SIDEBAR_ASSIGNEES;
+
+        // FetchAssignees コマンドが返る
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::FetchAssignees {
+                owner: "owner".into(),
+                repo: "repo".into(),
+            }
+        );
+
+        // AssigneesLoaded
+        let users = vec![
+            ("user_alice".into(), "alice".into()),
+            ("user_bob".into(), "bob".into()),
+        ];
+        state.handle_event(AppEvent::AssigneesLoaded(Ok(users)));
+        assert!(state.sidebar_edit.is_some());
+
+        if let Some(SidebarEditMode::Assignees { items, .. }) = &state.sidebar_edit {
+            assert!(items[0].applied); // alice (already assigned)
+            assert!(!items[1].applied); // bob
+        }
+
+        // j で bob に移動、Enter でトグル
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::ToggleAssignee {
+                content_id: "issue_1".into(),
+                user_id: "user_bob".into(),
+                add: true,
+            }
+        );
+
+        // 楽観的更新
+        let card = state.selected_card_ref().unwrap();
+        assert_eq!(card.assignees.len(), 2);
+    }
+
+    #[test]
+    fn test_detail_draft_issue_no_label_edit() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Draft")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state.sidebar_selected = SIDEBAR_LABELS;
+
+        // DraftIssue は content_id が None なので編集不可
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(cmd, Command::None);
     }
 }

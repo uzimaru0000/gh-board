@@ -112,6 +112,56 @@ pub fn render(frame: &mut Frame, area: Rect) {
             Span::styled("  q/Esc   ", key_style),
             Span::styled("Quit", desc_style),
         ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            " Detail View (Content)",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(vec![
+            Span::styled("  j/k     ", key_style),
+            Span::styled("Scroll", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  h/l     ", key_style),
+            Span::styled("Table scroll", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Tab     ", key_style),
+            Span::styled("Switch to sidebar", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter/o ", key_style),
+            Span::styled("Open in browser", desc_style),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            " Detail View (Sidebar)",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(vec![
+            Span::styled("  j/k     ", key_style),
+            Span::styled("Navigate sections", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter   ", key_style),
+            Span::styled("Edit / Select", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  d       ", key_style),
+            Span::styled("Delete card", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Tab     ", key_style),
+            Span::styled("Switch to content", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Esc     ", key_style),
+            Span::styled("Back to content", desc_style),
+        ]),
     ];
 
     let paragraph = Paragraph::new(lines).block(block);
