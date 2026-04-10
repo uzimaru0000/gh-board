@@ -1,0 +1,82 @@
+query ProjectBoard($projectId: ID!, $itemsCursor: String) {
+  node(id: $projectId) {
+    __typename
+    ... on ProjectV2 {
+      title
+      fields(first: 30) {
+        nodes {
+          __typename
+          ... on ProjectV2SingleSelectField {
+            id
+            name
+            options {
+              id
+              name
+            }
+          }
+          ... on ProjectV2Field {
+            id
+            name
+          }
+          ... on ProjectV2IterationField {
+            id
+            name
+          }
+        }
+      }
+      items(first: 50, after: $itemsCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          fieldValues(first: 10) {
+            nodes {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+                optionId
+                field {
+                  __typename
+                  ... on ProjectV2SingleSelectField { id name }
+                }
+              }
+              ... on ProjectV2ItemFieldTextValue {
+                text
+                field {
+                  __typename
+                  ... on ProjectV2Field { id name }
+                }
+              }
+            }
+          }
+          content {
+            __typename
+            ... on Issue {
+              title
+              number
+              state
+              url
+              body
+              assignees(first: 5) { nodes { login } }
+              labels(first: 10) { nodes { name color } }
+              comments(first: 20) { nodes { author { __typename login } body createdAt } }
+            }
+            ... on PullRequest {
+              title
+              number
+              state
+              url
+              body
+              assignees(first: 5) { nodes { login } }
+              labels(first: 10) { nodes { name color } }
+              comments(first: 20) { nodes { author { __typename login } body createdAt } }
+            }
+            ... on DraftIssue {
+              title
+              body
+            }
+          }
+        }
+      }
+    }
+  }
+}

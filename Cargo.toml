@@ -1,0 +1,30 @@
+[package]
+name = "gh-board"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "gh-board"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "sync", "time"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+graphql_client = { version = "0.14", features = ["reqwest-rustls"] }
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+open = "5"
+tui-markdown = "0.3"
+pulldown-cmark = "0.13"
+unicode-width = "0.2"
+
+[build-dependencies]
+toml = "0.8"
+
+[package.metadata.schema]
+commit = "baf144f319c7705e822de9a26f05d12e1c7c9df4"

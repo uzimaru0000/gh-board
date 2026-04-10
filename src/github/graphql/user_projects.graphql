@@ -1,0 +1,14 @@
+query UserProjects($login: String!, $cursor: String) {
+  user(login: $login) {
+    projectsV2(first: 20, after: $cursor, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        title
+        number
+        shortDescription
+        closed
+      }
+    }
+  }
+}

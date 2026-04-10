@@ -1,0 +1,14 @@
+query ViewerProjects($cursor: String) {
+  viewer {
+    projectsV2(first: 20, after: $cursor, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        title
+        number
+        shortDescription
+        closed
+      }
+    }
+  }
+}
