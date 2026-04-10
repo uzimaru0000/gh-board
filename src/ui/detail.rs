@@ -28,6 +28,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let popup = centered_rect(80, 80, area);
     frame.render_widget(Clear, popup);
 
+    // Fix: ポップアップ左境界をまたぐ全角文字をクリア
+    if popup.x > 0 {
+        let buf = frame.buffer_mut();
+        for y in popup.top()..popup.bottom() {
+            if let Some(cell) = buf.cell_mut((popup.x - 1, y)) {
+                if cell.symbol().width() > 1 {
+                    cell.reset();
+                }
+            }
+        }
+    }
+
     let (type_icon, type_color) = match &card.card_type {
         CardType::Issue { state } => match state {
             IssueState::Open => ("● ", Color::Green),
