@@ -64,6 +64,21 @@ pub enum Command {
         title: String,
         body: String,
     },
+    AddComment {
+        subject_id: String,
+        body: String,
+    },
+    UpdateComment {
+        comment_id: String,
+        body: String,
+    },
+    FetchComments {
+        content_id: String,
+    },
+    OpenEditorForComment {
+        content_id: String,
+        existing: Option<(String, String)>,
+    },
     OpenUrl(String),
     Batch(Vec<Command>),
 }

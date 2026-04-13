@@ -23,13 +23,27 @@ use project_board::{
 pub struct GitHubClient {
     http: reqwest::Client,
     token: String,
+    viewer_login: String,
 }
 
 impl GitHubClient {
     pub async fn new() -> anyhow::Result<Self> {
         let token = get_token().await?;
         let http = reqwest::Client::new();
-        Ok(Self { http, token })
+        let mut client = Self {
+            http,
+            token,
+            viewer_login: String::new(),
+        };
+        // Fetch viewer login
+        let vars = viewer_login::Variables {};
+        let data = client.query::<ViewerLogin>(vars).await?;
+        client.viewer_login = data.viewer.login;
+        Ok(client)
+    }
+
+    pub fn viewer_login(&self) -> &str {
+        &self.viewer_login
     }
 
     async fn query<Q: GraphQLQuery>(
@@ -438,6 +452,110 @@ impl GitHubClient {
 
         build_board(title, field_nodes, all_items, repositories)
     }
+
+    pub async fn fetch_all_comments(&self, content_id: &str) -> anyhow::Result<Vec<Comment>> {
+        let mut all_comments = Vec::new();
+        let mut cursor: Option<String> = None;
+
+        loop {
+            let vars = fetch_comments::Variables {
+                id: content_id.to_string(),
+                cursor,
+            };
+            let data = self.query::<FetchComments>(vars).await?;
+
+            let node = data.node.context("Node not found")?;
+
+            let (has_next, end_cursor) = match node {
+                fetch_comments::FetchCommentsNode::Issue(issue) => {
+                    if let Some(nodes) = issue.comments.nodes {
+                        for c in nodes.into_iter().flatten() {
+                            all_comments.push(Comment {
+                                id: c.id,
+                                author: c.author.as_ref().map(|a| a.login.clone()).unwrap_or_else(|| "ghost".into()),
+                                body: c.body,
+                                created_at: c.created_at,
+                            });
+                        }
+                    }
+                    (issue.comments.page_info.has_next_page, issue.comments.page_info.end_cursor)
+                }
+                fetch_comments::FetchCommentsNode::PullRequest(pr) => {
+                    if let Some(nodes) = pr.comments.nodes {
+                        for c in nodes.into_iter().flatten() {
+                            all_comments.push(Comment {
+                                id: c.id,
+                                author: c.author.as_ref().map(|a| a.login.clone()).unwrap_or_else(|| "ghost".into()),
+                                body: c.body,
+                                created_at: c.created_at,
+                            });
+                        }
+                    }
+                    (pr.comments.page_info.has_next_page, pr.comments.page_info.end_cursor)
+                }
+                _ => bail!("Unexpected node type for comments"),
+            };
+
+            if has_next {
+                cursor = end_cursor;
+            } else {
+                break;
+            }
+        }
+
+        Ok(all_comments)
+    }
+
+    pub async fn add_comment(
+        &self,
+        subject_id: &str,
+        body: &str,
+    ) -> anyhow::Result<Comment> {
+        let vars = add_comment::Variables {
+            subject_id: subject_id.to_string(),
+            body: body.to_string(),
+        };
+        let data = self.query::<AddComment>(vars).await?;
+        let node = data
+            .add_comment
+            .and_then(|ac| ac.comment_edge)
+            .and_then(|e| e.node)
+            .context("Failed to get added comment")?;
+
+        Ok(Comment {
+            id: node.id,
+            author: node
+                .author
+                .as_ref()
+                .map(|a| a.login.clone())
+                .unwrap_or_else(|| "ghost".into()),
+            body: node.body,
+            created_at: node.created_at,
+        })
+    }
+
+    pub async fn update_comment(
+        &self,
+        comment_id: &str,
+        body: &str,
+    ) -> anyhow::Result<Comment> {
+        let vars = update_issue_comment::Variables {
+            id: comment_id.to_string(),
+            body: body.to_string(),
+        };
+        let data = self.query::<UpdateIssueComment>(vars).await?;
+        let node = data
+            .update_issue_comment
+            .and_then(|u| u.issue_comment)
+            .context("Failed to get updated comment")?;
+
+        Ok(Comment {
+            id: node.id,
+            author: String::new(), // Will be filled by caller
+            body: node.body,
+            created_at: String::new(), // Will be filled by caller
+        })
+    }
 }
 
 async fn get_token() -> anyhow::Result<String> {
@@ -594,6 +712,7 @@ fn convert_item(item: &ItemNode) -> Card {
                     n.iter()
                         .flatten()
                         .map(|c| Comment {
+                            id: c.id.clone(),
                             author: c
                                 .author
                                 .as_ref()
@@ -649,6 +768,7 @@ fn convert_item(item: &ItemNode) -> Card {
                     n.iter()
                         .flatten()
                         .map(|c| Comment {
+                            id: c.id.clone(),
                             author: c
                                 .author
                                 .as_ref()

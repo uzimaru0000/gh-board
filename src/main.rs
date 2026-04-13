@@ -86,14 +86,33 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli) -> 
             events.resume();
 
             if let Ok(new_body) = result {
-                match app.state.mode {
-                    ViewMode::EditCard => {
-                        if let Some(ref mut s) = app.state.edit_card_state {
-                            s.body_input = new_body;
-                        }
+                if let Some(ctx) = app.pending_comment_editor.take() {
+                    // コメント用エディタの結果
+                    if !new_body.trim().is_empty() {
+                        let cmd = if let Some(comment_id) = ctx.comment_id {
+                            crate::command::Command::UpdateComment {
+                                comment_id,
+                                body: new_body,
+                            }
+                        } else {
+                            crate::command::Command::AddComment {
+                                subject_id: ctx.content_id,
+                                body: new_body,
+                            }
+                        };
+                        app.handle_event(event::AppEvent::Tick);
+                        app.execute_cmd(cmd);
                     }
-                    _ => {
-                        app.state.create_card_state.body_input = new_body;
+                } else {
+                    match app.state.mode {
+                        ViewMode::EditCard => {
+                            if let Some(ref mut s) = app.state.edit_card_state {
+                                s.body_input = new_body;
+                            }
+                        }
+                        _ => {
+                            app.state.create_card_state.body_input = new_body;
+                        }
                     }
                 }
             }
@@ -202,6 +221,12 @@ fn render(frame: &mut Frame, app: &App) {
         ViewMode::CardGrab => {
             ui::board::render(frame, main_area, app);
             ui::statusline::render(frame, area, app);
+        }
+        ViewMode::CommentList => {
+            ui::board::render(frame, main_area, app);
+            ui::statusline::render(frame, area, app);
+            ui::detail::render(frame, area, app);
+            ui::comment_list::render(frame, area, app);
         }
     }
 

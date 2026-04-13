@@ -42,6 +42,7 @@ src/
   ui/
     board.rs                # カンバンボード描画 (フィルタ適用含む)
     card.rs                 # カードウィジェット (parse_hex_color は pub で detail.rs からも利用)
+    comment_list.rs         # コメント一覧オーバーレイ (選択・編集)
     confirm.rs              # 削除確認ダイアログ
     detail.rs               # カード詳細モーダル (Markdown + テーブル + コメント)
     create_card.rs          # カード作成モーダル
@@ -78,8 +79,10 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 
 ### カード詳細ビュー (ViewMode::Detail)
 - Enter でボード上のカードを選択すると 80%×80% のモーダルポップアップを表示
-- 表示内容: 状態、アサイニー、ラベル、本文 (Markdown)、コメント (最大20件)
+- 表示内容: 状態、アサイニー、ラベル、本文 (Markdown)、コメント (全件取得)
 - j/k: 縦スクロール、h/l: テーブルのみ横スクロール
+- c: 新規コメント投稿 ($EDITOR 経由、Issue/PR のみ)
+- C: コメント一覧 (ViewMode::CommentList) を開く
 - Enter/o: ブラウザで開く、Esc/q: ボードに戻る
 - Markdown レンダリング: tui-markdown でヘッダー・太字・コード等を装飾表示
 - テーブル: pulldown-cmark でパースし罫線文字で自前レンダリング。ビューポートに収まらないテーブルのみ h/l で横スクロール可能
@@ -95,6 +98,17 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 - n: ドラフトIssue作成 (addProjectV2DraftIssue + ステータス設定の2段階)
 - d: カード削除 (確認ダイアログ付き、deleteProjectV2Item mutation)
 - 楽観的UI更新パターン: API呼び出し前にローカル状態を変更、エラー時はボードリフレッシュ
+
+### コメント操作
+- c (詳細ビュー Content ペイン): 新規コメント投稿 ($EDITOR 起動、addComment mutation)
+- C (詳細ビュー Content ペイン): コメント一覧 (ViewMode::CommentList) を開く
+  - j/k: コメント間移動
+  - e: 選択中の自分のコメントを編集 ($EDITOR 起動、updateIssueComment mutation)
+  - c: 新規コメント投稿
+  - Esc: 詳細ビューに戻る
+- DraftIssue はコメント非対応 (c/C は無効)
+- コメントのページネーション: 詳細ビューを開いた際にコメントが20件の場合、FetchComments クエリで全件取得
+- 自分のコメントのみ編集可能 (viewer_login で判定)
 
 ### フィルタ・検索
 - /: フィルタモード開始 → Enter で適用、Esc でキャンセル
@@ -175,8 +189,6 @@ assert_eq!(cmd, Command::MoveCard { ... });
 - カード編集 (ドラフトIssueのタイトル/本文変更)
 - 複数プロジェクト切替の改善
 - 詳細ビューからのカード操作 (ステータス変更、削除、ラベル編集)
-- コメント投稿・編集 (addIssueComment mutation)
-- コメントのページネーション (現在は最大20件)
 - Issue/PR の作成 (DraftIssue → Issue 変換を含む)
 - カスタムフィールド表示・編集 (Priority、Estimate 等)
 - 複数フィルタの組み合わせ (AND/OR)

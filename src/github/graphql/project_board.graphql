@@ -65,7 +65,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
               body
               assignees(first: 5) { nodes { login } }
               labels(first: 10) { nodes { id name color } }
-              comments(first: 20) { nodes { author { __typename login } body createdAt } }
+              comments(first: 20) { nodes { id author { __typename login } body createdAt } }
             }
             ... on PullRequest {
               id
@@ -76,7 +76,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
               body
               assignees(first: 5) { nodes { login } }
               labels(first: 10) { nodes { id name color } }
-              comments(first: 20) { nodes { author { __typename login } body createdAt } }
+              comments(first: 20) { nodes { id author { __typename login } body createdAt } }
             }
             ... on DraftIssue {
               id

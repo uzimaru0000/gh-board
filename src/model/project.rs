@@ -37,6 +37,7 @@ pub struct Card {
 
 #[derive(Clone, Debug)]
 pub struct Comment {
+    pub id: String,
     pub author: String,
     pub body: String,
     pub created_at: String,

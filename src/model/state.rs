@@ -17,6 +17,7 @@ pub enum ViewMode {
     RepoSelect,
     CardGrab,
     EditCard,
+    CommentList,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,6 +115,12 @@ impl Default for CreateCardState {
             focused_field: CreateCardField::Type,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct CommentListState {
+    pub cursor: usize,
+    pub content_id: String,
 }
 
 #[derive(Clone, Debug)]

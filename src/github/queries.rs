@@ -154,3 +154,35 @@ pub struct UpdateIssue;
     response_derives = "Debug"
 )]
 pub struct UpdatePullRequest;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/fetch_comments.graphql",
+    response_derives = "Debug"
+)]
+pub struct FetchComments;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/add_comment.graphql",
+    response_derives = "Debug"
+)]
+pub struct AddComment;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/update_issue_comment.graphql",
+    response_derives = "Debug"
+)]
+pub struct UpdateIssueComment;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/viewer_login.graphql",
+    response_derives = "Debug"
+)]
+pub struct ViewerLogin;

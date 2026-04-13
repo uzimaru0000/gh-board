@@ -5,7 +5,7 @@ use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::model::project::{Board, Label, ProjectSummary};
+use crate::model::project::{Board, Comment, Label, ProjectSummary};
 
 pub enum AppEvent {
     Key(KeyEvent),
@@ -23,6 +23,9 @@ pub enum AppEvent {
     LabelToggled(Result<(), String>),
     AssigneeToggled(Result<(), String>),
     CardUpdated(Result<(), String>),
+    CommentAdded(Result<Comment, String>),
+    CommentUpdated(Result<Comment, String>),
+    CommentsLoaded(Result<(String, Vec<Comment>), String>),
 }
 
 pub struct EventHandler {

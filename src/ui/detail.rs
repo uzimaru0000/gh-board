@@ -137,18 +137,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(":back", desc_style),
         ])
     } else {
-        Line::from(vec![
+        let is_draft = matches!(card.card_type, CardType::DraftIssue);
+        let mut spans = vec![
             Span::styled("Tab", hint_style),
             Span::styled(":sidebar  ", desc_style),
             Span::styled("j/k", hint_style),
             Span::styled(":scroll  ", desc_style),
-            Span::styled("h/l", hint_style),
-            Span::styled(":table  ", desc_style),
-            Span::styled("Enter/o", hint_style),
-            Span::styled(":open  ", desc_style),
+        ];
+        if !is_draft {
+            spans.extend([
+                Span::styled("c", hint_style),
+                Span::styled(":comment  ", desc_style),
+                Span::styled("C", hint_style),
+                Span::styled(":comments  ", desc_style),
+            ]);
+        }
+        spans.extend([
             Span::styled("Esc/q", hint_style),
             Span::styled(":close", desc_style),
-        ])
+        ]);
+        Line::from(spans)
     };
     frame.render_widget(footer, footer_area);
 }

@@ -5,9 +5,15 @@ use crate::command::Command;
 use crate::event::AppEvent;
 use crate::github::client::GitHubClient;
 
+pub struct CommentEditorContext {
+    pub content_id: String,
+    pub comment_id: Option<String>,
+}
+
 pub struct App {
     pub state: AppState,
     pub pending_editor: Option<String>,
+    pub pending_comment_editor: Option<CommentEditorContext>,
     github: GitHubClient,
     event_tx: mpsc::UnboundedSender<AppEvent>,
 }
@@ -18,9 +24,13 @@ impl App {
         event_tx: mpsc::UnboundedSender<AppEvent>,
         owner: Option<String>,
     ) -> Self {
+        let viewer_login = github.viewer_login().to_string();
+        let mut state = AppState::new(owner);
+        state.viewer_login = viewer_login;
         Self {
-            state: AppState::new(owner),
+            state,
             pending_editor: None,
+            pending_comment_editor: None,
             github,
             event_tx,
         }
@@ -33,6 +43,10 @@ impl App {
 
     pub fn handle_event(&mut self, event: AppEvent) {
         let cmd = self.state.handle_event(event);
+        self.execute(cmd);
+    }
+
+    pub fn execute_cmd(&mut self, cmd: Command) {
         self.execute(cmd);
     }
 
@@ -244,6 +258,54 @@ impl App {
                         }
                     };
                     let _ = tx.send(AppEvent::CardUpdated(result.map_err(|e| e.to_string())));
+                });
+            }
+            Command::AddComment {
+                subject_id,
+                body,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.add_comment(&subject_id, &body).await;
+                    let _ = tx.send(AppEvent::CommentAdded(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::UpdateComment { comment_id, body } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.update_comment(&comment_id, &body).await;
+                    let _ = tx.send(AppEvent::CommentUpdated(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::FetchComments { content_id } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                let cid = content_id.clone();
+                tokio::spawn(async move {
+                    let result = client.fetch_all_comments(&cid).await;
+                    let _ = tx.send(AppEvent::CommentsLoaded(
+                        result.map(|comments| (cid, comments)).map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::OpenEditorForComment {
+                content_id,
+                existing,
+            } => {
+                let body = existing
+                    .as_ref()
+                    .map(|(_, b)| b.clone())
+                    .unwrap_or_default();
+                self.pending_editor = Some(body);
+                self.pending_comment_editor = Some(CommentEditorContext {
+                    content_id,
+                    comment_id: existing.map(|(id, _)| id),
                 });
             }
             Command::OpenEditor { content } => {

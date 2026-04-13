@@ -2,12 +2,12 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::command::Command;
 use crate::event::AppEvent;
-use crate::model::project::{Board, Card, ProjectSummary};
+use crate::model::project::{Board, Card, CardType, ProjectSummary};
 use crate::model::state::{
-    ActiveFilter, ConfirmAction, ConfirmState, CreateCardField, CreateCardState, DetailPane,
-    EditCardField, EditCardState, EditItem, FilterState, GrabState, LoadingState, NewCardType,
-    PendingIssueCreate, RepoSelectState, SidebarEditMode, ViewMode, SIDEBAR_ASSIGNEES,
-    SIDEBAR_DELETE, SIDEBAR_LABELS, SIDEBAR_SECTION_COUNT, SIDEBAR_STATUS,
+    ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
+    CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
+    LoadingState, NewCardType, PendingIssueCreate, RepoSelectState, SidebarEditMode, ViewMode,
+    SIDEBAR_ASSIGNEES, SIDEBAR_DELETE, SIDEBAR_LABELS, SIDEBAR_SECTION_COUNT, SIDEBAR_STATUS,
 };
 
 pub struct AppState {
@@ -54,11 +54,17 @@ pub struct AppState {
     // Card grab
     pub grab_state: Option<GrabState>,
 
+    // Comment list
+    pub comment_list_state: Option<CommentListState>,
+
     // Loading
     pub loading: LoadingState,
 
     // CLI options
     pub owner: Option<String>,
+
+    // Viewer info
+    pub viewer_login: String,
 }
 
 impl AppState {
@@ -88,8 +94,10 @@ impl AppState {
             sidebar_edit: None,
             edit_card_state: None,
             grab_state: None,
+            comment_list_state: None,
             loading: LoadingState::Idle,
             owner,
+            viewer_login: String::new(),
         }
     }
 
@@ -263,6 +271,48 @@ impl AppState {
                     Command::None
                 }
             }
+            AppEvent::CommentAdded(Ok(comment)) => {
+                // 楽観的更新: コメントをカードに追加
+                if let Some(card) = self.selected_card_mut() {
+                    card.comments.push(comment);
+                }
+                Command::None
+            }
+            AppEvent::CommentAdded(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                Command::None
+            }
+            AppEvent::CommentUpdated(Ok(comment)) => {
+                // コメント更新: 対象コメントの body を更新
+                if let Some(card) = self.selected_card_mut() {
+                    if let Some(c) = card.comments.iter_mut().find(|c| c.id == comment.id) {
+                        c.body = comment.body;
+                    }
+                }
+                Command::None
+            }
+            AppEvent::CommentUpdated(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                Command::None
+            }
+            AppEvent::CommentsLoaded(Ok((content_id, comments))) => {
+                // ページネーション結果: カードのコメントを全件で差し替え
+                if let Some(board) = &mut self.board {
+                    for col in &mut board.columns {
+                        for card in &mut col.cards {
+                            if card.content_id.as_deref() == Some(&content_id) {
+                                card.comments = comments;
+                                return Command::None;
+                            }
+                        }
+                    }
+                }
+                Command::None
+            }
+            AppEvent::CommentsLoaded(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                Command::None
+            }
             AppEvent::Tick | AppEvent::Resize(_, _) => Command::None,
         }
     }
@@ -326,6 +376,7 @@ impl AppState {
             ViewMode::RepoSelect => self.handle_repo_select_key(key),
             ViewMode::CardGrab => self.handle_card_grab_key(key),
             ViewMode::EditCard => self.handle_edit_card_key(key),
+            ViewMode::CommentList => self.handle_comment_list_key(key),
         }
     }
 
@@ -1282,6 +1333,15 @@ impl AppState {
         self.status_select_open = false;
         self.sidebar_edit = None;
         self.mode = ViewMode::Detail;
+
+        // コメントが20件（上限）の場合、追加コメントを取得
+        if let Some(card) = self.selected_card_ref() {
+            if card.comments.len() >= 20 {
+                if let Some(content_id) = card.content_id.clone() {
+                    return Command::FetchComments { content_id };
+                }
+            }
+        }
         Command::None
     }
 
@@ -1364,8 +1424,50 @@ impl AppState {
                 Command::None
             }
             KeyCode::Char('e') => self.start_edit_card(),
+            KeyCode::Char('c') => self.start_new_comment(),
+            KeyCode::Char('C') => self.open_comment_list(),
             _ => Command::None,
         }
+    }
+
+    fn start_new_comment(&mut self) -> Command {
+        let card = match self.selected_card_ref() {
+            Some(c) => c,
+            None => return Command::None,
+        };
+        // DraftIssue はコメント不可
+        if matches!(card.card_type, CardType::DraftIssue) {
+            return Command::None;
+        }
+        let content_id = match &card.content_id {
+            Some(id) => id.clone(),
+            None => return Command::None,
+        };
+        Command::OpenEditorForComment {
+            content_id,
+            existing: None,
+        }
+    }
+
+    fn open_comment_list(&mut self) -> Command {
+        let card = match self.selected_card_ref() {
+            Some(c) => c,
+            None => return Command::None,
+        };
+        // DraftIssue はコメント不可
+        if matches!(card.card_type, CardType::DraftIssue) {
+            return Command::None;
+        }
+        let content_id = match &card.content_id {
+            Some(id) => id.clone(),
+            None => return Command::None,
+        };
+        self.comment_list_state = Some(CommentListState {
+            cursor: 0,
+            content_id,
+        });
+        self.mode = ViewMode::CommentList;
+        Command::None
     }
 
     fn start_edit_card(&mut self) -> Command {
@@ -1548,6 +1650,76 @@ impl AppState {
             KeyCode::Char('d') => {
                 self.start_delete_card(ViewMode::Detail);
                 Command::None
+            }
+            _ => Command::None,
+        }
+    }
+
+    fn handle_comment_list_key(&mut self, key: KeyEvent) -> Command {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.should_quit = true;
+            return Command::None;
+        }
+
+        let comment_count = self
+            .selected_card_ref()
+            .map(|c| c.comments.len())
+            .unwrap_or(0);
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.comment_list_state = None;
+                self.mode = ViewMode::Detail;
+                Command::None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(ref mut cls) = self.comment_list_state {
+                    if comment_count > 0 {
+                        cls.cursor = (cls.cursor + 1).min(comment_count - 1);
+                    }
+                }
+                Command::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(ref mut cls) = self.comment_list_state {
+                    cls.cursor = cls.cursor.saturating_sub(1);
+                }
+                Command::None
+            }
+            KeyCode::Char('e') => {
+                let cls = match &self.comment_list_state {
+                    Some(s) => s,
+                    None => return Command::None,
+                };
+                let card = match self.selected_card_ref() {
+                    Some(c) => c,
+                    None => return Command::None,
+                };
+                let comment = match card.comments.get(cls.cursor) {
+                    Some(c) => c,
+                    None => return Command::None,
+                };
+                // 自分のコメントのみ編集可能
+                if comment.author != self.viewer_login {
+                    return Command::None;
+                }
+                let content_id = cls.content_id.clone();
+                let comment_id = comment.id.clone();
+                let body = comment.body.clone();
+                Command::OpenEditorForComment {
+                    content_id,
+                    existing: Some((comment_id, body)),
+                }
+            }
+            KeyCode::Char('c') => {
+                let content_id = match &self.comment_list_state {
+                    Some(s) => s.content_id.clone(),
+                    None => return Command::None,
+                };
+                Command::OpenEditorForComment {
+                    content_id,
+                    existing: None,
+                }
             }
             _ => Command::None,
         }
@@ -1780,6 +1952,16 @@ impl AppState {
             .get(self.selected_column)?
             .cards
             .get(real_idx)
+    }
+
+    fn selected_card_mut(&mut self) -> Option<&mut Card> {
+        let real_idx = self.real_card_index()?;
+        self.board
+            .as_mut()?
+            .columns
+            .get_mut(self.selected_column)?
+            .cards
+            .get_mut(real_idx)
     }
 
     fn open_in_browser(&self) -> Command {
@@ -4225,5 +4407,303 @@ mod tests {
         let cmd = state.handle_event(AppEvent::CardUpdated(Err("API error".into())));
         // start_loading_board が Loading に上書きするのでリロードが走ることを確認
         assert!(matches!(cmd, Command::LoadBoard { .. }));
+    }
+
+    // ========== コメント関連ヘルパー ==========
+
+    fn make_comment(id: &str, author: &str, body: &str) -> Comment {
+        Comment {
+            id: id.into(),
+            author: author.into(),
+            body: body.into(),
+            created_at: "2024-01-01T00:00:00Z".into(),
+        }
+    }
+
+    fn make_issue_card_with_comments(
+        item_id: &str,
+        title: &str,
+        comments: Vec<Comment>,
+    ) -> Card {
+        Card {
+            item_id: item_id.into(),
+            content_id: Some(format!("issue_{item_id}")),
+            title: title.into(),
+            number: Some(1),
+            card_type: CardType::Issue {
+                state: IssueState::Open,
+            },
+            assignees: vec![],
+            labels: vec![],
+            url: Some("https://github.com/owner/repo/issues/1".into()),
+            body: Some("body".into()),
+            comments,
+        }
+    }
+
+    // ========== コメント投稿テスト ==========
+
+    #[test]
+    fn test_detail_c_opens_editor_for_new_comment() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        // Detail ビューに入る
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert_eq!(state.detail_pane, DetailPane::Content);
+
+        // c で新規コメント用エディタが開く
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('c'))));
+        assert!(
+            matches!(cmd, Command::OpenEditorForComment { existing: None, .. }),
+            "Expected OpenEditorForComment with existing=None, got {:?}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_detail_c_does_nothing_for_draft_issue() {
+        let card = make_card("1", "Draft");
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+
+        // DraftIssue では c は何もしない
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('c'))));
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn test_detail_shift_c_opens_comment_list() {
+        let comments = vec![
+            make_comment("c1", "alice", "Hello"),
+            make_comment("c2", "bob", "World"),
+        ];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+
+        // C (Shift+c) でコメント一覧を開く
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+        )));
+        assert_eq!(state.mode, ViewMode::CommentList);
+        assert!(state.comment_list_state.is_some());
+        assert_eq!(state.comment_list_state.as_ref().unwrap().cursor, 0);
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn test_comment_list_navigation() {
+        let comments = vec![
+            make_comment("c1", "alice", "Hello"),
+            make_comment("c2", "bob", "World"),
+            make_comment("c3", "carol", "!"),
+        ];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+        )));
+        assert_eq!(state.mode, ViewMode::CommentList);
+
+        // j で下に移動
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.comment_list_state.as_ref().unwrap().cursor, 1);
+
+        // もう一度 j
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.comment_list_state.as_ref().unwrap().cursor, 2);
+
+        // 末尾を超えない
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.comment_list_state.as_ref().unwrap().cursor, 2);
+
+        // k で上に移動
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
+        assert_eq!(state.comment_list_state.as_ref().unwrap().cursor, 1);
+    }
+
+    #[test]
+    fn test_comment_list_edit_own_comment() {
+        let comments = vec![
+            make_comment("c1", "me", "My comment"),
+            make_comment("c2", "other", "Other comment"),
+        ];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        state.viewer_login = "me".into();
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+        )));
+
+        // 自分のコメント（cursor=0, author="me"）で e → OpenEditorForComment
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+        assert!(
+            matches!(cmd, Command::OpenEditorForComment { existing: Some(_), .. }),
+            "Expected OpenEditorForComment with existing=Some, got {:?}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_comment_list_edit_other_comment_does_nothing() {
+        let comments = vec![
+            make_comment("c1", "other", "Other comment"),
+        ];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        state.viewer_login = "me".into();
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+        )));
+
+        // 他人のコメント（cursor=0, author="other"）で e → None
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn test_comment_list_new_comment() {
+        let comments = vec![make_comment("c1", "alice", "Hello")];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+        )));
+
+        // CommentList で c → 新規コメント
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('c'))));
+        assert!(
+            matches!(cmd, Command::OpenEditorForComment { existing: None, .. }),
+            "Expected OpenEditorForComment, got {:?}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_comment_list_esc_returns_to_detail() {
+        let comments = vec![make_comment("c1", "alice", "Hello")];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+        )));
+        assert_eq!(state.mode, ViewMode::CommentList);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert!(state.comment_list_state.is_none());
+    }
+
+    #[test]
+    fn test_comments_loaded_replaces_card_comments() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![
+            make_comment("c1", "alice", "old"),
+        ]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let new_comments = vec![
+            make_comment("c1", "alice", "old"),
+            make_comment("c2", "bob", "new1"),
+            make_comment("c3", "carol", "new2"),
+        ];
+        let _ = state.handle_event(AppEvent::CommentsLoaded(Ok((
+            "issue_1".into(),
+            new_comments,
+        ))));
+
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.comments.len(), 3);
+        assert_eq!(card.comments[2].author, "carol");
+    }
+
+    #[test]
+    fn test_comment_added_appends_to_card() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![
+            make_comment("c1", "alice", "first"),
+        ]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        // Detail ビューに入る
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        let new_comment = make_comment("c2", "me", "new comment");
+        let _ = state.handle_event(AppEvent::CommentAdded(Ok(new_comment)));
+
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.comments.len(), 2);
+        assert_eq!(card.comments[1].body, "new comment");
+    }
+
+    #[test]
+    fn test_comment_updated_modifies_body() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![
+            make_comment("c1", "me", "old body"),
+        ]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        let updated = Comment {
+            id: "c1".into(),
+            author: String::new(), // update_comment returns empty author
+            body: "updated body".into(),
+            created_at: String::new(),
+        };
+        let _ = state.handle_event(AppEvent::CommentUpdated(Ok(updated)));
+
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.comments[0].body, "updated body");
+    }
+
+    #[test]
+    fn test_detail_opens_fetch_comments_when_20() {
+        let comments: Vec<Comment> = (0..20)
+            .map(|i| make_comment(&format!("c{i}"), "alice", &format!("comment {i}")))
+            .collect();
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        // Detail を開く → コメント20件 → FetchComments が返る
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert!(
+            matches!(cmd, Command::FetchComments { .. }),
+            "Expected FetchComments when 20 comments, got {:?}",
+            cmd
+        );
     }
 }

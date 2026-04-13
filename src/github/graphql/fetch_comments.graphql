@@ -1,0 +1,17 @@
+query FetchComments($id: ID!, $cursor: String) {
+  node(id: $id) {
+    __typename
+    ... on Issue {
+      comments(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id author { __typename login } body createdAt }
+      }
+    }
+    ... on PullRequest {
+      comments(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id author { __typename login } body createdAt }
+      }
+    }
+  }
+}
