@@ -1,10 +1,12 @@
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
     Frame,
 };
+
+use crate::ui::theme::THEME;
 
 pub fn render(frame: &mut Frame, area: Rect) {
     let popup = centered_rect(50, 70, area);
@@ -12,23 +14,22 @@ pub fn render(frame: &mut Frame, area: Rect) {
 
     let block = Block::default()
         .title(" Help ")
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .title_style(Style::default().fg(THEME.accent).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(THEME.accent));
 
     let key_style = Style::default()
-        .fg(Color::Yellow)
+        .fg(THEME.yellow)
         .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(Color::White);
+    let desc_style = Style::default().fg(THEME.text);
+    let section_style = Style::default()
+        .fg(THEME.accent)
+        .add_modifier(Modifier::BOLD);
 
     let lines = vec![
         Line::from(""),
-        Line::from(Span::styled(
-            " Navigation",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Line::from(Span::styled(" Navigation", section_style)),
         Line::from(vec![
             Span::styled("  j/↓     ", key_style),
             Span::styled("Next card", desc_style),
@@ -58,12 +59,7 @@ pub fn render(frame: &mut Frame, area: Rect) {
             Span::styled("Next column (wrap)", desc_style),
         ]),
         Line::from(""),
-        Line::from(Span::styled(
-            " Actions",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Line::from(Span::styled(" Actions", section_style)),
         Line::from(vec![
             Span::styled("  Space   ", key_style),
             Span::styled("Grab card (move mode)", desc_style),
@@ -113,12 +109,7 @@ pub fn render(frame: &mut Frame, area: Rect) {
             Span::styled("Quit", desc_style),
         ]),
         Line::from(""),
-        Line::from(Span::styled(
-            " Detail View (Content)",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Line::from(Span::styled(" Detail View (Content)", section_style)),
         Line::from(vec![
             Span::styled("  j/k     ", key_style),
             Span::styled("Scroll", desc_style),
@@ -140,12 +131,7 @@ pub fn render(frame: &mut Frame, area: Rect) {
             Span::styled("Edit card", desc_style),
         ]),
         Line::from(""),
-        Line::from(Span::styled(
-            " Detail View (Sidebar)",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Line::from(Span::styled(" Detail View (Sidebar)", section_style)),
         Line::from(vec![
             Span::styled("  j/k     ", key_style),
             Span::styled("Navigate sections", desc_style),

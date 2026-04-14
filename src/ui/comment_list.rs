@@ -1,12 +1,13 @@
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Padding, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
     Frame,
 };
 
 use crate::app::App;
+use crate::ui::theme::THEME;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let card = match app.state.selected_card_ref() {
@@ -26,11 +27,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .title(" Comments ")
         .title_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(THEME.accent)
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(THEME.accent))
         .padding(Padding::horizontal(1));
 
     let inner = block.inner(popup);
@@ -46,7 +48,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if card.comments.is_empty() {
         lines.push(Line::from(Span::styled(
             "(No comments)",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(THEME.text_muted),
         )));
     } else {
         for (i, comment) in card.comments.iter().enumerate() {
@@ -67,22 +69,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
             let author_style = if is_selected {
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(THEME.accent)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(THEME.yellow)
                     .add_modifier(Modifier::BOLD)
             };
 
             let body_style = if is_selected {
-                Style::default().fg(Color::White)
+                Style::default().fg(THEME.text)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(THEME.text_dim)
             };
 
             let edit_hint = if is_own && is_selected {
-                Span::styled(" [e:edit]", Style::default().fg(Color::Green))
+                Span::styled(" [e:edit]", Style::default().fg(THEME.green))
             } else {
                 Span::raw("")
             };
@@ -90,7 +92,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             lines.push(Line::from(vec![
                 Span::styled(marker.to_string(), author_style),
                 Span::styled(format!("@{}", comment.author), author_style),
-                Span::styled(format!("  {date_display}"), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("  {date_display}"), Style::default().fg(THEME.text_muted)),
                 edit_hint,
             ]));
             lines.push(Line::from(vec![
@@ -117,9 +119,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(paragraph, vert[0]);
 
     let hint_style = Style::default()
-        .fg(Color::White)
+        .fg(THEME.text)
         .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(Color::DarkGray);
+    let desc_style = Style::default().fg(THEME.text_muted);
 
     let footer = Line::from(vec![
         Span::styled("j/k", hint_style),

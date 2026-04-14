@@ -19,6 +19,7 @@ pub struct AppState {
     pub selected_column: usize,
     pub selected_card: usize,
     pub scroll_offset: usize,
+    pub board_scroll_x: std::cell::Cell<usize>,
 
     // Project selection
     pub projects: Vec<ProjectSummary>,
@@ -76,6 +77,7 @@ impl AppState {
             selected_column: 0,
             selected_card: 0,
             scroll_offset: 0,
+            board_scroll_x: std::cell::Cell::new(0),
             projects: Vec::new(),
             selected_project_index: 0,
             current_project: None,
@@ -137,6 +139,7 @@ impl AppState {
                 self.selected_column = 0;
                 self.selected_card = 0;
                 self.scroll_offset = 0;
+                self.board_scroll_x.set(0);
                 self.loading = LoadingState::Idle;
                 self.mode = ViewMode::Board;
                 Command::None
@@ -1322,6 +1325,24 @@ impl AppState {
         self.scroll_offset = 0;
     }
 
+    pub fn compute_board_scroll_x(
+        selected_column: usize,
+        current_scroll: usize,
+        visible_cols: usize,
+        total_cols: usize,
+    ) -> usize {
+        if visible_cols == 0 || total_cols == 0 {
+            return 0;
+        }
+        let mut scroll = current_scroll;
+        if selected_column < scroll {
+            scroll = selected_column;
+        } else if selected_column >= scroll + visible_cols {
+            scroll = selected_column - visible_cols + 1;
+        }
+        scroll.min(total_cols.saturating_sub(visible_cols))
+    }
+
     fn open_detail_view(&mut self) -> Command {
         if self.real_card_index().is_none() {
             return Command::None;
@@ -2084,6 +2105,7 @@ mod tests {
                 .map(|(name, option_id, cards)| Column {
                     name: name.into(),
                     option_id: option_id.into(),
+                    color: None,
                     cards,
                 })
                 .collect(),
@@ -4705,5 +4727,54 @@ mod tests {
             "Expected FetchComments when 20 comments, got {:?}",
             cmd
         );
+    }
+
+    // --- compute_board_scroll_x tests ---
+
+    #[test]
+    fn test_board_scroll_x_no_scroll_when_all_fit() {
+        // 3 columns, 5 visible → no scroll needed
+        assert_eq!(AppState::compute_board_scroll_x(0, 0, 5, 3), 0);
+        assert_eq!(AppState::compute_board_scroll_x(2, 0, 5, 3), 0);
+    }
+
+    #[test]
+    fn test_board_scroll_x_follows_right() {
+        // 10 columns, 3 visible, selecting column 3 (0-indexed)
+        assert_eq!(AppState::compute_board_scroll_x(3, 0, 3, 10), 1);
+        // selecting column 5
+        assert_eq!(AppState::compute_board_scroll_x(5, 0, 3, 10), 3);
+    }
+
+    #[test]
+    fn test_board_scroll_x_follows_left() {
+        // current scroll = 5, selecting column 3
+        assert_eq!(AppState::compute_board_scroll_x(3, 5, 3, 10), 3);
+        // selecting column 0
+        assert_eq!(AppState::compute_board_scroll_x(0, 5, 3, 10), 0);
+    }
+
+    #[test]
+    fn test_board_scroll_x_clamp_at_end() {
+        // 10 columns, 3 visible, selecting last column
+        assert_eq!(AppState::compute_board_scroll_x(9, 0, 3, 10), 7);
+        // cannot scroll past total - visible
+        assert_eq!(AppState::compute_board_scroll_x(9, 9, 3, 10), 7);
+    }
+
+    #[test]
+    fn test_board_scroll_x_stays_when_in_range() {
+        // current scroll = 2, selected = 3, visible = 3 → column 3 is in range [2,3,4]
+        assert_eq!(AppState::compute_board_scroll_x(3, 2, 3, 10), 2);
+    }
+
+    #[test]
+    fn test_board_scroll_x_zero_visible() {
+        assert_eq!(AppState::compute_board_scroll_x(0, 0, 0, 10), 0);
+    }
+
+    #[test]
+    fn test_board_scroll_x_zero_total() {
+        assert_eq!(AppState::compute_board_scroll_x(0, 0, 3, 0), 0);
     }
 }

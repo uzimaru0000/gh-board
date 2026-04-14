@@ -1,13 +1,14 @@
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
     Frame,
 };
 
 use crate::model::project::Repository;
 use crate::model::state::RepoSelectState;
+use crate::ui::theme::THEME;
 
 pub fn render(frame: &mut Frame, area: Rect, repos: &[Repository], state: &RepoSelectState) {
     let height = (repos.len() as u16 + 4).min(20);
@@ -18,20 +19,21 @@ pub fn render(frame: &mut Frame, area: Rect, repos: &[Repository], state: &RepoS
         .title(" Select Repository ")
         .title_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(THEME.accent)
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(THEME.accent));
 
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let hint_style = Style::default().fg(Color::DarkGray);
+    let hint_style = Style::default().fg(THEME.text_muted);
     let selected_style = Style::default()
-        .fg(Color::Yellow)
+        .fg(THEME.yellow)
         .add_modifier(Modifier::BOLD);
-    let normal_style = Style::default().fg(Color::White);
+    let normal_style = Style::default().fg(THEME.text);
 
     let mut lines: Vec<Line> = Vec::new();
 

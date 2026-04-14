@@ -18,7 +18,20 @@ pub struct Board {
 pub struct Column {
     pub option_id: String,
     pub name: String,
+    pub color: Option<ColumnColor>,
     pub cards: Vec<Card>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ColumnColor {
+    Blue,
+    Gray,
+    Green,
+    Orange,
+    Pink,
+    Purple,
+    Red,
+    Yellow,
 }
 
 #[derive(Clone, Debug)]

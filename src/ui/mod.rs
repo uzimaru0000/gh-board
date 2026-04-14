@@ -10,3 +10,4 @@ pub mod help;
 pub mod project_list;
 pub mod repo_select;
 pub mod statusline;
+pub mod theme;

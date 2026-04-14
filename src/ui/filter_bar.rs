@@ -1,11 +1,12 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     Frame,
 };
 
 use crate::app::App;
+use crate::ui::theme::THEME;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if area.height < 1 {
@@ -22,7 +23,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let prompt = Span::styled(
         "/",
         Style::default()
-            .fg(Color::Cyan)
+            .fg(THEME.accent)
             .add_modifier(Modifier::BOLD),
     );
 
@@ -38,18 +39,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         &after[cursor_char.len_utf8()..]
     };
 
-    let before_span = Span::styled(before, Style::default().fg(Color::White));
+    let before_span = Span::styled(before, Style::default().fg(THEME.text));
     let cursor_span = Span::styled(
         cursor_char.to_string(),
         Style::default()
-            .fg(Color::Black)
-            .bg(Color::White),
+            .fg(THEME.text_inverted)
+            .bg(THEME.text),
     );
-    let after_span = Span::styled(rest, Style::default().fg(Color::White));
+    let after_span = Span::styled(rest, Style::default().fg(THEME.text));
 
     let hint = Span::styled(
         " (Enter:apply  Esc:cancel  label:  assignee:)",
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(THEME.text_muted),
     );
 
     let line = Line::from(vec![prompt, before_span, cursor_span, after_span, hint]);

@@ -1,14 +1,18 @@
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders},
+    style::{Modifier, Style},
+    widgets::{Block, BorderType, Borders},
     Frame,
 };
 
 use crate::app::App;
+use crate::app_state::AppState;
 use crate::model::state::ViewMode;
 use crate::ui::card::{CardWidget, CARD_HEIGHT};
+use crate::ui::theme::THEME;
+
+pub const COLUMN_WIDTH: u16 = 36;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let board = match &app.state.board {
@@ -20,30 +24,59 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    let num_cols = board.columns.len() as u32;
-    let constraints: Vec<Constraint> = (0..num_cols)
-        .map(|_| Constraint::Ratio(1, num_cols))
+    // 全体に padding を持たせる
+    let area = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+
+    let num_cols = board.columns.len();
+    let visible_cols = (area.width / COLUMN_WIDTH).max(1) as usize;
+
+    // 横スクロール: 選択カラムが常に表示されるように調整
+    let scroll_x = AppState::compute_board_scroll_x(
+        app.state.selected_column,
+        app.state.board_scroll_x.get(),
+        visible_cols,
+        num_cols,
+    );
+    app.state.board_scroll_x.set(scroll_x);
+
+    let end = (scroll_x + visible_cols).min(num_cols);
+    let render_count = end - scroll_x;
+
+    let constraints: Vec<Constraint> = (0..render_count)
+        .map(|_| Constraint::Length(COLUMN_WIDTH))
         .collect();
 
     let col_areas = Layout::horizontal(constraints).split(area);
 
-    for (col_idx, (column, &col_area)) in
-        board.columns.iter().zip(col_areas.iter()).enumerate()
-    {
+    for (vis_idx, col_idx) in (scroll_x..end).enumerate() {
+        let column = &board.columns[col_idx];
+        let col_area = col_areas[vis_idx];
         let is_selected_col = col_idx == app.state.selected_column;
 
+        let column_fg = column.color.as_ref().map(|c| THEME.column_color(c));
+
         let title_style = if is_selected_col {
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
+            let style = Style::default().add_modifier(Modifier::BOLD);
+            match column_fg {
+                Some(c) => style.fg(c),
+                None => style.fg(THEME.accent),
+            }
         } else {
-            Style::default().fg(Color::White)
+            match column_fg {
+                Some(c) => Style::default().fg(c),
+                None => Style::default().fg(THEME.text),
+            }
         };
 
         let border_style = if is_selected_col {
-            Style::default().fg(Color::Cyan)
+            Style::default().fg(THEME.border_focused)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(THEME.border_unfocused)
         };
 
         // フィルタ適用: フィルタに一致するカードのインデックスを収集
@@ -60,6 +93,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             .title(title)
             .title_style(title_style)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(border_style);
 
         let inner = col_block.inner(col_area);
@@ -132,8 +166,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_shadow(buf: &mut Buffer, card_area: Rect) {
     // 既存セルの文字を残しつつ色を暗くして透過風の影にする
-    let shadow_fg = Color::Indexed(245);
-    let shadow_bg = Color::Indexed(238);
+    let shadow_fg = THEME.shadow_fg;
+    let shadow_bg = THEME.shadow_bg;
 
     let dim = |buf: &mut Buffer, x: u16, y: u16| {
         if let Some(cell) = buf.cell_mut((x, y)) {

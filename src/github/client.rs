@@ -4,7 +4,8 @@ use tokio::process::Command;
 
 use super::queries::*;
 use crate::model::project::{
-    Board, Card, CardType, Column, Comment, IssueState, Label, PrState, ProjectSummary, Repository,
+    Board, Card, CardType, Column, ColumnColor, Comment, IssueState, Label, PrState,
+    ProjectSummary, Repository,
 };
 
 // Type aliases for readability
@@ -616,6 +617,7 @@ fn build_board(
         .map(|opt| Column {
             option_id: opt.id.clone(),
             name: opt.name.clone(),
+            color: convert_column_color(&opt.color),
             cards: Vec::new(),
         })
         .collect();
@@ -655,6 +657,7 @@ fn build_board(
             Column {
                 option_id: String::new(),
                 name: "No Status".to_string(),
+                color: None,
                 cards: no_status_cards,
             },
         );
@@ -665,6 +668,23 @@ fn build_board(
         status_field_id,
         columns,
         repositories,
+    })
+}
+
+fn convert_column_color(
+    color: &project_board::ProjectV2SingleSelectFieldOptionColor,
+) -> Option<ColumnColor> {
+    use project_board::ProjectV2SingleSelectFieldOptionColor::*;
+    Some(match color {
+        BLUE => ColumnColor::Blue,
+        GRAY => ColumnColor::Gray,
+        GREEN => ColumnColor::Green,
+        ORANGE => ColumnColor::Orange,
+        PINK => ColumnColor::Pink,
+        PURPLE => ColumnColor::Purple,
+        RED => ColumnColor::Red,
+        YELLOW => ColumnColor::Yellow,
+        Other(_) => return None,
     })
 }
 

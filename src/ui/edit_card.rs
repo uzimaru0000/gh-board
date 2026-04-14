@@ -1,12 +1,13 @@
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
     Frame,
 };
 
 use crate::model::state::{EditCardField, EditCardState};
+use crate::ui::theme::THEME;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &EditCardState) {
     let popup = centered_rect(60, 14, area);
@@ -16,23 +17,24 @@ pub fn render(frame: &mut Frame, area: Rect, state: &EditCardState) {
         .title(" Edit Card ")
         .title_style(
             Style::default()
-                .fg(Color::Yellow)
+                .fg(THEME.yellow)
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(THEME.yellow));
 
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
     let label_style = Style::default()
-        .fg(Color::Cyan)
+        .fg(THEME.accent)
         .add_modifier(Modifier::BOLD);
     let active_label = Style::default()
-        .fg(Color::Yellow)
+        .fg(THEME.yellow)
         .add_modifier(Modifier::BOLD);
-    let input_style = Style::default().fg(Color::White);
-    let hint_style = Style::default().fg(Color::DarkGray);
+    let input_style = Style::default().fg(THEME.text);
+    let hint_style = Style::default().fg(THEME.text_muted);
 
     // Layout: Title box (3 lines) + gap + Body (2 lines) + gap + hints
     let chunks = Layout::vertical([
@@ -46,9 +48,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &EditCardState) {
     // --- Title field (Box) ---
     let title_is_active = state.focused_field == EditCardField::Title;
     let title_border_style = if title_is_active {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(THEME.yellow)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(THEME.border_unfocused)
     };
     let title_label_style = if title_is_active {
         active_label
@@ -59,6 +61,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &EditCardState) {
     let title_block = Block::default()
         .title(Span::styled(" Title ", title_label_style))
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(title_border_style);
 
     let title_inner = title_block.inner(chunks[0]);
@@ -128,7 +131,7 @@ fn render_title_content(
             Span::styled(before.to_string(), input_style),
             Span::styled(
                 cursor_char.to_string(),
-                Style::default().fg(Color::Black).bg(Color::White),
+                Style::default().fg(THEME.text_inverted).bg(THEME.text),
             ),
             Span::styled(rest, input_style),
         ])
@@ -166,11 +169,11 @@ fn render_body_field(
         let text = format!("  {preview}{suffix}");
         if is_active {
             Line::from(vec![
-                Span::styled(text, Style::default().fg(Color::White)),
+                Span::styled(text, Style::default().fg(THEME.text)),
                 Span::styled("  (Enter to edit)", hint_style),
             ])
         } else {
-            Line::from(Span::styled(text, Style::default().fg(Color::White)))
+            Line::from(Span::styled(text, Style::default().fg(THEME.text)))
         }
     };
 

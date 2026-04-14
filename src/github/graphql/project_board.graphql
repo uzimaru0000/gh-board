@@ -18,6 +18,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
             options {
               id
               name
+              color
             }
           }
           ... on ProjectV2Field {

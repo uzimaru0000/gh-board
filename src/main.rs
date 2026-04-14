@@ -13,11 +13,13 @@ use clap::Parser;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
     DefaultTerminal, Frame,
 };
+
+use ui::theme::THEME;
 
 use app::App;
 use event::EventHandler;
@@ -49,7 +51,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli) -> Result<()> {
-    let (mut events, event_tx) = EventHandler::new(Duration::from_millis(250));
+    let (mut events, event_tx) = EventHandler::new(Duration::from_millis(80));
     let mut app = App::new(github, event_tx, cli.owner);
 
     let target_project = cli.project;
@@ -239,15 +241,19 @@ fn render(frame: &mut Frame, app: &App) {
 }
 
 fn render_loading(frame: &mut Frame, area: Rect, msg: &str) {
-    let popup = centered_rect(40, 5, area);
+    use rattles::presets::prelude as presets;
+
+    let popup = centered_rect(40, 3, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(THEME.yellow));
 
+    let spinner = presets::dots_circle().current_frame();
     let paragraph = Paragraph::new(Line::from(vec![
-        Span::styled("⏳ ", Style::default().fg(Color::Yellow)),
+        Span::styled(format!("{spinner} "), Style::default().fg(THEME.yellow)),
         Span::raw(msg),
     ]))
     .block(block)
@@ -264,16 +270,17 @@ fn render_error(frame: &mut Frame, area: Rect, msg: &str) {
         .title(" Error ")
         .title_style(
             Style::default()
-                .fg(Color::Red)
+                .fg(THEME.red)
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red));
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(THEME.red));
 
     let cmd_style = Style::default()
-        .fg(Color::White)
+        .fg(THEME.text)
         .add_modifier(Modifier::BOLD);
-    let text_style = Style::default().fg(Color::Red);
+    let text_style = Style::default().fg(THEME.red);
 
     let mut lines: Vec<Line> = vec![Line::from("")];
     for line in msg.lines() {
@@ -288,7 +295,7 @@ fn render_error(frame: &mut Frame, area: Rect, msg: &str) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "Press any key to dismiss, q to quit",
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(THEME.text_muted),
     )));
 
     let paragraph = Paragraph::new(lines)

@@ -1,12 +1,13 @@
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState},
     Frame,
 };
 
 use crate::app::App;
+use crate::ui::theme::THEME;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let popup_area = centered_rect(60, 60, area);
@@ -15,9 +16,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let block = Block::default()
         .title(" Select Project ")
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .title_style(Style::default().fg(THEME.accent).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(THEME.accent));
 
     if app.state.projects.is_empty() {
         let inner = block.inner(popup_area);
@@ -51,7 +53,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 ]),
                 Line::from(Span::styled(
                     format!("  {desc}"),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(THEME.text_muted),
                 )),
             ])
         })
@@ -61,7 +63,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .block(block)
         .highlight_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(THEME.accent)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▶ ");

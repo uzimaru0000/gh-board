@@ -795,6 +795,7 @@ dependencies = [
  "open",
  "pulldown-cmark",
  "ratatui",
+ "rattles",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -2052,6 +2053,12 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
 ]
+
+[[package]]
+name = "rattles"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b11b5a000704c5c10d20ca09d824c5d8077114879f1c2c5aaae2295a1abf389e"
 
 [[package]]
 name = "redox_syscall"

@@ -22,6 +22,7 @@ open = "5"
 tui-markdown = "0.3"
 pulldown-cmark = "0.13"
 unicode-width = "0.2"
+rattles = "0.3.0"
 
 [build-dependencies]
 toml = "0.8"

@@ -1,12 +1,13 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     Frame,
 };
 
 use crate::app::App;
 use crate::model::state::ViewMode;
+use crate::ui::theme::THEME;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if area.height < 2 {
@@ -29,8 +30,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let left = Span::styled(
         format!(" {project_name} "),
         Style::default()
-            .fg(Color::Black)
-            .bg(Color::Cyan)
+            .fg(THEME.text_inverted)
+            .bg(THEME.accent)
             .add_modifier(Modifier::BOLD),
     );
 
@@ -44,7 +45,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         };
         spans.push(Span::styled(
             filter_text,
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default().fg(THEME.yellow).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" "));
     }
@@ -53,18 +54,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(
             " GRAB ",
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
+                .fg(THEME.text_inverted)
+                .bg(THEME.yellow)
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
             " hjkl:move  Space/Esc:release ",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(THEME.text_muted),
         ));
     } else {
         spans.push(Span::styled(
             "Enter:detail  Space:grab  H/L:move  n:new  d:delete  /:filter  ?:help  p:projects  r:refresh  q:quit ",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(THEME.text_muted),
         ));
     }
 
