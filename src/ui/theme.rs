@@ -1,5 +1,8 @@
+use std::sync::OnceLock;
+
 use ratatui::style::Color;
 
+use crate::config::ThemeConfig;
 use crate::model::project::ColumnColor;
 
 pub struct ColorTheme {
@@ -46,26 +49,52 @@ impl ColorTheme {
     }
 }
 
-pub static THEME: ColorTheme = ColorTheme {
-    text: Color::White,
-    text_dim: Color::Gray,
-    text_muted: Color::DarkGray,
-    text_inverted: Color::Black,
+static THEME: OnceLock<ColorTheme> = OnceLock::new();
 
-    border_focused: Color::Cyan,
-    border_unfocused: Color::DarkGray,
+pub fn init_theme(config: &ThemeConfig) {
+    let theme = ColorTheme {
+        text: config.text.0,
+        text_dim: config.text_dim.0,
+        text_muted: config.text_muted.0,
+        text_inverted: config.text_inverted.0,
+        border_focused: config.border_focused.0,
+        border_unfocused: config.border_unfocused.0,
+        accent: config.accent.0,
+        shadow_fg: config.shadow_fg.0,
+        shadow_bg: config.shadow_bg.0,
+        blue: config.blue.0,
+        gray: config.gray.0,
+        green: config.green.0,
+        orange: config.orange.0,
+        pink: config.pink.0,
+        purple: config.purple.0,
+        red: config.red.0,
+        yellow: config.yellow.0,
+    };
+    let _ = THEME.set(theme);
+}
 
-    accent: Color::Cyan,
-
-    shadow_fg: Color::Rgb(60, 60, 60),
-    shadow_bg: Color::Rgb(30, 30, 30),
-
-    blue: Color::Rgb(56, 132, 244),
-    gray: Color::Rgb(155, 163, 176),
-    green: Color::Rgb(75, 210, 143),
-    orange: Color::Rgb(255, 172, 51),
-    pink: Color::Rgb(245, 120, 180),
-    purple: Color::Rgb(163, 113, 247),
-    red: Color::Rgb(244, 81, 81),
-    yellow: Color::Rgb(255, 214, 51),
-};
+pub fn theme() -> &'static ColorTheme {
+    THEME.get_or_init(|| {
+        let default = ThemeConfig::default();
+        ColorTheme {
+            text: default.text.0,
+            text_dim: default.text_dim.0,
+            text_muted: default.text_muted.0,
+            text_inverted: default.text_inverted.0,
+            border_focused: default.border_focused.0,
+            border_unfocused: default.border_unfocused.0,
+            accent: default.accent.0,
+            shadow_fg: default.shadow_fg.0,
+            shadow_bg: default.shadow_bg.0,
+            blue: default.blue.0,
+            gray: default.gray.0,
+            green: default.green.0,
+            orange: default.orange.0,
+            pink: default.pink.0,
+            purple: default.purple.0,
+            red: default.red.0,
+            yellow: default.yellow.0,
+        }
+    })
+}

@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::model::project::Repository;
 use crate::model::state::RepoSelectState;
-use crate::ui::theme::THEME;
+use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, repos: &[Repository], state: &RepoSelectState) {
     let height = (repos.len() as u16 + 4).min(20);
@@ -19,21 +19,21 @@ pub fn render(frame: &mut Frame, area: Rect, repos: &[Repository], state: &RepoS
         .title(" Select Repository ")
         .title_style(
             Style::default()
-                .fg(THEME.accent)
+                .fg(theme().accent)
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(THEME.accent));
+        .border_style(Style::default().fg(theme().accent));
 
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let hint_style = Style::default().fg(THEME.text_muted);
+    let hint_style = Style::default().fg(theme().text_muted);
     let selected_style = Style::default()
-        .fg(THEME.yellow)
+        .fg(theme().yellow)
         .add_modifier(Modifier::BOLD);
-    let normal_style = Style::default().fg(THEME.text);
+    let normal_style = Style::default().fg(theme().text);
 
     let mut lines: Vec<Line> = Vec::new();
 

@@ -1,6 +1,7 @@
 mod app;
 mod app_state;
 mod command;
+mod config;
 mod event;
 mod github;
 mod model;
@@ -19,7 +20,7 @@ use ratatui::{
     DefaultTerminal, Frame,
 };
 
-use ui::theme::THEME;
+use ui::theme::theme;
 
 use app::App;
 use event::EventHandler;
@@ -39,6 +40,12 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cfg = config::load_config().unwrap_or_else(|e| {
+        eprintln!("Warning: failed to load config: {e}");
+        config::Config::default()
+    });
+    ui::theme::init_theme(&cfg.theme);
+
     let cli = Cli::parse();
     let github = GitHubClient::new().await?;
 
@@ -246,11 +253,11 @@ fn render_loading(frame: &mut Frame, area: Rect, msg: &str) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(THEME.yellow));
+        .border_style(Style::default().fg(theme().yellow));
 
     let spinner = presets::dots_circle().current_frame();
     let paragraph = Paragraph::new(Line::from(vec![
-        Span::styled(format!("{spinner} "), Style::default().fg(THEME.yellow)),
+        Span::styled(format!("{spinner} "), Style::default().fg(theme().yellow)),
         Span::raw(msg),
     ]))
     .block(block)
@@ -267,17 +274,17 @@ fn render_error(frame: &mut Frame, area: Rect, msg: &str) {
         .title(" Error ")
         .title_style(
             Style::default()
-                .fg(THEME.red)
+                .fg(theme().red)
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(THEME.red));
+        .border_style(Style::default().fg(theme().red));
 
     let cmd_style = Style::default()
-        .fg(THEME.text)
+        .fg(theme().text)
         .add_modifier(Modifier::BOLD);
-    let text_style = Style::default().fg(THEME.red);
+    let text_style = Style::default().fg(theme().red);
 
     let mut lines: Vec<Line> = vec![Line::from("")];
     for line in msg.lines() {
@@ -292,7 +299,7 @@ fn render_error(frame: &mut Frame, area: Rect, msg: &str) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "Press any key to dismiss, q to quit",
-        Style::default().fg(THEME.text_muted),
+        Style::default().fg(theme().text_muted),
     )));
 
     let paragraph = Paragraph::new(lines)

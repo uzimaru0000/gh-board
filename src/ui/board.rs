@@ -10,7 +10,7 @@ use crate::app::App;
 use crate::app_state::AppState;
 use crate::model::state::ViewMode;
 use crate::ui::card::{CardWidget, CARD_HEIGHT};
-use crate::ui::theme::THEME;
+use crate::ui::theme::theme;
 
 pub const COLUMN_WIDTH: u16 = 36;
 
@@ -58,25 +58,25 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let col_area = col_areas[vis_idx];
         let is_selected_col = col_idx == app.state.selected_column;
 
-        let column_fg = column.color.as_ref().map(|c| THEME.column_color(c));
+        let column_fg = column.color.as_ref().map(|c| theme().column_color(c));
 
         let title_style = if is_selected_col {
             let style = Style::default().add_modifier(Modifier::BOLD);
             match column_fg {
                 Some(c) => style.fg(c),
-                None => style.fg(THEME.accent),
+                None => style.fg(theme().accent),
             }
         } else {
             match column_fg {
                 Some(c) => Style::default().fg(c),
-                None => Style::default().fg(THEME.text),
+                None => Style::default().fg(theme().text),
             }
         };
 
         let border_style = if is_selected_col {
-            Style::default().fg(THEME.border_focused)
+            Style::default().fg(theme().border_focused)
         } else {
-            Style::default().fg(THEME.border_unfocused)
+            Style::default().fg(theme().border_unfocused)
         };
 
         // フィルタ適用: フィルタに一致するカードのインデックスを収集
@@ -166,8 +166,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_shadow(buf: &mut Buffer, card_area: Rect) {
     // 既存セルの文字を残しつつ色を暗くして透過風の影にする
-    let shadow_fg = THEME.shadow_fg;
-    let shadow_bg = THEME.shadow_bg;
+    let shadow_fg = theme().shadow_fg;
+    let shadow_bg = theme().shadow_bg;
 
     let dim = |buf: &mut Buffer, x: u16, y: u16| {
         if let Some(cell) = buf.cell_mut((x, y)) {

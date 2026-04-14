@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::model::project::{Card, CardType, IssueState, PrState};
-use crate::ui::theme::THEME;
+use crate::ui::theme::theme;
 
 pub const CARD_HEIGHT: u16 = 5;
 
@@ -21,17 +21,17 @@ impl Widget for CardWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let (border_style, border_type) = if self.grabbing {
             (
-                Style::default().fg(THEME.yellow),
+                Style::default().fg(theme().yellow),
                 BorderType::Thick,
             )
         } else if self.selected {
             (
-                Style::default().fg(THEME.border_focused),
+                Style::default().fg(theme().border_focused),
                 BorderType::Rounded,
             )
         } else {
             (
-                Style::default().fg(THEME.border_unfocused),
+                Style::default().fg(theme().border_unfocused),
                 BorderType::Rounded,
             )
         };
@@ -51,15 +51,15 @@ impl Widget for CardWidget<'_> {
 
         let type_indicator = match &self.card.card_type {
             CardType::Issue { state } => match state {
-                IssueState::Open => Span::styled("● ", Style::default().fg(THEME.green)),
-                IssueState::Closed => Span::styled("● ", Style::default().fg(THEME.purple)),
+                IssueState::Open => Span::styled("● ", Style::default().fg(theme().green)),
+                IssueState::Closed => Span::styled("● ", Style::default().fg(theme().purple)),
             },
             CardType::PullRequest { state } => match state {
-                PrState::Open => Span::styled("⑂ ", Style::default().fg(THEME.green)),
-                PrState::Closed => Span::styled("⑂ ", Style::default().fg(THEME.red)),
-                PrState::Merged => Span::styled("⑂ ", Style::default().fg(THEME.purple)),
+                PrState::Open => Span::styled("⑂ ", Style::default().fg(theme().green)),
+                PrState::Closed => Span::styled("⑂ ", Style::default().fg(theme().red)),
+                PrState::Merged => Span::styled("⑂ ", Style::default().fg(theme().purple)),
             },
-            CardType::DraftIssue => Span::styled("○ ", Style::default().fg(THEME.text_dim)),
+            CardType::DraftIssue => Span::styled("○ ", Style::default().fg(theme().text_dim)),
         };
 
         let number_str = self
@@ -79,7 +79,7 @@ impl Widget for CardWidget<'_> {
         if let Some(milestone) = &self.card.milestone {
             title_spans.push(Span::styled(
                 format!(" [{milestone}]"),
-                Style::default().fg(THEME.text_muted),
+                Style::default().fg(theme().text_muted),
             ));
         }
         let title_line = Line::from(title_spans);
@@ -94,7 +94,7 @@ impl Widget for CardWidget<'_> {
                 .map(|a| format!("@{a}"))
                 .collect::<Vec<_>>()
                 .join(" ");
-            Line::from(Span::styled(text, Style::default().fg(THEME.yellow)))
+            Line::from(Span::styled(text, Style::default().fg(theme().yellow)))
         };
 
         let label_line = if self.card.labels.is_empty() {
@@ -106,10 +106,10 @@ impl Widget for CardWidget<'_> {
                 .iter()
                 .enumerate()
                 .flat_map(|(i, label)| {
-                    let color = parse_hex_color(&label.color).unwrap_or(THEME.text_dim);
+                    let color = parse_hex_color(&label.color).unwrap_or(theme().text_dim);
                     let mut spans = vec![Span::styled(
                         &label.name,
-                        Style::default().fg(THEME.text_inverted).bg(color),
+                        Style::default().fg(theme().text_inverted).bg(color),
                     )];
                     if i < self.card.labels.len() - 1 {
                         spans.push(Span::raw(" "));

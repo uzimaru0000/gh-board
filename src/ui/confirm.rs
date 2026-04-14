@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::model::state::ConfirmState;
-use crate::ui::theme::THEME;
+use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &ConfirmState) {
     let popup = centered_rect(50, 7, area);
@@ -17,22 +17,22 @@ pub fn render(frame: &mut Frame, area: Rect, state: &ConfirmState) {
         .title(" Confirm ")
         .title_style(
             Style::default()
-                .fg(THEME.red)
+                .fg(theme().red)
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(THEME.red));
+        .border_style(Style::default().fg(theme().red));
 
     let key_style = Style::default()
-        .fg(THEME.yellow)
+        .fg(theme().yellow)
         .add_modifier(Modifier::BOLD);
 
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
             format!("  Delete \"{}\"?", state.title),
-            Style::default().fg(THEME.text),
+            Style::default().fg(theme().text),
         )),
         Line::from(""),
         Line::from(vec![

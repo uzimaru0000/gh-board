@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::ui::theme::THEME;
+use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if area.height < 1 {
@@ -23,7 +23,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let prompt = Span::styled(
         "/",
         Style::default()
-            .fg(THEME.accent)
+            .fg(theme().accent)
             .add_modifier(Modifier::BOLD),
     );
 
@@ -39,18 +39,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         &after[cursor_char.len_utf8()..]
     };
 
-    let before_span = Span::styled(before, Style::default().fg(THEME.text));
+    let before_span = Span::styled(before, Style::default().fg(theme().text));
     let cursor_span = Span::styled(
         cursor_char.to_string(),
         Style::default()
-            .fg(THEME.text_inverted)
-            .bg(THEME.text),
+            .fg(theme().text_inverted)
+            .bg(theme().text),
     );
-    let after_span = Span::styled(rest, Style::default().fg(THEME.text));
+    let after_span = Span::styled(rest, Style::default().fg(theme().text));
 
     let hint = Span::styled(
         " (Enter:apply  Esc:cancel  label:  assignee:  milestone:  |:OR)",
-        Style::default().fg(THEME.text_muted),
+        Style::default().fg(theme().text_muted),
     );
 
     let line = Line::from(vec![prompt, before_span, cursor_span, after_span, hint]);

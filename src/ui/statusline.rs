@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::model::state::ViewMode;
-use crate::ui::theme::THEME;
+use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if area.height < 2 {
@@ -30,8 +30,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let left = Span::styled(
         format!(" {project_name} "),
         Style::default()
-            .fg(THEME.text_inverted)
-            .bg(THEME.accent)
+            .fg(theme().text_inverted)
+            .bg(theme().accent)
             .add_modifier(Modifier::BOLD),
     );
 
@@ -41,7 +41,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let filter_text = format!("[filter: {}]", app.state.filter.input);
         spans.push(Span::styled(
             filter_text,
-            Style::default().fg(THEME.yellow).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme().yellow).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" "));
     }
@@ -50,18 +50,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(
             " GRAB ",
             Style::default()
-                .fg(THEME.text_inverted)
-                .bg(THEME.yellow)
+                .fg(theme().text_inverted)
+                .bg(theme().yellow)
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
             " hjkl:move  Space/Esc:release ",
-            Style::default().fg(THEME.text_muted),
+            Style::default().fg(theme().text_muted),
         ));
     } else {
         spans.push(Span::styled(
             "Enter:detail  Space:grab  H/L:move  n:new  d:delete  /:filter  ?:help  p:projects  r:refresh  q:quit ",
-            Style::default().fg(THEME.text_muted),
+            Style::default().fg(theme().text_muted),
         ));
     }
 

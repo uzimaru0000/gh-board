@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::ui::theme::THEME;
+use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect) {
     let popup = centered_rect(50, 70, area);
@@ -14,17 +14,17 @@ pub fn render(frame: &mut Frame, area: Rect) {
 
     let block = Block::default()
         .title(" Help ")
-        .title_style(Style::default().fg(THEME.accent).add_modifier(Modifier::BOLD))
+        .title_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(THEME.accent));
+        .border_style(Style::default().fg(theme().accent));
 
     let key_style = Style::default()
-        .fg(THEME.yellow)
+        .fg(theme().yellow)
         .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(THEME.text);
+    let desc_style = Style::default().fg(theme().text);
     let section_style = Style::default()
-        .fg(THEME.accent)
+        .fg(theme().accent)
         .add_modifier(Modifier::BOLD);
 
     let lines = vec![

@@ -16,7 +16,7 @@ use crate::model::state::{
     SIDEBAR_STATUS,
 };
 use crate::ui::card::parse_hex_color;
-use crate::ui::theme::THEME;
+use crate::ui::theme::theme;
 
 /// A line tagged as either table content (horizontally scrollable) or normal text (wrappable).
 struct TaggedLine {
@@ -47,15 +47,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let (type_icon, type_color) = match &card.card_type {
         CardType::Issue { state } => match state {
-            IssueState::Open => ("● ", THEME.green),
-            IssueState::Closed => ("● ", THEME.purple),
+            IssueState::Open => ("● ", theme().green),
+            IssueState::Closed => ("● ", theme().purple),
         },
         CardType::PullRequest { state } => match state {
-            PrState::Open => ("⑂ ", THEME.green),
-            PrState::Closed => ("⑂ ", THEME.red),
-            PrState::Merged => ("⑂ ", THEME.purple),
+            PrState::Open => ("⑂ ", theme().green),
+            PrState::Closed => ("⑂ ", theme().red),
+            PrState::Merged => ("⑂ ", theme().purple),
         },
-        CardType::DraftIssue => ("○ ", THEME.text_dim),
+        CardType::DraftIssue => ("○ ", theme().text_dim),
     };
 
     let number_str = card
@@ -67,9 +67,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let sidebar_focused = app.state.detail_pane == DetailPane::Sidebar;
     let border_color = if sidebar_focused {
-        THEME.border_unfocused
+        theme().border_unfocused
     } else {
-        THEME.border_focused
+        theme().border_focused
     };
 
     let block = Block::default()
@@ -114,9 +114,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // ── Footer ──
     let hint_style = Style::default()
-        .fg(THEME.text)
+        .fg(theme().text)
         .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(THEME.text_muted);
+    let desc_style = Style::default().fg(theme().text_muted);
     let footer = if app.state.sidebar_edit.is_some() {
         Line::from(vec![
             Span::styled("j/k", hint_style),
@@ -172,11 +172,11 @@ fn render_content_pane(
     card: &crate::model::project::Card,
 ) {
     let focused = app.state.detail_pane == DetailPane::Content;
-    let border_color = if focused { THEME.border_focused } else { THEME.border_unfocused };
+    let border_color = if focused { theme().border_focused } else { theme().border_unfocused };
 
     let block = Block::default()
         .borders(Borders::RIGHT)
-        .border_style(Style::default().fg(THEME.border_unfocused))
+        .border_style(Style::default().fg(theme().border_unfocused))
         .padding(Padding::horizontal(1));
 
     let content_inner = block.inner(area);
@@ -203,7 +203,7 @@ fn render_content_pane(
             &mut tagged,
             Line::from(Span::styled(
                 "(No description)",
-                Style::default().fg(THEME.text_muted),
+                Style::default().fg(theme().text_muted),
             )),
         );
     } else {
@@ -214,7 +214,7 @@ fn render_content_pane(
     if !card.comments.is_empty() {
         let separator = Line::from(Span::styled(
             "─".repeat(content_width),
-            Style::default().fg(THEME.text_muted),
+            Style::default().fg(theme().text_muted),
         ));
         push_text(&mut tagged, Line::from(""));
         push_text(&mut tagged, separator);
@@ -226,7 +226,7 @@ fn render_content_pane(
             Line::from(Span::styled(
                 comment_header,
                 Style::default()
-                    .fg(THEME.accent)
+                    .fg(theme().accent)
                     .add_modifier(Modifier::BOLD),
             )),
         );
@@ -240,12 +240,12 @@ fn render_content_pane(
                     Span::styled(
                         format!("@{}", comment.author),
                         Style::default()
-                            .fg(THEME.yellow)
+                            .fg(theme().yellow)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         format!("  {date_display}"),
-                        Style::default().fg(THEME.text_muted),
+                        Style::default().fg(theme().text_muted),
                     ),
                 ]),
             );
@@ -258,7 +258,7 @@ fn render_content_pane(
                     &mut tagged,
                     Line::from(Span::styled(
                         "· · ·",
-                        Style::default().fg(THEME.text_muted),
+                        Style::default().fg(theme().text_muted),
                     )),
                 );
                 push_text(&mut tagged, Line::from(""));
@@ -336,9 +336,9 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     let selected = app.state.sidebar_selected;
 
     let header_style = Style::default()
-        .fg(THEME.text)
+        .fg(theme().text)
         .add_modifier(Modifier::BOLD);
-    let dim_style = Style::default().fg(THEME.text_muted);
+    let dim_style = Style::default().fg(theme().text_muted);
     let selected_marker = if focused { "▶ " } else { "  " };
 
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -346,7 +346,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     // ── Status section ──
     let status_header_style = if focused && selected == SIDEBAR_STATUS {
         Style::default()
-            .fg(THEME.accent)
+            .fg(theme().accent)
             .add_modifier(Modifier::BOLD)
     } else {
         header_style
@@ -371,12 +371,12 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
                 let marker = if is_cursor { "▶ " } else { "  " };
                 let style = if is_cursor {
                     Style::default()
-                        .fg(THEME.accent)
+                        .fg(theme().accent)
                         .add_modifier(Modifier::BOLD)
                 } else if is_current {
-                    Style::default().fg(THEME.green)
+                    Style::default().fg(theme().green)
                 } else {
-                    Style::default().fg(THEME.text)
+                    Style::default().fg(theme().text)
                 };
                 lines.push(Line::from(Span::styled(
                     format!("{marker}{}", col.name),
@@ -392,21 +392,21 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
         };
         let (state_label, state_color) = match &card.card_type {
             CardType::Issue { state } => match state {
-                IssueState::Open => ("Open", THEME.green),
-                IssueState::Closed => ("Closed", THEME.purple),
+                IssueState::Open => ("Open", theme().green),
+                IssueState::Closed => ("Closed", theme().purple),
             },
             CardType::PullRequest { state } => match state {
-                PrState::Open => ("Open", THEME.green),
-                PrState::Closed => ("Closed", THEME.red),
-                PrState::Merged => ("Merged", THEME.purple),
+                PrState::Open => ("Open", theme().green),
+                PrState::Closed => ("Closed", theme().red),
+                PrState::Merged => ("Merged", theme().purple),
             },
-            CardType::DraftIssue => ("Draft", THEME.text_dim),
+            CardType::DraftIssue => ("Draft", theme().text_dim),
         };
         lines.push(Line::from(vec![
             Span::styled(marker.to_string(), dim_style),
             Span::styled(
                 current_col_name.to_string(),
-                Style::default().fg(THEME.text),
+                Style::default().fg(theme().text),
             ),
             Span::styled(
                 format!(" ({state_label})"),
@@ -419,7 +419,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     // ── Assignees section ──
     let assignee_header_style = if focused && selected == SIDEBAR_ASSIGNEES {
         Style::default()
-            .fg(THEME.accent)
+            .fg(theme().accent)
             .add_modifier(Modifier::BOLD)
     } else {
         header_style
@@ -431,7 +431,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
         for assignee in &card.assignees {
             lines.push(Line::from(Span::styled(
                 format!("  @{assignee}"),
-                Style::default().fg(THEME.yellow),
+                Style::default().fg(theme().yellow),
             )));
         }
     }
@@ -440,7 +440,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     // ── Labels section ──
     let label_header_style = if focused && selected == SIDEBAR_LABELS {
         Style::default()
-            .fg(THEME.accent)
+            .fg(theme().accent)
             .add_modifier(Modifier::BOLD)
     } else {
         header_style
@@ -450,12 +450,12 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(Span::styled("  --", dim_style)));
     } else {
         for label in &card.labels {
-            let color = parse_hex_color(&label.color).unwrap_or(THEME.text_dim);
+            let color = parse_hex_color(&label.color).unwrap_or(theme().text_dim);
             lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
                     label.name.clone(),
-                    Style::default().fg(THEME.text_inverted).bg(color),
+                    Style::default().fg(theme().text_inverted).bg(color),
                 ),
             ]));
         }
@@ -465,7 +465,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     // ── Milestone section ──
     let milestone_header_style = if focused && selected == SIDEBAR_MILESTONE {
         Style::default()
-            .fg(THEME.accent)
+            .fg(theme().accent)
             .add_modifier(Modifier::BOLD)
     } else {
         header_style
@@ -478,7 +478,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     lines.push(Line::from(Span::styled(
         format!("  {milestone_text}"),
         if card.milestone.is_some() {
-            Style::default().fg(THEME.text)
+            Style::default().fg(theme().text)
         } else {
             dim_style
         },
@@ -492,12 +492,12 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     // ── Delete button ──
     let is_delete_focused = focused && selected == SIDEBAR_DELETE;
     let btn_bg = if is_delete_focused {
-        THEME.red
+        theme().red
     } else {
-        THEME.border_unfocused
+        theme().border_unfocused
     };
     let edge_style = Style::default().fg(btn_bg);
-    let fill_style = Style::default().fg(THEME.text).bg(btn_bg);
+    let fill_style = Style::default().fg(theme().text).bg(btn_bg);
     let label = "Delete";
     let pad_total = btn_width.saturating_sub(label.len());
     let pad_left = pad_total / 2;
@@ -533,9 +533,9 @@ fn render_sidebar_edit(
     };
 
     let header_style = Style::default()
-        .fg(THEME.accent)
+        .fg(theme().accent)
         .add_modifier(Modifier::BOLD);
-    let dim_style = Style::default().fg(THEME.text_muted);
+    let dim_style = Style::default().fg(theme().text_muted);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(Span::styled(
@@ -554,7 +554,7 @@ fn render_sidebar_edit(
             format!("{marker} {check} "),
             if is_cursor {
                 Style::default()
-                    .fg(THEME.accent)
+                    .fg(theme().accent)
                     .add_modifier(Modifier::BOLD)
             } else {
                 dim_style
@@ -562,18 +562,18 @@ fn render_sidebar_edit(
         ));
 
         if let Some(color_hex) = &item.color {
-            let color = parse_hex_color(color_hex).unwrap_or(THEME.text_dim);
+            let color = parse_hex_color(color_hex).unwrap_or(theme().text_dim);
             spans.push(Span::styled(
                 item.name.clone(),
-                Style::default().fg(THEME.text_inverted).bg(color),
+                Style::default().fg(theme().text_inverted).bg(color),
             ));
         } else {
             spans.push(Span::styled(
                 format!("@{}", item.name),
                 if is_cursor {
-                    Style::default().fg(THEME.text)
+                    Style::default().fg(theme().text)
                 } else {
-                    Style::default().fg(THEME.yellow)
+                    Style::default().fg(theme().yellow)
                 },
             ));
         }
@@ -795,11 +795,11 @@ fn render_table_lines(rows: &[Vec<String>], header_count: usize) -> Vec<Line<'st
         return lines;
     }
 
-    let border_style = Style::default().fg(THEME.text_muted);
+    let border_style = Style::default().fg(theme().text_muted);
     let header_style = Style::default()
-        .fg(THEME.text)
+        .fg(theme().text)
         .add_modifier(Modifier::BOLD);
-    let cell_style = Style::default().fg(THEME.text);
+    let cell_style = Style::default().fg(theme().text);
 
     let mut widths = vec![0usize; num_cols];
     for row in rows {
