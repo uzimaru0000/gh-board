@@ -12,7 +12,8 @@ use ratatui::{
 use crate::app::App;
 use crate::model::project::{CardType, IssueState, PrState};
 use crate::model::state::{
-    DetailPane, SIDEBAR_ASSIGNEES, SIDEBAR_DELETE, SIDEBAR_LABELS, SIDEBAR_STATUS,
+    DetailPane, SIDEBAR_ASSIGNEES, SIDEBAR_DELETE, SIDEBAR_LABELS, SIDEBAR_MILESTONE,
+    SIDEBAR_STATUS,
 };
 use crate::ui::card::parse_hex_color;
 use crate::ui::theme::THEME;
@@ -459,6 +460,29 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
             ]));
         }
     }
+    lines.push(Line::from(""));
+
+    // ── Milestone section ──
+    let milestone_header_style = if focused && selected == SIDEBAR_MILESTONE {
+        Style::default()
+            .fg(THEME.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        header_style
+    };
+    lines.push(Line::from(Span::styled("Milestone", milestone_header_style)));
+    let milestone_text = card
+        .milestone
+        .as_deref()
+        .unwrap_or("--");
+    lines.push(Line::from(Span::styled(
+        format!("  {milestone_text}"),
+        if card.milestone.is_some() {
+            Style::default().fg(THEME.text)
+        } else {
+            dim_style
+        },
+    )));
     lines.push(Line::from(""));
 
     let block = Block::default().padding(Padding::horizontal(1));

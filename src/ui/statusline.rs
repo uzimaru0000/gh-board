@@ -37,12 +37,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut spans = vec![left, Span::raw(" ")];
 
-    if let Some(filter) = &app.state.filter.active_filter {
-        let filter_text = match filter {
-            crate::model::state::ActiveFilter::Text(q) => format!("[filter: {q}]"),
-            crate::model::state::ActiveFilter::Label(q) => format!("[label: {q}]"),
-            crate::model::state::ActiveFilter::Assignee(q) => format!("[assignee: {q}]"),
-        };
+    if app.state.filter.active_filter.is_some() {
+        let filter_text = format!("[filter: {}]", app.state.filter.input);
         spans.push(Span::styled(
             filter_text,
             Style::default().fg(THEME.yellow).add_modifier(Modifier::BOLD),

@@ -2056,6 +2056,7 @@ mod tests {
             url: Some(format!("https://example.com/{item_id}")),
             body: None,
             comments: vec![],
+            milestone: None,
         }
     }
 
@@ -2078,6 +2079,7 @@ mod tests {
             url: None,
             body: None,
             comments: vec![],
+            milestone: None,
         }
     }
 
@@ -2093,6 +2095,23 @@ mod tests {
             url: None,
             body: None,
             comments: vec![],
+            milestone: None,
+        }
+    }
+
+    fn make_card_with_milestone(item_id: &str, title: &str, milestone: &str) -> Card {
+        Card {
+            item_id: item_id.into(),
+            content_id: None,
+            title: title.into(),
+            number: None,
+            card_type: CardType::DraftIssue,
+            assignees: vec![],
+            labels: vec![],
+            url: None,
+            body: None,
+            comments: vec![],
+            milestone: Some(milestone.into()),
         }
     }
 
@@ -2297,7 +2316,7 @@ mod tests {
             ],
         )]);
         let mut state = make_state_with_board(board);
-        state.filter.active_filter = Some(ActiveFilter::Text("fix".into()));
+        state.filter.active_filter = Some(ActiveFilter::parse("fix"));
         assert_eq!(state.filtered_card_indices(0), vec![0, 2]);
     }
 
@@ -2313,7 +2332,7 @@ mod tests {
             ],
         )]);
         let mut state = make_state_with_board(board);
-        state.filter.active_filter = Some(ActiveFilter::Label("bug".into()));
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug"));
         assert_eq!(state.filtered_card_indices(0), vec![0, 2]);
     }
 
@@ -2329,7 +2348,7 @@ mod tests {
             ],
         )]);
         let mut state = make_state_with_board(board);
-        state.filter.active_filter = Some(ActiveFilter::Assignee("alice".into()));
+        state.filter.active_filter = Some(ActiveFilter::parse("assignee:alice"));
         assert_eq!(state.filtered_card_indices(0), vec![0, 2]);
     }
 
@@ -2345,7 +2364,7 @@ mod tests {
             ],
         )]);
         let mut state = make_state_with_board(board);
-        state.filter.active_filter = Some(ActiveFilter::Text("fix".into()));
+        state.filter.active_filter = Some(ActiveFilter::parse("fix"));
         // filtered indices = [0, 2]
         state.selected_card = 1; // 2番目のフィルタ結果 = index 2
         assert_eq!(state.real_card_index(), Some(2));
@@ -2363,7 +2382,7 @@ mod tests {
             ],
         )]);
         let mut state = make_state_with_board(board);
-        state.filter.active_filter = Some(ActiveFilter::Text("fix".into()));
+        state.filter.active_filter = Some(ActiveFilter::parse("fix"));
         // filtered = [0, 2], len = 2
 
         state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
@@ -2382,7 +2401,7 @@ mod tests {
             vec![make_card("1", "A"), make_card("2", "B")],
         )]);
         let mut state = make_state_with_board(board);
-        state.filter.active_filter = Some(ActiveFilter::Text("A".into()));
+        state.filter.active_filter = Some(ActiveFilter::parse("A"));
 
         state.handle_event(AppEvent::Key(key_with_mod(
             KeyCode::Char('u'),
@@ -2498,7 +2517,7 @@ mod tests {
             ("Done", "opt_2", vec![]),
         ]);
         let mut state = make_state_with_board(board);
-        state.filter.active_filter = Some(ActiveFilter::Text("fix".into()));
+        state.filter.active_filter = Some(ActiveFilter::parse("fix"));
         state.selected_card = 1; // フィルタ後の2番目 = real index 2 (Fix typo)
 
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('L'))));
@@ -3799,14 +3818,17 @@ mod tests {
         assert_eq!(state.sidebar_selected, 2); // Labels
 
         state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
-        assert_eq!(state.sidebar_selected, 3); // Delete
+        assert_eq!(state.sidebar_selected, 3); // Milestone
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 4); // Delete
 
         // 下限でクランプ
         state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
-        assert_eq!(state.sidebar_selected, 3);
+        assert_eq!(state.sidebar_selected, 4);
 
         state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
-        assert_eq!(state.sidebar_selected, 2);
+        assert_eq!(state.sidebar_selected, 3);
     }
 
     // ========== 詳細ビュー: ステータス変更 (ドロップダウン) ==========
@@ -3925,7 +3947,7 @@ mod tests {
         state.selected_card = 0;
         state.mode = ViewMode::Detail;
         state.detail_pane = DetailPane::Sidebar;
-        state.sidebar_selected = 3; // Delete
+        state.sidebar_selected = SIDEBAR_DELETE;
 
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
         assert_eq!(state.mode, ViewMode::Confirm);
@@ -4024,6 +4046,7 @@ mod tests {
             url: Some("https://github.com/owner/repo/issues/1".into()),
             body: None,
             comments: vec![],
+            milestone: None,
         }
     }
 
@@ -4182,6 +4205,7 @@ mod tests {
             url: None,
             body: Some(body.into()),
             comments: vec![],
+            milestone: None,
         }
     }
 
@@ -4460,6 +4484,7 @@ mod tests {
             url: Some("https://github.com/owner/repo/issues/1".into()),
             body: Some("body".into()),
             comments,
+            milestone: None,
         }
     }
 
@@ -4776,5 +4801,117 @@ mod tests {
     #[test]
     fn test_board_scroll_x_zero_total() {
         assert_eq!(AppState::compute_board_scroll_x(0, 0, 3, 0), 0);
+    }
+
+    // ========== 複合フィルタ (AND/OR) ==========
+
+    #[test]
+    fn test_filtered_indices_and() {
+        // label:bug AND assignee:alice → Card 1 のみマッチ
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![
+                {
+                    let mut c = make_card_with_labels("1", "Card 1", vec![("bug", "ff0000")]);
+                    c.assignees = vec!["alice".into()];
+                    c
+                },
+                make_card_with_labels("2", "Card 2", vec![("bug", "ff0000")]),
+                make_card_with_assignees("3", "Card 3", vec!["alice"]),
+            ],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug assignee:alice"));
+        assert_eq!(state.filtered_card_indices(0), vec![0]);
+    }
+
+    #[test]
+    fn test_filtered_indices_or() {
+        // label:bug OR label:enhancement → Card 1, 2 がマッチ
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![
+                make_card_with_labels("1", "Card 1", vec![("bug", "ff0000")]),
+                make_card_with_labels("2", "Card 2", vec![("enhancement", "00ff00")]),
+                make_card("3", "Card 3"),
+            ],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug | label:enhancement"));
+        assert_eq!(state.filtered_card_indices(0), vec![0, 1]);
+    }
+
+    #[test]
+    fn test_filtered_indices_complex_and_or() {
+        // (label:bug AND assignee:alice) OR label:enhancement
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![
+                {
+                    let mut c = make_card_with_labels("1", "Card 1", vec![("bug", "ff0000")]);
+                    c.assignees = vec!["alice".into()];
+                    c
+                },
+                make_card_with_labels("2", "Card 2", vec![("bug", "ff0000")]),
+                make_card_with_labels("3", "Card 3", vec![("enhancement", "00ff00")]),
+                make_card("4", "Card 4"),
+            ],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter =
+            Some(ActiveFilter::parse("label:bug assignee:alice | label:enhancement"));
+        assert_eq!(state.filtered_card_indices(0), vec![0, 2]);
+    }
+
+    #[test]
+    fn test_filtered_indices_milestone() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![
+                make_card_with_milestone("1", "Card 1", "v1.0"),
+                make_card_with_milestone("2", "Card 2", "v2.0"),
+                make_card("3", "Card 3"), // milestone なし
+            ],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("milestone:v1"));
+        assert_eq!(state.filtered_card_indices(0), vec![0]);
+    }
+
+    #[test]
+    fn test_filtered_indices_milestone_no_match() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![
+                make_card("1", "Card 1"),
+                make_card("2", "Card 2"),
+            ],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("milestone:v1"));
+        let empty: Vec<usize> = vec![];
+        assert_eq!(state.filtered_card_indices(0), empty);
+    }
+
+    #[test]
+    fn test_filtered_indices_text_and_milestone() {
+        // text "Fix" AND milestone:v1 → Card 1 のみ
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![
+                make_card_with_milestone("1", "Fix bug", "v1.0"),
+                make_card_with_milestone("2", "Add feature", "v1.0"),
+                make_card_with_milestone("3", "Fix typo", "v2.0"),
+            ],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("fix milestone:v1"));
+        assert_eq!(state.filtered_card_indices(0), vec![0]);
     }
 }

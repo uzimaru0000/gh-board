@@ -27,12 +27,13 @@ pub enum DetailPane {
 }
 
 /// サイドバーのセクション数
-pub const SIDEBAR_SECTION_COUNT: usize = 4;
+pub const SIDEBAR_SECTION_COUNT: usize = 5;
 /// サイドバーセクションのインデックス
 pub const SIDEBAR_STATUS: usize = 0;
 pub const SIDEBAR_ASSIGNEES: usize = 1;
 pub const SIDEBAR_LABELS: usize = 2;
-pub const SIDEBAR_DELETE: usize = 3;
+pub const SIDEBAR_MILESTONE: usize = 3;
+pub const SIDEBAR_DELETE: usize = 4;
 
 #[derive(Clone, Debug)]
 pub enum SidebarEditMode {
@@ -161,38 +162,189 @@ impl Default for FilterState {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum ActiveFilter {
+#[derive(Clone, Debug, PartialEq)]
+pub enum FilterCondition {
     Text(String),
     Label(String),
     Assignee(String),
+    Milestone(String),
 }
 
-impl ActiveFilter {
-    pub fn parse(input: &str) -> Self {
-        if let Some(rest) = input.strip_prefix("label:") {
-            ActiveFilter::Label(rest.to_string())
-        } else if let Some(rest) = input.strip_prefix("assignee:") {
-            ActiveFilter::Assignee(rest.to_string())
+impl FilterCondition {
+    pub fn parse_token(token: &str) -> Self {
+        if let Some(rest) = token.strip_prefix("label:") {
+            FilterCondition::Label(rest.to_string())
+        } else if let Some(rest) = token.strip_prefix("assignee:") {
+            FilterCondition::Assignee(rest.to_string())
+        } else if let Some(rest) = token.strip_prefix("milestone:") {
+            FilterCondition::Milestone(rest.to_string())
         } else {
-            ActiveFilter::Text(input.to_string())
+            FilterCondition::Text(token.to_string())
         }
     }
 
     pub fn matches(&self, card: &super::project::Card) -> bool {
         match self {
-            ActiveFilter::Text(query) => {
+            FilterCondition::Text(query) => {
                 let q = query.to_lowercase();
                 card.title.to_lowercase().contains(&q)
             }
-            ActiveFilter::Label(query) => {
+            FilterCondition::Label(query) => {
                 let q = query.to_lowercase();
-                card.labels.iter().any(|l| l.name.to_lowercase().contains(&q))
+                card.labels
+                    .iter()
+                    .any(|l| l.name.to_lowercase().contains(&q))
             }
-            ActiveFilter::Assignee(query) => {
+            FilterCondition::Assignee(query) => {
                 let q = query.strip_prefix('@').unwrap_or(query).to_lowercase();
-                card.assignees.iter().any(|a| a.to_lowercase().contains(&q))
+                card.assignees
+                    .iter()
+                    .any(|a| a.to_lowercase().contains(&q))
+            }
+            FilterCondition::Milestone(query) => {
+                let q = query.to_lowercase();
+                card.milestone
+                    .as_ref()
+                    .map_or(false, |m| m.to_lowercase().contains(&q))
             }
         }
+    }
+}
+
+/// 複合フィルタ: groups は OR 結合、各 group 内の条件は AND 結合
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActiveFilter {
+    pub groups: Vec<Vec<FilterCondition>>,
+}
+
+impl ActiveFilter {
+    pub fn parse(input: &str) -> Self {
+        let groups: Vec<Vec<FilterCondition>> = input
+            .split('|')
+            .map(|group| {
+                group
+                    .split_whitespace()
+                    .map(FilterCondition::parse_token)
+                    .collect()
+            })
+            .filter(|g: &Vec<FilterCondition>| !g.is_empty())
+            .collect();
+        ActiveFilter { groups }
+    }
+
+    pub fn matches(&self, card: &super::project::Card) -> bool {
+        if self.groups.is_empty() {
+            return true;
+        }
+        // OR of ANDs: いずれかのグループの全条件がマッチすればOK
+        self.groups
+            .iter()
+            .any(|group| group.iter().all(|cond| cond.matches(card)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_single_text() {
+        let f = ActiveFilter::parse("fix");
+        assert_eq!(
+            f,
+            ActiveFilter {
+                groups: vec![vec![FilterCondition::Text("fix".into())]]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_single_label() {
+        let f = ActiveFilter::parse("label:bug");
+        assert_eq!(
+            f,
+            ActiveFilter {
+                groups: vec![vec![FilterCondition::Label("bug".into())]]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_single_assignee() {
+        let f = ActiveFilter::parse("assignee:alice");
+        assert_eq!(
+            f,
+            ActiveFilter {
+                groups: vec![vec![FilterCondition::Assignee("alice".into())]]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_single_milestone() {
+        let f = ActiveFilter::parse("milestone:v1.0");
+        assert_eq!(
+            f,
+            ActiveFilter {
+                groups: vec![vec![FilterCondition::Milestone("v1.0".into())]]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_and_combination() {
+        let f = ActiveFilter::parse("label:bug assignee:alice");
+        assert_eq!(
+            f,
+            ActiveFilter {
+                groups: vec![vec![
+                    FilterCondition::Label("bug".into()),
+                    FilterCondition::Assignee("alice".into()),
+                ]]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_or_combination() {
+        let f = ActiveFilter::parse("label:bug | label:enhancement");
+        assert_eq!(
+            f,
+            ActiveFilter {
+                groups: vec![
+                    vec![FilterCondition::Label("bug".into())],
+                    vec![FilterCondition::Label("enhancement".into())],
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_complex() {
+        let f = ActiveFilter::parse("label:bug assignee:alice | label:enhancement");
+        assert_eq!(
+            f,
+            ActiveFilter {
+                groups: vec![
+                    vec![
+                        FilterCondition::Label("bug".into()),
+                        FilterCondition::Assignee("alice".into()),
+                    ],
+                    vec![FilterCondition::Label("enhancement".into())],
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_empty() {
+        let f = ActiveFilter::parse("");
+        assert_eq!(f, ActiveFilter { groups: vec![] });
+    }
+
+    #[test]
+    fn test_parse_only_pipe() {
+        let f = ActiveFilter::parse("|");
+        assert_eq!(f, ActiveFilter { groups: vec![] });
     }
 }

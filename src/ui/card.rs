@@ -68,14 +68,21 @@ impl Widget for CardWidget<'_> {
             .map(|n| format!("#{n} "))
             .unwrap_or_default();
 
-        let title_line = Line::from(vec![
+        let mut title_spans = vec![
             type_indicator,
             Span::styled(
                 number_str,
                 Style::default().add_modifier(Modifier::DIM),
             ),
             Span::raw(&self.card.title),
-        ]);
+        ];
+        if let Some(milestone) = &self.card.milestone {
+            title_spans.push(Span::styled(
+                format!(" [{milestone}]"),
+                Style::default().fg(THEME.text_muted),
+            ));
+        }
+        let title_line = Line::from(title_spans);
 
         let assignee_line = if self.card.assignees.is_empty() {
             Line::from("")

@@ -46,6 +46,7 @@ pub struct Card {
     pub url: Option<String>,
     pub body: Option<String>,
     pub comments: Vec<Comment>,
+    pub milestone: Option<String>,
 }
 
 #[derive(Clone, Debug)]

@@ -724,6 +724,7 @@ fn convert_item(item: &ItemNode) -> Card {
                 .unwrap_or_default(),
             url: Some(issue.url.clone()),
             body: Some(issue.body.clone()),
+            milestone: issue.milestone.as_ref().map(|m| m.title.clone()),
             comments: issue
                 .comments
                 .nodes
@@ -780,6 +781,7 @@ fn convert_item(item: &ItemNode) -> Card {
                 .unwrap_or_default(),
             url: Some(pr.url.clone()),
             body: Some(pr.body.clone()),
+            milestone: pr.milestone.as_ref().map(|m| m.title.clone()),
             comments: pr
                 .comments
                 .nodes
@@ -812,6 +814,7 @@ fn convert_item(item: &ItemNode) -> Card {
             url: None,
             body: Some(draft.body.clone()),
             comments: Vec::new(),
+            milestone: None,
         },
         None => Card {
             item_id: item.id.clone(),
@@ -824,6 +827,7 @@ fn convert_item(item: &ItemNode) -> Card {
             url: None,
             body: None,
             comments: Vec::new(),
+            milestone: None,
         },
     }
 }

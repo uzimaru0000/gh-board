@@ -90,7 +90,7 @@ pub fn render(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  /       ", key_style),
-            Span::styled("Filter cards", desc_style),
+            Span::styled("Filter (label: assignee: milestone: |:OR)", desc_style),
         ]),
         Line::from(vec![
             Span::styled("  C-u     ", key_style),
