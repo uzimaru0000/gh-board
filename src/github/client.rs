@@ -71,8 +71,8 @@ impl GitHubClient {
         let resp_body: graphql_client::Response<Q::ResponseData> =
             resp.json().await.context("Failed to parse response")?;
 
-        if let Some(errors) = resp_body.errors {
-            if !errors.is_empty() {
+        if let Some(errors) = resp_body.errors
+            && !errors.is_empty() {
                 let messages: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
                 let is_scope_error = messages
                     .iter()
@@ -86,7 +86,6 @@ impl GitHubClient {
                 }
                 bail!("GraphQL errors:\n{}", messages.join("\n"));
             }
-        }
 
         resp_body.data.context("No data in GraphQL response")
     }
@@ -694,13 +693,11 @@ fn build_board(
 
         let fv_nodes = item.field_values.nodes.unwrap_or_default();
         let status_option_id = fv_nodes.iter().flatten().find_map(|fv| {
-            if let FVNode::ProjectV2ItemFieldSingleSelectValue(sv) = fv {
-                if let SSValueField::ProjectV2SingleSelectField(f) = &sv.field {
-                    if f.id == status_field_id {
+            if let FVNode::ProjectV2ItemFieldSingleSelectValue(sv) = fv
+                && let SSValueField::ProjectV2SingleSelectField(f) = &sv.field
+                    && f.id == status_field_id {
                         return sv.option_id.clone();
                     }
-                }
-            }
             None
         });
 

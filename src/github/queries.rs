@@ -1,5 +1,6 @@
 use graphql_client::GraphQLQuery;
 
+#[allow(clippy::upper_case_acronyms)]
 type URI = String;
 type DateTime = String;
 

@@ -146,21 +146,13 @@ pub enum LoadingState {
 }
 
 #[derive(Clone, Debug)]
+#[derive(Default)]
 pub struct FilterState {
     pub input: String,
     pub cursor_pos: usize,
     pub active_filter: Option<ActiveFilter>,
 }
 
-impl Default for FilterState {
-    fn default() -> Self {
-        Self {
-            input: String::new(),
-            cursor_pos: 0,
-            active_filter: None,
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum FilterCondition {
@@ -205,7 +197,7 @@ impl FilterCondition {
                 let q = query.to_lowercase();
                 card.milestone
                     .as_ref()
-                    .map_or(false, |m| m.to_lowercase().contains(&q))
+                    .is_some_and(|m| m.to_lowercase().contains(&q))
             }
         }
     }

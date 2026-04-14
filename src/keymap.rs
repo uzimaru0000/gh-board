@@ -41,11 +41,10 @@ impl KeyBind {
         let mut modifiers = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::SHIFT | KeyModifiers::ALT);
         // Normalize: for uppercase ASCII chars, the SHIFT modifier is implicit in the char itself
         // crossterm sends KeyCode::Char('C') + SHIFT for uppercase C
-        if let KeyCode::Char(c) = key.code {
-            if c.is_ascii_uppercase() {
+        if let KeyCode::Char(c) = key.code
+            && c.is_ascii_uppercase() {
                 modifiers -= KeyModifiers::SHIFT;
             }
-        }
         Self {
             code: key.code,
             modifiers,
@@ -58,7 +57,7 @@ impl KeyBind {
 
         if parts.len() == 1 {
             // Simple key: "j", "Enter", "Esc", etc.
-            return parse_key_name(parts[0]).map(|code| KeyBind::key(code));
+            return parse_key_name(parts[0]).map(KeyBind::key);
         }
 
         // Modifier prefix(es) + key
@@ -434,7 +433,7 @@ impl Keymap {
                 let shadowed = self
                     .modes
                     .get(&mode)
-                    .map_or(false, |m| m.contains_key(bind));
+                    .is_some_and(|m| m.contains_key(bind));
                 if !shadowed {
                     result.push(bind);
                 }

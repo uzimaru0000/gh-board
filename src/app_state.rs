@@ -358,11 +358,10 @@ impl AppState {
             }
             AppEvent::CommentUpdated(Ok(comment)) => {
                 // コメント更新: 対象コメントの body を更新
-                if let Some(card) = self.selected_card_mut() {
-                    if let Some(c) = card.comments.iter_mut().find(|c| c.id == comment.id) {
+                if let Some(card) = self.selected_card_mut()
+                    && let Some(c) = card.comments.iter_mut().find(|c| c.id == comment.id) {
                         c.body = comment.body;
                     }
-                }
                 Command::None
             }
             AppEvent::CommentUpdated(Err(e)) => {
@@ -462,12 +461,11 @@ impl AppState {
         }
 
         // View switching (1-9, 0) は特殊処理のまま
-        if let KeyCode::Char(c @ '1'..='9') = key.code {
-            if key.modifiers == KeyModifiers::NONE {
+        if let KeyCode::Char(c @ '1'..='9') = key.code
+            && key.modifiers == KeyModifiers::NONE {
                 self.switch_to_view((c as usize) - ('1' as usize));
                 return Command::None;
             }
-        }
         if key.code == KeyCode::Char('0') && key.modifiers == KeyModifiers::NONE {
             self.clear_view();
             return Command::None;
@@ -942,9 +940,9 @@ impl AppState {
 
     fn delete_card(&mut self, item_id: &str) -> Command {
         // 楽観的UI更新: ローカルモデルからカードを削除
-        if let Some(board) = &mut self.board {
-            if let Some(col) = board.columns.get_mut(self.selected_column) {
-                if let Some(pos) = col.cards.iter().position(|c| c.item_id == item_id) {
+        if let Some(board) = &mut self.board
+            && let Some(col) = board.columns.get_mut(self.selected_column)
+                && let Some(pos) = col.cards.iter().position(|c| c.item_id == item_id) {
                     col.cards.remove(pos);
                     // フィルタ後の表示カード数で選択を調整
                     let filtered_len = col
@@ -963,8 +961,6 @@ impl AppState {
                         self.selected_card = self.selected_card.min(filtered_len - 1);
                     }
                 }
-            }
-        }
 
         let project_id = match &self.current_project {
             Some(p) => p.id.clone(),
@@ -1301,15 +1297,14 @@ impl AppState {
         }
 
         // 元の位置に戻す
-        if let Some(card) = found_card {
-            if grab.origin_column < board.columns.len() {
+        if let Some(card) = found_card
+            && grab.origin_column < board.columns.len() {
                 let insert_idx =
                     grab.origin_card_index.min(board.columns[grab.origin_column].cards.len());
                 board.columns[grab.origin_column]
                     .cards
                     .insert(insert_idx, card);
             }
-        }
 
         self.selected_column = grab.origin_column;
         self.selected_card = grab.origin_card_index;
@@ -1333,11 +1328,10 @@ impl AppState {
                 self.should_quit = true;
             }
             Action::MoveDown => {
-                if let Some(rs) = &mut self.repo_select_state {
-                    if rs.selected_index + 1 < repo_count {
+                if let Some(rs) = &mut self.repo_select_state
+                    && rs.selected_index + 1 < repo_count {
                         rs.selected_index += 1;
                     }
-                }
             }
             Action::MoveUp => {
                 if let Some(rs) = &mut self.repo_select_state {
@@ -1469,13 +1463,11 @@ impl AppState {
         self.mode = ViewMode::Detail;
 
         // コメントが20件（上限）の場合、追加コメントを取得
-        if let Some(card) = self.selected_card_ref() {
-            if card.comments.len() >= 20 {
-                if let Some(content_id) = card.content_id.clone() {
+        if let Some(card) = self.selected_card_ref()
+            && card.comments.len() >= 20
+                && let Some(content_id) = card.content_id.clone() {
                     return Command::FetchComments { content_id };
                 }
-            }
-        }
         Command::None
     }
 
@@ -1810,11 +1802,10 @@ impl AppState {
                 Command::None
             }
             Action::MoveDown => {
-                if let Some(ref mut cls) = self.comment_list_state {
-                    if comment_count > 0 {
+                if let Some(ref mut cls) = self.comment_list_state
+                    && comment_count > 0 {
                         cls.cursor = (cls.cursor + 1).min(comment_count - 1);
                     }
-                }
                 Command::None
             }
             Action::MoveUp => {
@@ -1915,17 +1906,15 @@ impl AppState {
 
         // 移動先カラムに追従
         self.selected_column = target_column;
-        if let Some(board) = &self.board {
-            if let Some(col) = board.columns.get(target_column) {
-                if let Some(real_idx) = col.cards.iter().position(|c| c.item_id == item_id) {
+        if let Some(board) = &self.board
+            && let Some(col) = board.columns.get(target_column)
+                && let Some(real_idx) = col.cards.iter().position(|c| c.item_id == item_id) {
                     let filtered = self.filtered_card_indices(target_column);
                     self.selected_card = filtered
                         .iter()
                         .position(|&i| i == real_idx)
                         .unwrap_or(0);
                 }
-            }
-        }
 
         cmd
     }
@@ -2030,10 +2019,10 @@ impl AppState {
                     let label_color = item.color.clone().unwrap_or_default();
 
                     // 楽観的 UI 更新: Card のラベルを更新
-                    if let Some(real_idx) = self.real_card_index() {
-                        if let Some(board) = &mut self.board {
-                            if let Some(col) = board.columns.get_mut(self.selected_column) {
-                                if let Some(card) = col.cards.get_mut(real_idx) {
+                    if let Some(real_idx) = self.real_card_index()
+                        && let Some(board) = &mut self.board
+                            && let Some(col) = board.columns.get_mut(self.selected_column)
+                                && let Some(card) = col.cards.get_mut(real_idx) {
                                     if add {
                                         card.labels.push(crate::model::project::Label {
                                             id: label_id.clone(),
@@ -2044,9 +2033,6 @@ impl AppState {
                                         card.labels.retain(|l| l.id != label_id);
                                     }
                                 }
-                            }
-                        }
-                    }
 
                     return Command::ToggleLabel {
                         content_id,
@@ -2065,10 +2051,10 @@ impl AppState {
                     let login = item.name.clone();
 
                     // 楽観的 UI 更新: Card のアサイニーを更新
-                    if let Some(real_idx) = self.real_card_index() {
-                        if let Some(board) = &mut self.board {
-                            if let Some(col) = board.columns.get_mut(self.selected_column) {
-                                if let Some(card) = col.cards.get_mut(real_idx) {
+                    if let Some(real_idx) = self.real_card_index()
+                        && let Some(board) = &mut self.board
+                            && let Some(col) = board.columns.get_mut(self.selected_column)
+                                && let Some(card) = col.cards.get_mut(real_idx) {
                                     if add {
                                         card.assignees.push(login);
                                     } else {
@@ -2077,9 +2063,6 @@ impl AppState {
                                         });
                                     }
                                 }
-                            }
-                        }
-                    }
 
                     return Command::ToggleAssignee {
                         content_id,
