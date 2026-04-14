@@ -94,7 +94,15 @@ pub fn render(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  C-u     ", key_style),
-            Span::styled("Clear filter", desc_style),
+            Span::styled("Clear filter / view", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  1-9     ", key_style),
+            Span::styled("Switch to view 1-9", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  0       ", key_style),
+            Span::styled("Show all (clear view)", desc_style),
         ]),
         Line::from(vec![
             Span::styled("  r       ", key_style),

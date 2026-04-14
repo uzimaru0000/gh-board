@@ -37,7 +37,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut spans = vec![left, Span::raw(" ")];
 
-    if app.state.filter.active_filter.is_some() {
+    if let Some(view_idx) = app.state.active_view {
+        if let Some(view) = app.state.views.get(view_idx) {
+            let view_text = format!("[view: {}]", view.name);
+            spans.push(Span::styled(
+                view_text,
+                Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::raw(" "));
+        }
+    } else if app.state.filter.active_filter.is_some() {
         let filter_text = format!("[filter: {}]", app.state.filter.input);
         spans.push(Span::styled(
             filter_text,

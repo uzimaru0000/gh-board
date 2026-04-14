@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::command::Command;
+use crate::config::ViewConfig;
 use crate::event::AppEvent;
 use crate::model::project::{Board, Card, CardType, ProjectSummary};
 use crate::model::state::{
@@ -61,6 +62,10 @@ pub struct AppState {
     // Loading
     pub loading: LoadingState,
 
+    // Views (saved filter presets)
+    pub views: Vec<ViewConfig>,
+    pub active_view: Option<usize>,
+
     // CLI options
     pub owner: Option<String>,
 
@@ -98,9 +103,48 @@ impl AppState {
             grab_state: None,
             comment_list_state: None,
             loading: LoadingState::Idle,
+            views: Vec::new(),
+            active_view: None,
             owner,
             viewer_login: String::new(),
         }
+    }
+
+    pub fn set_views(&mut self, views: Vec<ViewConfig>) {
+        self.views = views;
+    }
+
+    fn resolve_at_me(&self, input: &str) -> String {
+        if self.viewer_login.is_empty() {
+            return input.to_string();
+        }
+        input.replace("@me", &format!("@{}", self.viewer_login))
+    }
+
+    fn switch_to_view(&mut self, idx: usize) {
+        if idx >= self.views.len() {
+            return;
+        }
+        self.active_view = Some(idx);
+        let filter_str = self.resolve_at_me(&self.views[idx].filter.clone());
+        self.filter.input = filter_str.clone();
+        self.filter.cursor_pos = filter_str.len();
+        if filter_str.is_empty() {
+            self.filter.active_filter = None;
+        } else {
+            self.filter.active_filter = Some(ActiveFilter::parse(&filter_str));
+        }
+        self.selected_card = 0;
+        self.scroll_offset = 0;
+    }
+
+    fn clear_view(&mut self) {
+        self.active_view = None;
+        self.filter.active_filter = None;
+        self.filter.input.clear();
+        self.filter.cursor_pos = 0;
+        self.selected_card = 0;
+        self.scroll_offset = 0;
     }
 
     pub fn start_loading_projects(&mut self) -> Command {
@@ -486,6 +530,7 @@ impl AppState {
                 Command::None
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.active_view = None;
                 self.filter.active_filter = None;
                 self.clamp_card_selection();
                 Command::None
@@ -516,6 +561,14 @@ impl AppState {
             }
             KeyCode::Char('H') => self.move_card_left(),
             KeyCode::Char('L') => self.move_card_right(),
+            KeyCode::Char(c @ '1'..='9') => {
+                self.switch_to_view((c as usize) - ('1' as usize));
+                Command::None
+            }
+            KeyCode::Char('0') => {
+                self.clear_view();
+                Command::None
+            }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_quit = true;
                 Command::None
@@ -659,10 +712,12 @@ impl AppState {
                 self.mode = ViewMode::Board;
             }
             KeyCode::Enter => {
-                if self.filter.input.is_empty() {
+                self.active_view = None;
+                let resolved = self.resolve_at_me(&self.filter.input.clone());
+                if resolved.is_empty() {
                     self.filter.active_filter = None;
                 } else {
-                    self.filter.active_filter = Some(ActiveFilter::parse(&self.filter.input));
+                    self.filter.active_filter = Some(ActiveFilter::parse(&resolved));
                 }
                 self.selected_card = 0;
                 self.scroll_offset = 0;
@@ -4991,5 +5046,230 @@ mod tests {
 
         assert!(matches!(state.loading, LoadingState::Error(_)));
         assert_eq!(cmd, Command::None);
+    }
+
+    // ========== View (保存済みフィルタ/タブ) ==========
+
+    fn make_state_with_views(board: Board, views: Vec<(&str, &str)>) -> AppState {
+        let mut state = make_state_with_board(board);
+        state.views = views
+            .into_iter()
+            .map(|(name, filter)| crate::config::ViewConfig {
+                name: name.to_string(),
+                filter: filter.to_string(),
+            })
+            .collect();
+        state
+    }
+
+    #[test]
+    fn test_switch_to_view_by_number_key() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card_with_labels("1", "Bug A", vec![("bug", "red")]),
+                make_card("2", "Feature B"),
+            ]),
+        ]);
+        let mut state = make_state_with_views(board, vec![("Bugs", "label:bug")]);
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.active_view, Some(0));
+        assert!(state.filter.active_filter.is_some());
+        assert_eq!(state.filter.input, "label:bug");
+    }
+
+    #[test]
+    fn test_switch_to_view_0_clears() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card_with_labels("1", "Bug A", vec![("bug", "red")]),
+                make_card("2", "Feature B"),
+            ]),
+        ]);
+        let mut state = make_state_with_views(board, vec![("Bugs", "label:bug")]);
+
+        // Switch to view 1 first
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(state.active_view, Some(0));
+
+        // Press 0 to clear
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('0'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.active_view, None);
+        assert!(state.filter.active_filter.is_none());
+        assert!(state.filter.input.is_empty());
+    }
+
+    #[test]
+    fn test_switch_view_clamps_card_selection() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card_with_labels("1", "Bug A", vec![("bug", "red")]),
+                make_card("2", "Feature B"),
+                make_card("3", "Feature C"),
+            ]),
+        ]);
+        let mut state = make_state_with_views(board, vec![("Bugs", "label:bug")]);
+        state.selected_card = 2; // Select the last card
+
+        // Switch to "Bugs" view — only 1 card matches, so selection should clamp
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(state.selected_card, 0);
+    }
+
+    #[test]
+    fn test_manual_filter_deselects_view() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_views(board, vec![("Bugs", "label:bug")]);
+
+        // Switch to view 1
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(state.active_view, Some(0));
+
+        // Enter manual filter mode
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        assert_eq!(state.mode, ViewMode::Filter);
+
+        // Type filter text and apply
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('t'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('s'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('t'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(state.mode, ViewMode::Board);
+        assert_eq!(state.active_view, None);
+        assert!(state.filter.active_filter.is_some());
+    }
+
+    #[test]
+    fn test_ctrl_u_clears_view_and_filter() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_views(board, vec![("Bugs", "label:bug")]);
+
+        // Switch to view 1
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(state.active_view, Some(0));
+        assert!(state.filter.active_filter.is_some());
+
+        // Ctrl+U
+        state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('u'),
+            KeyModifiers::CONTROL,
+        )));
+        assert_eq!(state.active_view, None);
+        assert!(state.filter.active_filter.is_none());
+    }
+
+    #[test]
+    fn test_number_key_beyond_views_ignored() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_views(board, vec![("Bugs", "label:bug")]);
+
+        // Press 3 when only 1 view exists
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('3'))));
+        assert_eq!(state.active_view, None);
+        assert!(state.filter.active_filter.is_none());
+    }
+
+    #[test]
+    fn test_no_views_number_keys_ignored() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+
+        // Press 1 with no views
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(state.active_view, None);
+        assert!(state.filter.active_filter.is_none());
+    }
+
+    #[test]
+    fn test_switch_view_filter_applies() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card_with_labels("1", "Bug A", vec![("bug", "red")]),
+                make_card("2", "Feature B"),
+                make_card_with_labels("3", "Bug C", vec![("bug", "red")]),
+            ]),
+        ]);
+        let mut state = make_state_with_views(board, vec![("Bugs", "label:bug")]);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+
+        // Only bug cards should be visible
+        let filtered = state.filtered_card_indices(0);
+        assert_eq!(filtered, vec![0, 2]);
+    }
+
+    #[test]
+    fn test_switch_between_views() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card_with_labels("1", "Bug A", vec![("bug", "red")]),
+                make_card_with_assignees("2", "Task B", vec!["alice"]),
+                make_card_with_labels("3", "Bug C", vec![("bug", "red")]),
+            ]),
+        ]);
+        let mut state = make_state_with_views(board, vec![
+            ("Bugs", "label:bug"),
+            ("Alice", "assignee:alice"),
+        ]);
+
+        // Switch to view 1 (Bugs)
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(state.active_view, Some(0));
+        assert_eq!(state.filtered_card_indices(0), vec![0, 2]);
+
+        // Switch to view 2 (Alice)
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('2'))));
+        assert_eq!(state.active_view, Some(1));
+        assert_eq!(state.filtered_card_indices(0), vec![1]);
+        assert_eq!(state.filter.input, "assignee:alice");
+    }
+
+    #[test]
+    fn test_view_assignee_at_me_resolves_to_viewer() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card_with_assignees("1", "My Task", vec!["uzimaru0000"]),
+                make_card_with_assignees("2", "Other Task", vec!["alice"]),
+            ]),
+        ]);
+        let mut state = make_state_with_views(board, vec![("My Tasks", "assignee:@me")]);
+        state.viewer_login = "uzimaru0000".to_string();
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(state.filtered_card_indices(0), vec![0]);
+        assert_eq!(state.filter.input, "assignee:@uzimaru0000");
+    }
+
+    #[test]
+    fn test_manual_filter_at_me_resolves_to_viewer() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![
+                make_card_with_assignees("1", "My Task", vec!["uzimaru0000"]),
+                make_card_with_assignees("2", "Other Task", vec!["alice"]),
+            ]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.viewer_login = "uzimaru0000".to_string();
+
+        // Enter filter mode and type assignee:@me
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        for c in "assignee:@me".chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(state.filtered_card_indices(0), vec![0]);
     }
 }

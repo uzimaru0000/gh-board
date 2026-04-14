@@ -10,4 +10,5 @@ pub mod help;
 pub mod project_list;
 pub mod repo_select;
 pub mod statusline;
+pub mod tab_bar;
 pub mod theme;

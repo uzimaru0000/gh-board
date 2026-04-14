@@ -50,19 +50,20 @@ async fn main() -> Result<()> {
     let github = GitHubClient::new().await?;
 
     let mut terminal = ratatui::init();
-    let result = run(&mut terminal, github, cli).await;
+    let result = run(&mut terminal, github, cli, cfg).await;
     ratatui::restore();
 
     result
 }
 
-async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli) -> Result<()> {
+async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg: config::Config) -> Result<()> {
     let (mut events, event_tx) = EventHandler::new(Duration::from_millis(80));
 
     // "@me" means the current viewer (same as no owner)
     let owner = cli.owner.filter(|o| o != "@me");
 
     let mut app = App::new(github, event_tx, owner.clone());
+    app.state.set_views(cfg.view);
 
     // When project number is specified, load that project directly (skip project list)
     if let Some(number) = cli.number {
@@ -155,6 +156,25 @@ fn run_editor(content: &str) -> Result<String> {
     Ok(result)
 }
 
+fn render_board_with_tabs(frame: &mut Frame, main_area: Rect, app: &App) {
+    if !app.state.views.is_empty() {
+        let tab_area = Rect {
+            y: main_area.y,
+            height: 1,
+            ..main_area
+        };
+        let board_area = Rect {
+            y: main_area.y + 1,
+            height: main_area.height.saturating_sub(1),
+            ..main_area
+        };
+        ui::tab_bar::render(frame, tab_area, app);
+        ui::board::render(frame, board_area, app);
+    } else {
+        ui::board::render(frame, main_area, app);
+    }
+}
+
 fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
@@ -168,44 +188,44 @@ fn render(frame: &mut Frame, app: &App) {
 
     match app.state.mode {
         ViewMode::Board => {
-            ui::board::render(frame, main_area, app);
+            render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
         }
         ViewMode::ProjectSelect => {
             if app.state.board.is_some() {
-                ui::board::render(frame, main_area, app);
+                render_board_with_tabs(frame, main_area, app);
                 ui::statusline::render(frame, area, app);
             }
             ui::project_list::render(frame, area, app);
         }
         ViewMode::Help => {
-            ui::board::render(frame, main_area, app);
+            render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::help::render(frame, area);
         }
         ViewMode::Filter => {
-            ui::board::render(frame, main_area, app);
+            render_board_with_tabs(frame, main_area, app);
             ui::filter_bar::render(frame, area, app);
         }
         ViewMode::Confirm => {
-            ui::board::render(frame, main_area, app);
+            render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             if let Some(state) = &app.state.confirm_state {
                 ui::confirm::render(frame, area, state);
             }
         }
         ViewMode::CreateCard => {
-            ui::board::render(frame, main_area, app);
+            render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::create_card::render(frame, area, &app.state.create_card_state);
         }
         ViewMode::Detail => {
-            ui::board::render(frame, main_area, app);
+            render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
         }
         ViewMode::RepoSelect => {
-            ui::board::render(frame, main_area, app);
+            render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             if let Some(rs) = &app.state.repo_select_state {
                 let repos = app
@@ -218,18 +238,18 @@ fn render(frame: &mut Frame, app: &App) {
             }
         }
         ViewMode::EditCard => {
-            ui::board::render(frame, main_area, app);
+            render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             if let Some(ref edit_state) = app.state.edit_card_state {
                 ui::edit_card::render(frame, area, edit_state);
             }
         }
         ViewMode::CardGrab => {
-            ui::board::render(frame, main_area, app);
+            render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
         }
         ViewMode::CommentList => {
-            ui::board::render(frame, main_area, app);
+            render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
             ui::comment_list::render(frame, area, app);

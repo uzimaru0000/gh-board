@@ -5,10 +5,19 @@ use ratatui::style::Color;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::Deserialize;
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ViewConfig {
+    pub name: String,
+    #[serde(default)]
+    pub filter: String,
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub theme: ThemeConfig,
+    #[serde(default)]
+    pub view: Vec<ViewConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,6 +275,71 @@ yellow = "#FFD633"
             config.theme.shadow_fg.0,
             Color::Rgb(60, 60, 60)
         ));
+    }
+
+    #[test]
+    fn test_parse_no_views() {
+        let config: Config = toml::from_str("").unwrap();
+        assert!(config.view.is_empty());
+    }
+
+    #[test]
+    fn test_parse_single_view() {
+        let toml = r#"
+[[view]]
+name = "Bugs"
+filter = "label:bug"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.view.len(), 1);
+        assert_eq!(config.view[0].name, "Bugs");
+        assert_eq!(config.view[0].filter, "label:bug");
+    }
+
+    #[test]
+    fn test_parse_multiple_views() {
+        let toml = r#"
+[[view]]
+name = "Bugs"
+filter = "label:bug"
+
+[[view]]
+name = "My Tasks"
+filter = "assignee:@me"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.view.len(), 2);
+        assert_eq!(config.view[0].name, "Bugs");
+        assert_eq!(config.view[1].name, "My Tasks");
+        assert_eq!(config.view[1].filter, "assignee:@me");
+    }
+
+    #[test]
+    fn test_parse_view_without_filter() {
+        let toml = r#"
+[[view]]
+name = "All Items"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.view.len(), 1);
+        assert_eq!(config.view[0].name, "All Items");
+        assert_eq!(config.view[0].filter, "");
+    }
+
+    #[test]
+    fn test_parse_views_with_theme() {
+        let toml = r#"
+[theme]
+accent = "red"
+
+[[view]]
+name = "Bugs"
+filter = "label:bug"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(matches!(config.theme.accent.0, Color::Red));
+        assert_eq!(config.view.len(), 1);
+        assert_eq!(config.view[0].name, "Bugs");
     }
 
     #[test]
