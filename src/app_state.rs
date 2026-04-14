@@ -1,8 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use crate::action::Action;
 use crate::command::Command;
 use crate::config::ViewConfig;
 use crate::event::AppEvent;
+use crate::keymap::{Keymap, KeymapMode};
 use crate::model::project::{Board, Card, CardType, ProjectSummary};
 use crate::model::state::{
     ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
@@ -71,6 +73,9 @@ pub struct AppState {
 
     // Viewer info
     pub viewer_login: String,
+
+    // Keymap
+    pub keymap: Keymap,
 }
 
 impl AppState {
@@ -107,11 +112,16 @@ impl AppState {
             active_view: None,
             owner,
             viewer_login: String::new(),
+            keymap: Keymap::default_keymap(),
         }
     }
 
     pub fn set_views(&mut self, views: Vec<ViewConfig>) {
         self.views = views;
+    }
+
+    pub fn set_keymap(&mut self, keymap: Keymap) {
+        self.keymap = keymap;
     }
 
     fn resolve_at_me(&self, input: &str) -> String {
@@ -442,76 +452,94 @@ impl AppState {
         };
 
         if board.columns.is_empty() {
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
-                KeyCode::Char('p') => self.mode = ViewMode::ProjectSelect,
-                KeyCode::Char('?') => self.mode = ViewMode::Help,
+            match self.keymap.resolve(KeymapMode::Board, &key) {
+                Some(Action::Quit) | Some(Action::ForceQuit) => self.should_quit = true,
+                Some(Action::SwitchProject) => self.mode = ViewMode::ProjectSelect,
+                Some(Action::ShowHelp) => self.mode = ViewMode::Help,
                 _ => {}
             }
             return Command::None;
         }
 
-        let current_col_len = self.filtered_card_indices(self.selected_column).len();
+        // View switching (1-9, 0) は特殊処理のまま
+        if let KeyCode::Char(c @ '1'..='9') = key.code {
+            if key.modifiers == KeyModifiers::NONE {
+                self.switch_to_view((c as usize) - ('1' as usize));
+                return Command::None;
+            }
+        }
+        if key.code == KeyCode::Char('0') && key.modifiers == KeyModifiers::NONE {
+            self.clear_view();
+            return Command::None;
+        }
 
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => {
+        let action = match self.keymap.resolve(KeymapMode::Board, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
+        let current_col_len = self.filtered_card_indices(self.selected_column).len();
+        let col_count = self.board.as_ref().map(|b| b.columns.len()).unwrap_or(0);
+
+        match action {
+            Action::Quit | Action::ForceQuit => {
                 self.should_quit = true;
                 Command::None
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            Action::MoveDown => {
                 if current_col_len > 0 {
                     self.selected_card = (self.selected_card + 1).min(current_col_len - 1);
                 }
                 Command::None
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Action::MoveUp => {
                 self.selected_card = self.selected_card.saturating_sub(1);
                 Command::None
             }
-            KeyCode::Char('h') | KeyCode::Left => {
+            Action::MoveLeft => {
                 if self.selected_column > 0 {
                     self.selected_column -= 1;
                     self.clamp_card_selection();
                 }
                 Command::None
             }
-            KeyCode::Char('l') | KeyCode::Right => {
-                if self.selected_column < board.columns.len() - 1 {
+            Action::MoveRight => {
+                if self.selected_column < col_count - 1 {
                     self.selected_column += 1;
                     self.clamp_card_selection();
                 }
                 Command::None
             }
-            KeyCode::Char('g') => {
+            Action::FirstItem => {
                 self.selected_card = 0;
                 Command::None
             }
-            KeyCode::Char('G') => {
+            Action::LastItem => {
                 if current_col_len > 0 {
                     self.selected_card = current_col_len - 1;
                 }
                 Command::None
             }
-            KeyCode::Tab => {
-                self.selected_column = (self.selected_column + 1) % board.columns.len();
+            Action::NextTab => {
+                self.selected_column = (self.selected_column + 1) % col_count;
                 self.clamp_card_selection();
                 Command::None
             }
-            KeyCode::BackTab => {
+            Action::PrevTab => {
                 if self.selected_column == 0 {
-                    self.selected_column = board.columns.len() - 1;
+                    self.selected_column = col_count - 1;
                 } else {
                     self.selected_column -= 1;
                 }
                 self.clamp_card_selection();
                 Command::None
             }
-            KeyCode::Enter => self.open_detail_view(),
-            KeyCode::Char('p') => {
+            Action::OpenDetail => self.open_detail_view(),
+            Action::SwitchProject => {
                 self.mode = ViewMode::ProjectSelect;
                 Command::None
             }
-            KeyCode::Char('r') => {
+            Action::Refresh => {
                 if let Some(project) = &self.current_project {
                     let id = project.id.clone();
                     self.start_loading_board(&id)
@@ -519,32 +547,32 @@ impl AppState {
                     Command::None
                 }
             }
-            KeyCode::Char('?') => {
+            Action::ShowHelp => {
                 self.mode = ViewMode::Help;
                 Command::None
             }
-            KeyCode::Char('/') => {
+            Action::StartFilter => {
                 self.filter.input.clear();
                 self.filter.cursor_pos = 0;
                 self.mode = ViewMode::Filter;
                 Command::None
             }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Action::ClearFilter => {
                 self.active_view = None;
                 self.filter.active_filter = None;
                 self.clamp_card_selection();
                 Command::None
             }
-            KeyCode::Char('d') => {
+            Action::DeleteCard => {
                 self.start_delete_card(ViewMode::Board);
                 Command::None
             }
-            KeyCode::Char('n') => {
+            Action::NewCard => {
                 self.create_card_state = CreateCardState::default();
                 self.mode = ViewMode::CreateCard;
                 Command::None
             }
-            KeyCode::Char(' ') => {
+            Action::GrabCard => {
                 if let Some(real_idx) = self.real_card_index() {
                     let item_id = self.board.as_ref().unwrap().columns[self.selected_column]
                         .cards[real_idx]
@@ -559,20 +587,8 @@ impl AppState {
                 }
                 Command::None
             }
-            KeyCode::Char('H') => self.move_card_left(),
-            KeyCode::Char('L') => self.move_card_right(),
-            KeyCode::Char(c @ '1'..='9') => {
-                self.switch_to_view((c as usize) - ('1' as usize));
-                Command::None
-            }
-            KeyCode::Char('0') => {
-                self.clear_view();
-                Command::None
-            }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
-                Command::None
-            }
+            Action::MoveCardLeft => self.move_card_left(),
+            Action::MoveCardRight => self.move_card_right(),
             _ => Command::None,
         }
     }
@@ -672,8 +688,13 @@ impl AppState {
     }
 
     fn handle_project_select_key(&mut self, key: KeyEvent) -> Command {
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => {
+        let action = match self.keymap.resolve(KeymapMode::ProjectSelect, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
+        match action {
+            Action::Quit => {
                 if self.board.is_some() {
                     self.mode = ViewMode::Board;
                 } else {
@@ -681,48 +702,63 @@ impl AppState {
                 }
                 Command::None
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            Action::ForceQuit => {
+                self.should_quit = true;
+                Command::None
+            }
+            Action::MoveDown => {
                 if !self.projects.is_empty() {
                     self.selected_project_index =
                         (self.selected_project_index + 1).min(self.projects.len() - 1);
                 }
                 Command::None
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Action::MoveUp => {
                 self.selected_project_index = self.selected_project_index.saturating_sub(1);
                 Command::None
             }
-            KeyCode::Enter => self.select_project(self.selected_project_index),
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
-                Command::None
-            }
+            Action::Select => self.select_project(self.selected_project_index),
             _ => Command::None,
         }
     }
 
     fn handle_filter_key(&mut self, key: KeyEvent) {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        // Check structural keys first (ForceQuit, Back, Select)
+        if let Some(action) = self.keymap.resolve(KeymapMode::FilterStructural, &key) {
+            match action {
+                Action::ForceQuit => {
+                    self.should_quit = true;
+                    return;
+                }
+                Action::Back => {
+                    self.mode = ViewMode::Board;
+                    return;
+                }
+                Action::Select => {
+                    self.active_view = None;
+                    let resolved = self.resolve_at_me(&self.filter.input.clone());
+                    if resolved.is_empty() {
+                        self.filter.active_filter = None;
+                    } else {
+                        self.filter.active_filter = Some(ActiveFilter::parse(&resolved));
+                    }
+                    self.selected_card = 0;
+                    self.scroll_offset = 0;
+                    self.mode = ViewMode::Board;
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        // Global ForceQuit check
+        if let Some(Action::ForceQuit) = self.keymap.resolve(KeymapMode::FilterStructural, &key) {
             self.should_quit = true;
             return;
         }
 
+        // Text input handling (not configurable)
         match key.code {
-            KeyCode::Esc => {
-                self.mode = ViewMode::Board;
-            }
-            KeyCode::Enter => {
-                self.active_view = None;
-                let resolved = self.resolve_at_me(&self.filter.input.clone());
-                if resolved.is_empty() {
-                    self.filter.active_filter = None;
-                } else {
-                    self.filter.active_filter = Some(ActiveFilter::parse(&resolved));
-                }
-                self.selected_card = 0;
-                self.scroll_offset = 0;
-                self.mode = ViewMode::Board;
-            }
             KeyCode::Backspace => {
                 if self.filter.cursor_pos > 0 {
                     let prev = prev_char_pos(&self.filter.input, self.filter.cursor_pos);
@@ -751,9 +787,14 @@ impl AppState {
     }
 
     fn handle_confirm_key(&mut self, key: KeyEvent) -> Command {
-        match key.code {
-            KeyCode::Char('y') => {
-                let cmd = if let Some(state) = self.confirm_state.take() {
+        let action = match self.keymap.resolve(KeymapMode::Confirm, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
+        match action {
+            Action::ConfirmYes => {
+                if let Some(state) = self.confirm_state.take() {
                     let return_to = state.return_to;
                     let cmd = match state.action {
                         ConfirmAction::DeleteCard { item_id } => self.delete_card(&item_id),
@@ -767,10 +808,9 @@ impl AppState {
                     cmd
                 } else {
                     Command::None
-                };
-                cmd
+                }
             }
-            KeyCode::Char('n') | KeyCode::Esc => {
+            Action::ConfirmNo => {
                 let return_to = self
                     .confirm_state
                     .as_ref()
@@ -780,7 +820,7 @@ impl AppState {
                 self.mode = return_to;
                 Command::None
             }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Action::ForceQuit => {
                 self.should_quit = true;
                 Command::None
             }
@@ -789,85 +829,90 @@ impl AppState {
     }
 
     fn handle_create_card_key(&mut self, key: KeyEvent) -> Command {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.should_quit = true;
-            return Command::None;
-        }
-        if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            return self.submit_create_card();
+        // Global keys (ForceQuit, Submit, Back, Tab fields)
+        if let Some(action) = self.keymap.resolve(KeymapMode::CreateCardGlobal, &key) {
+            match action {
+                Action::ForceQuit => {
+                    self.should_quit = true;
+                    return Command::None;
+                }
+                Action::Submit => {
+                    return self.submit_create_card();
+                }
+                Action::Back => {
+                    self.mode = ViewMode::Board;
+                    return Command::None;
+                }
+                Action::NextField => {
+                    self.create_card_state.focused_field =
+                        match self.create_card_state.focused_field {
+                            CreateCardField::Type => CreateCardField::Title,
+                            CreateCardField::Title => CreateCardField::Body,
+                            CreateCardField::Body => CreateCardField::Type,
+                        };
+                    return Command::None;
+                }
+                Action::PrevField => {
+                    self.create_card_state.focused_field =
+                        match self.create_card_state.focused_field {
+                            CreateCardField::Type => CreateCardField::Body,
+                            CreateCardField::Title => CreateCardField::Type,
+                            CreateCardField::Body => CreateCardField::Title,
+                        };
+                    return Command::None;
+                }
+                _ => {}
+            }
         }
 
-        match key.code {
-            KeyCode::Esc => {
-                self.mode = ViewMode::Board;
-            }
-            KeyCode::Tab => {
-                self.create_card_state.focused_field =
-                    match self.create_card_state.focused_field {
-                        CreateCardField::Type => CreateCardField::Title,
-                        CreateCardField::Title => CreateCardField::Body,
-                        CreateCardField::Body => CreateCardField::Type,
+        match self.create_card_state.focused_field {
+            CreateCardField::Type => {
+                // Type field: toggle via keymap
+                if let Some(Action::ToggleType) = self.keymap.resolve(KeymapMode::CreateCardType, &key) {
+                    self.create_card_state.card_type = match self.create_card_state.card_type {
+                        NewCardType::Draft => NewCardType::Issue,
+                        NewCardType::Issue => NewCardType::Draft,
                     };
-            }
-            KeyCode::BackTab => {
-                self.create_card_state.focused_field =
-                    match self.create_card_state.focused_field {
-                        CreateCardField::Type => CreateCardField::Body,
-                        CreateCardField::Title => CreateCardField::Type,
-                        CreateCardField::Body => CreateCardField::Title,
-                    };
-            }
-            // Type field: ← → / h l でトグル
-            KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l')
-                if self.create_card_state.focused_field == CreateCardField::Type =>
-            {
-                self.create_card_state.card_type = match self.create_card_state.card_type {
-                    NewCardType::Draft => NewCardType::Issue,
-                    NewCardType::Issue => NewCardType::Draft,
-                };
-            }
-            // Body field: Enter で $EDITOR 起動
-            KeyCode::Enter
-                if self.create_card_state.focused_field == CreateCardField::Body =>
-            {
-                let content = self.create_card_state.body_input.clone();
-                return Command::OpenEditor { content };
-            }
-            // Title field: テキスト編集
-            KeyCode::Backspace
-                if self.create_card_state.focused_field == CreateCardField::Title =>
-            {
-                let cursor = &mut self.create_card_state.title_cursor;
-                if *cursor > 0 {
-                    let prev = prev_char_pos(&self.create_card_state.title_input, *cursor);
-                    self.create_card_state.title_input.drain(prev..*cursor);
-                    *cursor = prev;
                 }
             }
-            KeyCode::Left
-                if self.create_card_state.focused_field == CreateCardField::Title =>
-            {
-                let cursor = &mut self.create_card_state.title_cursor;
-                if *cursor > 0 {
-                    *cursor = prev_char_pos(&self.create_card_state.title_input, *cursor);
+            CreateCardField::Body => {
+                // Body field: open editor
+                if let Some(Action::OpenEditor) = self.keymap.resolve(KeymapMode::CreateCardBody, &key) {
+                    let content = self.create_card_state.body_input.clone();
+                    return Command::OpenEditor { content };
                 }
             }
-            KeyCode::Right
-                if self.create_card_state.focused_field == CreateCardField::Title =>
-            {
-                let cursor = &mut self.create_card_state.title_cursor;
-                if *cursor < self.create_card_state.title_input.len() {
-                    *cursor = next_char_pos(&self.create_card_state.title_input, *cursor);
+            CreateCardField::Title => {
+                // Title field: text input (not configurable)
+                match key.code {
+                    KeyCode::Backspace => {
+                        let cursor = &mut self.create_card_state.title_cursor;
+                        if *cursor > 0 {
+                            let prev = prev_char_pos(&self.create_card_state.title_input, *cursor);
+                            self.create_card_state.title_input.drain(prev..*cursor);
+                            *cursor = prev;
+                        }
+                    }
+                    KeyCode::Left => {
+                        let cursor = &mut self.create_card_state.title_cursor;
+                        if *cursor > 0 {
+                            *cursor = prev_char_pos(&self.create_card_state.title_input, *cursor);
+                        }
+                    }
+                    KeyCode::Right => {
+                        let cursor = &mut self.create_card_state.title_cursor;
+                        if *cursor < self.create_card_state.title_input.len() {
+                            *cursor = next_char_pos(&self.create_card_state.title_input, *cursor);
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        let cursor = &mut self.create_card_state.title_cursor;
+                        self.create_card_state.title_input.insert(*cursor, c);
+                        *cursor += c.len_utf8();
+                    }
+                    _ => {}
                 }
             }
-            KeyCode::Char(c)
-                if self.create_card_state.focused_field == CreateCardField::Title =>
-            {
-                let cursor = &mut self.create_card_state.title_cursor;
-                self.create_card_state.title_input.insert(*cursor, c);
-                *cursor += c.len_utf8();
-            }
-            _ => {}
         }
         Command::None
     }
@@ -1010,26 +1055,31 @@ impl AppState {
     }
 
     fn handle_card_grab_key(&mut self, key: KeyEvent) -> Command {
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
+        let action = match self.keymap.resolve(KeymapMode::CardGrab, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
+        match action {
+            Action::MoveDown => {
                 self.move_card_down();
                 Command::None
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Action::MoveUp => {
                 self.move_card_up();
                 Command::None
             }
-            KeyCode::Char('h') | KeyCode::Left => {
+            Action::MoveLeft => {
                 self.grab_move_card_horizontal(-1);
                 Command::None
             }
-            KeyCode::Char('l') | KeyCode::Right => {
+            Action::MoveRight => {
                 self.grab_move_card_horizontal(1);
                 Command::None
             }
-            KeyCode::Char(' ') => self.confirm_grab(),
-            KeyCode::Esc => self.cancel_grab(),
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Action::ConfirmGrab => self.confirm_grab(),
+            Action::CancelGrab => self.cancel_grab(),
+            Action::ForceQuit => {
                 self.should_quit = true;
                 Command::None
             }
@@ -1267,10 +1317,10 @@ impl AppState {
     }
 
     fn handle_repo_select_key(&mut self, key: KeyEvent) -> Command {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.should_quit = true;
-            return Command::None;
-        }
+        let action = match self.keymap.resolve(KeymapMode::RepoSelect, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
 
         let repo_count = self
             .board
@@ -1278,23 +1328,26 @@ impl AppState {
             .map(|b| b.repositories.len())
             .unwrap_or(0);
 
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
+        match action {
+            Action::ForceQuit => {
+                self.should_quit = true;
+            }
+            Action::MoveDown => {
                 if let Some(rs) = &mut self.repo_select_state {
                     if rs.selected_index + 1 < repo_count {
                         rs.selected_index += 1;
                     }
                 }
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Action::MoveUp => {
                 if let Some(rs) = &mut self.repo_select_state {
                     rs.selected_index = rs.selected_index.saturating_sub(1);
                 }
             }
-            KeyCode::Enter => {
+            Action::Select => {
                 return self.submit_repo_selection();
             }
-            KeyCode::Esc | KeyCode::Char('q') => {
+            Action::Back | Action::Quit => {
                 self.repo_select_state = None;
                 self.mode = ViewMode::Board;
             }
@@ -1339,11 +1392,8 @@ impl AppState {
     }
 
     fn handle_help_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q') => {
-                self.mode = ViewMode::Board;
-            }
-            _ => {}
+        if let Some(Action::Back) = self.keymap.resolve(KeymapMode::Help, &key) {
+            self.mode = ViewMode::Board;
         }
     }
 
@@ -1430,7 +1480,8 @@ impl AppState {
     }
 
     fn handle_detail_key(&mut self, key: KeyEvent) -> Command {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        // ForceQuit (global)
+        if let Some(Action::ForceQuit) = self.keymap.resolve(KeymapMode::DetailContent, &key) {
             self.should_quit = true;
             return Command::None;
         }
@@ -1445,12 +1496,23 @@ impl AppState {
             return self.handle_status_select_key(key);
         }
 
-        match key.code {
-            KeyCode::Char('q') => {
+        // Determine the keymap mode based on current detail pane
+        let mode = match self.detail_pane {
+            DetailPane::Content => KeymapMode::DetailContent,
+            DetailPane::Sidebar => KeymapMode::DetailSidebar,
+        };
+
+        let action = match self.keymap.resolve(mode, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
+        match action {
+            Action::Quit => {
                 self.mode = ViewMode::Board;
                 Command::None
             }
-            KeyCode::Esc => {
+            Action::Back => {
                 if self.detail_pane == DetailPane::Sidebar {
                     self.detail_pane = DetailPane::Content;
                 } else {
@@ -1458,14 +1520,7 @@ impl AppState {
                 }
                 Command::None
             }
-            KeyCode::Tab => {
-                self.detail_pane = match self.detail_pane {
-                    DetailPane::Content => DetailPane::Sidebar,
-                    DetailPane::Sidebar => DetailPane::Content,
-                };
-                Command::None
-            }
-            KeyCode::BackTab => {
+            Action::NextTab | Action::PrevTab => {
                 self.detail_pane = match self.detail_pane {
                     DetailPane::Content => DetailPane::Sidebar,
                     DetailPane::Sidebar => DetailPane::Content,
@@ -1473,43 +1528,43 @@ impl AppState {
                 Command::None
             }
             _ => match self.detail_pane {
-                DetailPane::Content => self.handle_detail_content_key(key),
-                DetailPane::Sidebar => self.handle_detail_sidebar_key(key),
+                DetailPane::Content => self.handle_detail_content_action(action),
+                DetailPane::Sidebar => self.handle_detail_sidebar_action(action),
             },
         }
     }
 
-    fn handle_detail_content_key(&mut self, key: KeyEvent) -> Command {
-        match key.code {
-            KeyCode::Char('o') | KeyCode::Enter => {
+    fn handle_detail_content_action(&mut self, action: Action) -> Command {
+        match action {
+            Action::OpenInBrowser => {
                 self.mode = ViewMode::Board;
                 self.open_in_browser()
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            Action::MoveDown => {
                 self.detail_scroll = self
                     .detail_scroll
                     .saturating_add(1)
                     .min(self.detail_max_scroll.get());
                 Command::None
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Action::MoveUp => {
                 self.detail_scroll = self.detail_scroll.saturating_sub(1);
                 Command::None
             }
-            KeyCode::Char('h') | KeyCode::Left => {
+            Action::MoveLeft => {
                 self.detail_scroll_x = self.detail_scroll_x.saturating_sub(2);
                 Command::None
             }
-            KeyCode::Char('l') | KeyCode::Right => {
+            Action::MoveRight => {
                 self.detail_scroll_x = self
                     .detail_scroll_x
                     .saturating_add(2)
                     .min(self.detail_max_scroll_x.get());
                 Command::None
             }
-            KeyCode::Char('e') => self.start_edit_card(),
-            KeyCode::Char('c') => self.start_new_comment(),
-            KeyCode::Char('C') => self.open_comment_list(),
+            Action::EditCard => self.start_edit_card(),
+            Action::NewComment => self.start_new_comment(),
+            Action::OpenCommentList => self.open_comment_list(),
             _ => Command::None,
         }
     }
@@ -1617,107 +1672,101 @@ impl AppState {
     }
 
     fn handle_edit_card_key(&mut self, key: KeyEvent) -> Command {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.should_quit = true;
-            return Command::None;
+        // Global keys (ForceQuit, Submit, Back, Tab fields)
+        if let Some(action) = self.keymap.resolve(KeymapMode::EditCardGlobal, &key) {
+            match action {
+                Action::ForceQuit => {
+                    self.should_quit = true;
+                    return Command::None;
+                }
+                Action::Submit => {
+                    return self.submit_edit_card();
+                }
+                Action::Back => {
+                    self.mode = ViewMode::Detail;
+                    self.edit_card_state = None;
+                    return Command::None;
+                }
+                Action::NextField => {
+                    if let Some(ref mut state) = self.edit_card_state {
+                        state.focused_field = match state.focused_field {
+                            EditCardField::Title => EditCardField::Body,
+                            EditCardField::Body => EditCardField::Title,
+                        };
+                    }
+                    return Command::None;
+                }
+                _ => {}
+            }
         }
 
-        if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            return self.submit_edit_card();
-        }
-
-        match key.code {
-            KeyCode::Esc => {
-                self.mode = ViewMode::Detail;
-                self.edit_card_state = None;
-                Command::None
-            }
-            KeyCode::Tab | KeyCode::BackTab => {
-                if let Some(ref mut state) = self.edit_card_state {
-                    state.focused_field = match state.focused_field {
-                        EditCardField::Title => EditCardField::Body,
-                        EditCardField::Body => EditCardField::Title,
-                    };
+        let focused = self
+            .edit_card_state
+            .as_ref()
+            .map(|s| s.focused_field.clone());
+        match focused {
+            Some(EditCardField::Title) => {
+                // Title: text input (not configurable)
+                let state = match self.edit_card_state.as_mut() {
+                    Some(s) => s,
+                    None => return Command::None,
+                };
+                match key.code {
+                    KeyCode::Backspace => {
+                        if state.title_cursor > 0 {
+                            let prev = prev_char_pos(&state.title_input, state.title_cursor);
+                            state.title_input.drain(prev..state.title_cursor);
+                            state.title_cursor = prev;
+                        }
+                    }
+                    KeyCode::Left => {
+                        if state.title_cursor > 0 {
+                            state.title_cursor =
+                                prev_char_pos(&state.title_input, state.title_cursor);
+                        }
+                    }
+                    KeyCode::Right => {
+                        if state.title_cursor < state.title_input.len() {
+                            state.title_cursor =
+                                next_char_pos(&state.title_input, state.title_cursor);
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        state.title_input.insert(state.title_cursor, c);
+                        state.title_cursor += c.len_utf8();
+                    }
+                    _ => {}
                 }
                 Command::None
             }
-            _ => {
-                let focused = self
-                    .edit_card_state
-                    .as_ref()
-                    .map(|s| s.focused_field.clone());
-                match focused {
-                    Some(EditCardField::Title) => self.handle_edit_card_title_key(key),
-                    Some(EditCardField::Body) => self.handle_edit_card_body_key(key),
-                    None => Command::None,
+            Some(EditCardField::Body) => {
+                if let Some(Action::OpenEditor) = self.keymap.resolve(KeymapMode::EditCardBody, &key) {
+                    let content = self
+                        .edit_card_state
+                        .as_ref()
+                        .map(|s| s.body_input.clone())
+                        .unwrap_or_default();
+                    Command::OpenEditor { content }
+                } else {
+                    Command::None
                 }
             }
-        }
-    }
-
-    fn handle_edit_card_title_key(&mut self, key: KeyEvent) -> Command {
-        let state = match self.edit_card_state.as_mut() {
-            Some(s) => s,
-            None => return Command::None,
-        };
-        match key.code {
-            KeyCode::Backspace => {
-                if state.title_cursor > 0 {
-                    let prev = prev_char_pos(&state.title_input, state.title_cursor);
-                    state.title_input.drain(prev..state.title_cursor);
-                    state.title_cursor = prev;
-                }
-                Command::None
-            }
-            KeyCode::Left => {
-                if state.title_cursor > 0 {
-                    state.title_cursor =
-                        prev_char_pos(&state.title_input, state.title_cursor);
-                }
-                Command::None
-            }
-            KeyCode::Right => {
-                if state.title_cursor < state.title_input.len() {
-                    state.title_cursor =
-                        next_char_pos(&state.title_input, state.title_cursor);
-                }
-                Command::None
-            }
-            KeyCode::Char(c) => {
-                state.title_input.insert(state.title_cursor, c);
-                state.title_cursor += c.len_utf8();
-                Command::None
-            }
-            _ => Command::None,
-        }
-    }
-
-    fn handle_edit_card_body_key(&mut self, key: KeyEvent) -> Command {
-        match key.code {
-            KeyCode::Enter => {
-                let content = self
-                    .edit_card_state
-                    .as_ref()
-                    .map(|s| s.body_input.clone())
-                    .unwrap_or_default();
-                Command::OpenEditor { content }
-            }
-            _ => Command::None,
+            None => Command::None,
         }
     }
 
-    fn handle_detail_sidebar_key(&mut self, key: KeyEvent) -> Command {
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
+    fn handle_detail_sidebar_action(&mut self, action: Action) -> Command {
+        match action {
+            Action::MoveDown => {
                 self.sidebar_selected =
                     (self.sidebar_selected + 1).min(SIDEBAR_SECTION_COUNT - 1);
                 Command::None
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Action::MoveUp => {
                 self.sidebar_selected = self.sidebar_selected.saturating_sub(1);
                 Command::None
             }
-            KeyCode::Enter => match self.sidebar_selected {
+            Action::Select => match self.sidebar_selected {
                 SIDEBAR_STATUS => {
                     self.status_select_open = true;
                     self.status_select_cursor = self.selected_column;
@@ -1731,7 +1780,7 @@ impl AppState {
                 }
                 _ => Command::None,
             },
-            KeyCode::Char('d') => {
+            Action::DeleteCard => {
                 self.start_delete_card(ViewMode::Detail);
                 Command::None
             }
@@ -1740,23 +1789,27 @@ impl AppState {
     }
 
     fn handle_comment_list_key(&mut self, key: KeyEvent) -> Command {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.should_quit = true;
-            return Command::None;
-        }
+        let action = match self.keymap.resolve(KeymapMode::CommentList, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
 
         let comment_count = self
             .selected_card_ref()
             .map(|c| c.comments.len())
             .unwrap_or(0);
 
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+        match action {
+            Action::ForceQuit => {
+                self.should_quit = true;
+                Command::None
+            }
+            Action::Back | Action::Quit => {
                 self.comment_list_state = None;
                 self.mode = ViewMode::Detail;
                 Command::None
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            Action::MoveDown => {
                 if let Some(ref mut cls) = self.comment_list_state {
                     if comment_count > 0 {
                         cls.cursor = (cls.cursor + 1).min(comment_count - 1);
@@ -1764,13 +1817,13 @@ impl AppState {
                 }
                 Command::None
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Action::MoveUp => {
                 if let Some(ref mut cls) = self.comment_list_state {
                     cls.cursor = cls.cursor.saturating_sub(1);
                 }
                 Command::None
             }
-            KeyCode::Char('e') => {
+            Action::EditComment => {
                 let cls = match &self.comment_list_state {
                     Some(s) => s,
                     None => return Command::None,
@@ -1795,7 +1848,7 @@ impl AppState {
                     existing: Some((comment_id, body)),
                 }
             }
-            KeyCode::Char('c') => {
+            Action::NewComment => {
                 let content_id = match &self.comment_list_state {
                     Some(s) => s.content_id.clone(),
                     None => return Command::None,
@@ -1810,23 +1863,29 @@ impl AppState {
     }
 
     fn handle_status_select_key(&mut self, key: KeyEvent) -> Command {
+        let action = match self.keymap.resolve(KeymapMode::StatusSelect, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
         let column_count = self
             .board
             .as_ref()
             .map(|b| b.columns.len())
             .unwrap_or(0);
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
+
+        match action {
+            Action::MoveDown => {
                 if self.status_select_cursor + 1 < column_count {
                     self.status_select_cursor += 1;
                 }
                 Command::None
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Action::MoveUp => {
                 self.status_select_cursor = self.status_select_cursor.saturating_sub(1);
                 Command::None
             }
-            KeyCode::Enter => {
+            Action::Select => {
                 self.status_select_open = false;
                 let target = self.status_select_cursor;
                 if target == self.selected_column {
@@ -1834,7 +1893,7 @@ impl AppState {
                 }
                 self.move_card_to_and_follow(target)
             }
-            KeyCode::Esc => {
+            Action::Back => {
                 self.status_select_open = false;
                 Command::None
             }
@@ -1909,6 +1968,11 @@ impl AppState {
     }
 
     fn handle_sidebar_edit_key(&mut self, key: KeyEvent) -> Command {
+        let action = match self.keymap.resolve(KeymapMode::SidebarEdit, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
         let edit = match &mut self.sidebar_edit {
             Some(e) => e,
             None => return Command::None,
@@ -1919,22 +1983,22 @@ impl AppState {
             SidebarEditMode::Assignees { items, cursor } => (items.len(), cursor),
         };
 
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+        match action {
+            Action::Back | Action::Quit => {
                 self.sidebar_edit = None;
                 Command::None
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            Action::MoveDown => {
                 if *cursor + 1 < items_len {
                     *cursor += 1;
                 }
                 Command::None
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Action::MoveUp => {
                 *cursor = cursor.saturating_sub(1);
                 Command::None
             }
-            KeyCode::Enter | KeyCode::Char(' ') => {
+            Action::ToggleItem => {
                 self.toggle_sidebar_edit_item()
             }
             _ => Command::None,

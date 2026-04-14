@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -18,6 +19,58 @@ pub struct Config {
     pub theme: ThemeConfig,
     #[serde(default)]
     pub view: Vec<ViewConfig>,
+    #[serde(default)]
+    pub keys: KeysConfig,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct KeysConfig {
+    pub global: HashMap<String, Vec<String>>,
+    pub board: HashMap<String, Vec<String>>,
+    pub project_select: HashMap<String, Vec<String>>,
+    pub help: HashMap<String, Vec<String>>,
+    pub confirm: HashMap<String, Vec<String>>,
+    pub card_grab: HashMap<String, Vec<String>>,
+    pub repo_select: HashMap<String, Vec<String>>,
+    pub detail_content: HashMap<String, Vec<String>>,
+    pub detail_sidebar: HashMap<String, Vec<String>>,
+    pub status_select: HashMap<String, Vec<String>>,
+    pub sidebar_edit: HashMap<String, Vec<String>>,
+    pub comment_list: HashMap<String, Vec<String>>,
+    pub create_card_type: HashMap<String, Vec<String>>,
+    pub create_card_body: HashMap<String, Vec<String>>,
+    pub edit_card_body: HashMap<String, Vec<String>>,
+    pub filter: HashMap<String, Vec<String>>,
+    pub create_card: HashMap<String, Vec<String>>,
+    pub edit_card: HashMap<String, Vec<String>>,
+}
+
+impl KeysConfig {
+    /// Get the override map for a given section name
+    pub fn section(&self, name: &str) -> HashMap<String, Vec<String>> {
+        match name {
+            "global" => self.global.clone(),
+            "board" => self.board.clone(),
+            "project_select" => self.project_select.clone(),
+            "help" => self.help.clone(),
+            "confirm" => self.confirm.clone(),
+            "card_grab" => self.card_grab.clone(),
+            "repo_select" => self.repo_select.clone(),
+            "detail_content" => self.detail_content.clone(),
+            "detail_sidebar" => self.detail_sidebar.clone(),
+            "status_select" => self.status_select.clone(),
+            "sidebar_edit" => self.sidebar_edit.clone(),
+            "comment_list" => self.comment_list.clone(),
+            "create_card_type" => self.create_card_type.clone(),
+            "create_card_body" => self.create_card_body.clone(),
+            "edit_card_body" => self.edit_card_body.clone(),
+            "filter" => self.filter.clone(),
+            "create_card" => self.create_card.clone(),
+            "edit_card" => self.edit_card.clone(),
+            _ => HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -340,6 +393,66 @@ filter = "label:bug"
         assert!(matches!(config.theme.accent.0, Color::Red));
         assert_eq!(config.view.len(), 1);
         assert_eq!(config.view[0].name, "Bugs");
+    }
+
+    #[test]
+    fn test_parse_keys_config_empty() {
+        let config: Config = toml::from_str("").unwrap();
+        assert!(config.keys.global.is_empty());
+        assert!(config.keys.board.is_empty());
+    }
+
+    #[test]
+    fn test_parse_keys_config_global() {
+        let toml = r#"
+[keys.global]
+force_quit = ["C-q"]
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.keys.global.get("force_quit").unwrap(), &vec!["C-q".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_keys_config_board() {
+        let toml = r#"
+[keys.board]
+move_down = ["n", "Down"]
+move_up = ["p", "Up"]
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.keys.board.get("move_down").unwrap(), &vec!["n".to_string(), "Down".to_string()]);
+        assert_eq!(config.keys.board.get("move_up").unwrap(), &vec!["p".to_string(), "Up".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_keys_config_with_theme_and_views() {
+        let toml = r#"
+[theme]
+accent = "red"
+
+[[view]]
+name = "Bugs"
+filter = "label:bug"
+
+[keys.board]
+refresh = ["R"]
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(matches!(config.theme.accent.0, Color::Red));
+        assert_eq!(config.view.len(), 1);
+        assert_eq!(config.keys.board.get("refresh").unwrap(), &vec!["R".to_string()]);
+    }
+
+    #[test]
+    fn test_keys_config_section() {
+        let mut keys = KeysConfig::default();
+        keys.board.insert("move_down".into(), vec!["n".into()]);
+
+        let section = keys.section("board");
+        assert_eq!(section.get("move_down").unwrap(), &vec!["n".to_string()]);
+
+        let empty = keys.section("nonexistent");
+        assert!(empty.is_empty());
     }
 
     #[test]

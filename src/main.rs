@@ -1,9 +1,11 @@
+mod action;
 mod app;
 mod app_state;
 mod command;
 mod config;
 mod event;
 mod github;
+mod keymap;
 mod model;
 mod ui;
 
@@ -64,6 +66,9 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg
 
     let mut app = App::new(github, event_tx, owner.clone());
     app.state.set_views(cfg.view);
+
+    let keymap = keymap::Keymap::default_keymap().with_overrides(&cfg.keys);
+    app.state.set_keymap(keymap);
 
     // When project number is specified, load that project directly (skip project list)
     if let Some(number) = cli.number {
@@ -201,7 +206,7 @@ fn render(frame: &mut Frame, app: &App) {
         ViewMode::Help => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
-            ui::help::render(frame, area);
+            ui::help::render(frame, area, &app.state.keymap);
         }
         ViewMode::Filter => {
             render_board_with_tabs(frame, main_area, app);
