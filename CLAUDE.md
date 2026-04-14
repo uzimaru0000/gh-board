@@ -172,6 +172,7 @@ assert_eq!(cmd, Command::MoveCard { ... });
 - UI ファイルから App のフィールドにアクセスする場合は `app.state.X` を使う
 - `AppState` のメソッドは副作用を直接実行せず、必ず `Command` を返すこと
 - `cargo test` で全テストが通ることを確認してからコミットする
+- 実装完了後は `cargo clippy -- -D warnings` も実行し、警告がないことを確認する (CI で同じチェックが走る)
 
 ## 設計上の注意点
 
