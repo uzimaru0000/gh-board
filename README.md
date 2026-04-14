@@ -1,79 +1,86 @@
+**English** | [日本語](README.ja.md)
+
 # gh-board
 
-GitHub Projects V2 をターミナル上でカンバンボード形式で操作する [gh](https://cli.github.com/) CLI 拡張。
+A [gh](https://cli.github.com/) CLI extension to manage GitHub Projects V2 as a kanban board in your terminal.
 
-## インストール
+## Installation
 
 ```
 gh extension install uzimaru0000/gh-board
 ```
 
-## 使い方
+## Usage
 
 ```
 gh board --owner <org-or-user> --project <number>
 ```
 
-引数なしで実行すると、自分がアクセス可能なプロジェクト一覧から選択できます。
+Running without arguments lets you choose from your accessible projects.
 
-## キーバインド
+## Key Bindings
 
-### ボード
+### Board
 
-| キー | 操作 |
-|------|------|
-| `h` / `l` | カラム移動 |
-| `j` / `k` | カード移動 |
-| `g` / `G` | 先頭 / 末尾カード |
-| `Tab` / `S-Tab` | 次 / 前カラム (ラップ) |
-| `H` / `L` | カードを左右のカラムに移動 |
-| `Enter` | カード詳細表示 |
-| `n` | ドラフトIssue作成 |
-| `d` | カード削除 |
-| `/` | フィルタ |
-| `p` | プロジェクト切替 |
-| `r` | リフレッシュ |
-| `?` | ヘルプ |
-| `q` / `Esc` | 終了 |
+| Key | Action |
+|-----|--------|
+| `h` / `l` | Move between columns |
+| `j` / `k` | Move between cards |
+| `g` / `G` | First / last card |
+| `Tab` / `S-Tab` | Next / previous column (wraps) |
+| `H` / `L` | Move card to left / right column |
+| `Space` | Grab card (reorder with h/j/k/l) |
+| `Enter` | Open card detail |
+| `n` | Create draft issue |
+| `d` | Delete card |
+| `/` | Filter |
+| `p` | Switch project |
+| `r` | Refresh |
+| `?` | Help |
+| `q` / `Esc` | Quit |
 
-### カード詳細
+### Card Detail
 
-| キー | 操作 |
-|------|------|
-| `j` / `k` | 縦スクロール |
-| `h` / `l` | テーブル横スクロール |
-| `Enter` / `o` | ブラウザで開く |
-| `Esc` / `q` | 閉じる |
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Scroll vertically |
+| `h` / `l` | Scroll table horizontally |
+| `c` | Post new comment |
+| `C` | Open comment list |
+| `Enter` / `o` | Open in browser |
+| `Esc` / `q` | Close |
 
-### フィルタ
+### Filter
 
-- フリーテキスト: カードタイトルの部分一致
-- `label:<name>`: ラベルで絞り込み
-- `assignee:<name>`: アサイニーで絞り込み (`@` プレフィックス対応)
+- Free text: partial match on card title
+- `label:<name>`: filter by label
+- `assignee:<name>`: filter by assignee (`@` prefix supported)
+- `milestone:<name>`: filter by milestone
+- Compound: `label:bug AND assignee:me`, `label:bug OR label:feature`
 
-## 設定
+## Configuration
 
-`~/.config/gh-board/config.toml` で設定をカスタマイズできます。
+Customize settings in `~/.config/gh-board/config.toml`.
 
-### キーバインド
+### Key Bindings
 
-`[keys.<モード>]` セクションでキーバインドを上書きできます。
+Override key bindings in `[keys.<mode>]` sections.
 
 ```toml
 [keys.board]
-move_down = ["n", "Down"]    # j の代わりに n で下移動
-refresh = ["R"]              # r の代わりに R でリフレッシュ
-start_filter = ["/", "f"]   # / に加えて f でもフィルタ
+move_down = ["n", "Down"]    # Use n instead of j to move down
+refresh = ["R"]              # Use R instead of r to refresh
+start_filter = ["/", "f"]   # Use f in addition to / for filter
 
 [keys.global]
-force_quit = ["C-q"]         # Ctrl+c の代わりに Ctrl+q で終了
+force_quit = ["C-q"]         # Use Ctrl+q instead of Ctrl+c to quit
 ```
 
-モード: `global`, `board`, `project_select`, `detail_content`, `detail_sidebar`, `card_grab`, `confirm`, `comment_list`, `status_select`, `sidebar_edit` 等
+Modes: `global`, `board`, `project_select`, `detail_content`, `detail_sidebar`, `card_grab`, `confirm`, `comment_list`, `status_select`, `sidebar_edit`, etc.
 
-キー記法: `j`, `Enter`, `Esc`, `Tab`, `S-Tab`, `Space`, `Up`, `Down`, `Left`, `Right`, `Backspace`, `C-c` (Ctrl), `A-x` (Alt)
+Key notation: `j`, `Enter`, `Esc`, `Tab`, `S-Tab`, `Space`, `Up`, `Down`, `Left`, `Right`, `Backspace`, `C-c` (Ctrl), `A-x` (Alt)
 
-### テーマ・ビュー
+### Theme & Views
 
 ```toml
 [theme]
@@ -84,16 +91,14 @@ name = "Bugs"
 filter = "label:bug"
 ```
 
-詳細は [CLAUDE.md](CLAUDE.md) を参照してください。
-
-## ビルド
+## Building
 
 ```
 cargo build
 ```
 
-`schema.graphql` (GitHub GraphQL API スキーマ) は初回ビルド時に自動ダウンロードされます。`gh` CLI がインストール・認証済みである必要があります。
+`schema.graphql` (GitHub GraphQL API schema) is automatically downloaded on the first build. Requires `gh` CLI to be installed and authenticated.
 
-## ライセンス
+## License
 
 MIT
