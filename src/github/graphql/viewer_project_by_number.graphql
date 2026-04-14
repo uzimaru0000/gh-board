@@ -1,0 +1,10 @@
+query ViewerProjectByNumber($number: Int!) {
+  viewer {
+    projectV2(number: $number) {
+      id
+      title
+      number
+      shortDescription
+    }
+  }
+}

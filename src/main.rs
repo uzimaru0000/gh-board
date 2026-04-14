@@ -29,13 +29,12 @@ use model::state::{LoadingState, ViewMode};
 #[derive(Parser)]
 #[command(name = "gh-board", about = "View GitHub Projects V2 as a kanban board")]
 struct Cli {
-    /// GitHub user or organization login
+    /// Project number to open directly
+    number: Option<i32>,
+
+    /// Login of the owner. Use "@me" for the current user.
     #[arg(long)]
     owner: Option<String>,
-
-    /// Project number to open directly
-    #[arg(long, short)]
-    project: Option<i32>,
 }
 
 #[tokio::main]
@@ -52,26 +51,24 @@ async fn main() -> Result<()> {
 
 async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli) -> Result<()> {
     let (mut events, event_tx) = EventHandler::new(Duration::from_millis(80));
-    let mut app = App::new(github, event_tx, cli.owner);
 
-    let target_project = cli.project;
+    // "@me" means the current viewer (same as no owner)
+    let owner = cli.owner.filter(|o| o != "@me");
 
-    // Start loading projects
-    app.load_projects();
+    let mut app = App::new(github, event_tx, owner.clone());
+
+    // When project number is specified, load that project directly (skip project list)
+    if let Some(number) = cli.number {
+        app.load_project_by_number(owner, number);
+    } else {
+        app.load_projects();
+    }
 
     loop {
         terminal.draw(|frame| render(frame, &app))?;
 
         if let Some(event) = events.next().await {
-            // If we have a target project number and projects just loaded, auto-select it
-            if let event::AppEvent::ProjectsLoaded(Ok(_)) = &event {
-                app.handle_event(event);
-                if let Some(number) = target_project {
-                    app.select_project_by_number(number);
-                }
-            } else {
-                app.handle_event(event);
-            }
+            app.handle_event(event);
         }
 
         // $EDITOR でボディ編集

@@ -110,6 +110,15 @@ impl AppState {
         }
     }
 
+    pub fn start_loading_project_by_number(
+        &mut self,
+        owner: Option<String>,
+        number: i32,
+    ) -> Command {
+        self.loading = LoadingState::Loading("Loading project...".into());
+        Command::LoadProjectByNumber { owner, number }
+    }
+
     pub fn start_loading_board(&mut self, project_id: &str) -> Command {
         self.loading = LoadingState::Loading("Loading board...".into());
         Command::LoadBoard {
@@ -131,6 +140,14 @@ impl AppState {
                 }
             }
             AppEvent::ProjectsLoaded(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                Command::None
+            }
+            AppEvent::ProjectLoaded(Ok(project)) => {
+                self.current_project = Some(project.clone());
+                self.start_loading_board(&project.id)
+            }
+            AppEvent::ProjectLoaded(Err(e)) => {
                 self.loading = LoadingState::Error(e);
                 Command::None
             }
@@ -326,15 +343,6 @@ impl AppState {
             self.current_project = Some(project.clone());
             self.start_loading_board(&project.id)
         } else {
-            Command::None
-        }
-    }
-
-    pub fn select_project_by_number(&mut self, number: i32) -> Command {
-        if let Some(idx) = self.projects.iter().position(|p| p.number == number) {
-            self.select_project(idx)
-        } else {
-            self.loading = LoadingState::Error(format!("Project #{number} not found"));
             Command::None
         }
     }
@@ -4913,5 +4921,75 @@ mod tests {
         let mut state = make_state_with_board(board);
         state.filter.active_filter = Some(ActiveFilter::parse("fix milestone:v1"));
         assert_eq!(state.filtered_card_indices(0), vec![0]);
+    }
+
+    // ========== Project direct loading (skip project list) ==========
+
+    #[test]
+    fn test_start_loading_project_by_number_with_owner() {
+        let mut state = AppState::new(Some("myorg".into()));
+        let cmd = state.start_loading_project_by_number(Some("myorg".into()), 5);
+        assert!(matches!(state.loading, LoadingState::Loading(_)));
+        assert_eq!(
+            cmd,
+            Command::LoadProjectByNumber {
+                owner: Some("myorg".into()),
+                number: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn test_start_loading_project_by_number_without_owner() {
+        let mut state = AppState::new(None);
+        let cmd = state.start_loading_project_by_number(None, 3);
+        assert!(matches!(state.loading, LoadingState::Loading(_)));
+        assert_eq!(
+            cmd,
+            Command::LoadProjectByNumber {
+                owner: None,
+                number: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn test_project_loaded_sets_current_project_and_loads_board() {
+        let mut state = AppState::new(None);
+        state.loading = LoadingState::Loading("Loading project...".into());
+
+        let project = ProjectSummary {
+            id: "proj_42".into(),
+            title: "My Project".into(),
+            number: 5,
+            description: None,
+        };
+        let cmd = state.handle_event(AppEvent::ProjectLoaded(Ok(project)));
+
+        assert!(state.current_project.is_some());
+        let cp = state.current_project.as_ref().unwrap();
+        assert_eq!(cp.id, "proj_42");
+        assert_eq!(cp.title, "My Project");
+        assert_eq!(cp.number, 5);
+        assert!(matches!(state.loading, LoadingState::Loading(_)));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_42".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_project_loaded_error() {
+        let mut state = AppState::new(None);
+        state.loading = LoadingState::Loading("Loading project...".into());
+
+        let cmd = state.handle_event(AppEvent::ProjectLoaded(Err(
+            "Project #99 not found".into(),
+        )));
+
+        assert!(matches!(state.loading, LoadingState::Error(_)));
+        assert_eq!(cmd, Command::None);
     }
 }

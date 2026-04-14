@@ -4,6 +4,10 @@ pub enum Command {
     LoadProjects {
         owner: Option<String>,
     },
+    LoadProjectByNumber {
+        owner: Option<String>,
+        number: i32,
+    },
     LoadBoard {
         project_id: String,
     },

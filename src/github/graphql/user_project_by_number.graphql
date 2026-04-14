@@ -1,0 +1,10 @@
+query UserProjectByNumber($login: String!, $number: Int!) {
+  user(login: $login) {
+    projectV2(number: $number) {
+      id
+      title
+      number
+      shortDescription
+    }
+  }
+}

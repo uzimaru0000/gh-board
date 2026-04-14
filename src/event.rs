@@ -13,6 +13,7 @@ pub enum AppEvent {
     Resize(u16, u16),
     Tick,
     ProjectsLoaded(Result<Vec<ProjectSummary>, String>),
+    ProjectLoaded(Result<ProjectSummary, String>),
     BoardLoaded(Result<Board, String>),
     CardMoved(Result<(), String>),
     CardDeleted(Result<(), String>),

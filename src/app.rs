@@ -41,17 +41,17 @@ impl App {
         self.execute(cmd);
     }
 
+    pub fn load_project_by_number(&mut self, owner: Option<String>, number: i32) {
+        let cmd = self.state.start_loading_project_by_number(owner, number);
+        self.execute(cmd);
+    }
+
     pub fn handle_event(&mut self, event: AppEvent) {
         let cmd = self.state.handle_event(event);
         self.execute(cmd);
     }
 
     pub fn execute_cmd(&mut self, cmd: Command) {
-        self.execute(cmd);
-    }
-
-    pub fn select_project_by_number(&mut self, number: i32) {
-        let cmd = self.state.select_project_by_number(number);
         self.execute(cmd);
     }
 
@@ -68,6 +68,20 @@ impl App {
                         client.list_viewer_projects().await
                     };
                     let _ = tx.send(AppEvent::ProjectsLoaded(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::LoadProjectByNumber { owner, number } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = if let Some(owner) = owner {
+                        client.get_owner_project_by_number(&owner, number).await
+                    } else {
+                        client.get_viewer_project_by_number(number).await
+                    };
+                    let _ = tx.send(AppEvent::ProjectLoaded(
                         result.map_err(|e| e.to_string()),
                     ));
                 });

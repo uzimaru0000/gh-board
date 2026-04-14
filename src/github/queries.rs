@@ -30,6 +30,30 @@ pub struct UserProjects;
 #[derive(GraphQLQuery)]
 #[graphql(
     schema_path = "schema.graphql",
+    query_path = "src/github/graphql/viewer_project_by_number.graphql",
+    response_derives = "Debug"
+)]
+pub struct ViewerProjectByNumber;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/org_project_by_number.graphql",
+    response_derives = "Debug"
+)]
+pub struct OrgProjectByNumber;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/user_project_by_number.graphql",
+    response_derives = "Debug"
+)]
+pub struct UserProjectByNumber;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
     query_path = "src/github/graphql/project_board.graphql",
     response_derives = "Debug"
 )]

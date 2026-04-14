@@ -162,6 +162,71 @@ impl GitHubClient {
         }
     }
 
+    pub async fn get_viewer_project_by_number(
+        &self,
+        number: i32,
+    ) -> anyhow::Result<ProjectSummary> {
+        let vars = viewer_project_by_number::Variables {
+            number: number as i64,
+        };
+        let data = self.query::<ViewerProjectByNumber>(vars).await?;
+        let project = data
+            .viewer
+            .project_v2
+            .context(format!("Project #{number} not found"))?;
+        Ok(ProjectSummary {
+            id: project.id,
+            title: project.title,
+            number: project.number as i32,
+            description: project.short_description,
+        })
+    }
+
+    pub async fn get_owner_project_by_number(
+        &self,
+        owner: &str,
+        number: i32,
+    ) -> anyhow::Result<ProjectSummary> {
+        let org_vars = org_project_by_number::Variables {
+            login: owner.to_string(),
+            number: number as i64,
+        };
+        match self.query::<OrgProjectByNumber>(org_vars).await {
+            Ok(data) => {
+                let org = data.organization.context("Organization not found")?;
+                let project = org
+                    .project_v2
+                    .context(format!("Project #{number} not found"))?;
+                Ok(ProjectSummary {
+                    id: project.id,
+                    title: project.title,
+                    number: project.number as i32,
+                    description: project.short_description,
+                })
+            }
+            Err(_) => {
+                let user_vars = user_project_by_number::Variables {
+                    login: owner.to_string(),
+                    number: number as i64,
+                };
+                let data = self
+                    .query::<UserProjectByNumber>(user_vars)
+                    .await
+                    .context(format!("Failed to fetch project #{number} for '{owner}'"))?;
+                let user = data.user.context("User not found")?;
+                let project = user
+                    .project_v2
+                    .context(format!("Project #{number} not found"))?;
+                Ok(ProjectSummary {
+                    id: project.id,
+                    title: project.title,
+                    number: project.number as i32,
+                    description: project.short_description,
+                })
+            }
+        }
+    }
+
     pub async fn move_card(
         &self,
         project_id: &str,
