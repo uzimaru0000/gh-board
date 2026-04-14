@@ -84,7 +84,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             .cards
             .iter()
             .enumerate()
-            .filter(|(_, card)| app.state.filter.active_filter.as_ref().map_or(true, |f| f.matches(card)))
+            .filter(|(_, card)| app.state.filter.active_filter.as_ref().is_none_or(|f| f.matches(card)))
             .map(|(idx, _)| idx)
             .collect();
 

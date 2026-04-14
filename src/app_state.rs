@@ -631,7 +631,7 @@ impl AppState {
                 self.filter
                     .active_filter
                     .as_ref()
-                    .map_or(true, |f| f.matches(c))
+                    .is_none_or(|f| f.matches(c))
             })
             .count();
         if filtered_len == 0 {
@@ -954,7 +954,7 @@ impl AppState {
                             self.filter
                                 .active_filter
                                 .as_ref()
-                                .map_or(true, |f| f.matches(c))
+                                .is_none_or(|f| f.matches(c))
                         })
                         .count();
                     if filtered_len == 0 {
@@ -1416,7 +1416,7 @@ impl AppState {
                 self.filter
                     .active_filter
                     .as_ref()
-                    .map_or(true, |f| f.matches(card))
+                    .is_none_or(|f| f.matches(card))
             })
             .map(|(idx, _)| idx)
             .collect()

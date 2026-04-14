@@ -186,7 +186,7 @@ fn render_body_field(
     let label_line = Line::from(Span::styled("  Body:", label_style));
 
     let value_line = if body.is_empty() {
-        let msg_style = if is_active { hint_style } else { hint_style };
+        let msg_style = hint_style;
         let msg = if is_active {
             "  (press Enter to edit in $EDITOR)"
         } else {

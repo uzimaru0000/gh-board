@@ -37,10 +37,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if popup.x > 0 {
         let buf = frame.buffer_mut();
         for y in popup.top()..popup.bottom() {
-            if let Some(cell) = buf.cell_mut((popup.x - 1, y)) {
-                if cell.symbol().width() > 1 {
+            if let Some(cell) = buf.cell_mut((popup.x - 1, y))
+                && cell.symbol().width() > 1 {
                     cell.reset();
-                }
             }
         }
     }
