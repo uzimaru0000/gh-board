@@ -11,7 +11,8 @@ use ratatui::{
 
 use crate::app::App;
 use crate::model::project::{
-    Card, CardType, CiStatus, ColumnColor, CustomFieldValue, IssueState, PrState, ReviewDecision,
+    Card, CardType, CiStatus, ColumnColor, CustomFieldValue, IssueState, PrState, ReactionSummary,
+    ReviewDecision,
 };
 use crate::model::state::{
     DetailPane, SIDEBAR_ASSIGNEES, SIDEBAR_LABELS, SIDEBAR_MILESTONE, SIDEBAR_STATUS,
@@ -156,6 +157,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 Span::styled(":comment  ", desc_style),
                 Span::styled("C", hint_style),
                 Span::styled(":comments  ", desc_style),
+                Span::styled("r", hint_style),
+                Span::styled(":react  ", desc_style),
             ]);
         }
         spans.extend([
@@ -165,6 +168,27 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(spans)
     };
     frame.render_widget(footer, footer_area);
+}
+
+/// リアクション集計を1行で表す。count > 0 のもののみ表示。
+pub(crate) fn reactions_line(reactions: &[ReactionSummary]) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for r in reactions.iter().filter(|r| r.count > 0) {
+        let reacted = r.viewer_has_reacted;
+        let style = if reacted {
+            Style::default()
+                .fg(theme().green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme().text_muted)
+        };
+        spans.push(Span::styled(format!("{} {}  ", r.content.emoji(), r.count), style));
+    }
+    if spans.is_empty() {
+        Line::from("")
+    } else {
+        Line::from(spans)
+    }
 }
 
 /// 左ペイン: 本文 + コメント
@@ -213,6 +237,12 @@ fn render_content_pane(
         render_markdown(body_text, &mut tagged);
     }
 
+    // Body reactions (if any)
+    if !card.reactions.is_empty() {
+        push_text(&mut tagged, Line::from(""));
+        push_text(&mut tagged, reactions_line(&card.reactions));
+    }
+
     // Comments
     if !card.comments.is_empty() {
         let separator = Line::from(Span::styled(
@@ -254,6 +284,10 @@ fn render_content_pane(
             );
 
             render_markdown(&comment.body, &mut tagged);
+
+            if !comment.reactions.is_empty() {
+                push_text(&mut tagged, reactions_line(&comment.reactions));
+            }
 
             if i < card.comments.len() - 1 {
                 push_text(&mut tagged, Line::from(""));
@@ -1284,6 +1318,7 @@ mod tests {
             custom_fields: vec![],
             pr_status,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -1303,6 +1338,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: linked,
+            reactions: vec![],
         }
     }
 

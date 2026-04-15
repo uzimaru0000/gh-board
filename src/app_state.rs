@@ -38,8 +38,8 @@ fn is_valid_iso_date(s: &str) -> bool {
 use crate::model::state::{
     ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
     CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
-    LoadingState, NewCardType, PendingIssueCreate, RepoSelectState, SidebarEditMode, ViewMode,
-    SIDEBAR_ASSIGNEES, SIDEBAR_LABELS, SIDEBAR_STATUS,
+    LoadingState, NewCardType, PendingIssueCreate, ReactionPickerState, ReactionTarget,
+    RepoSelectState, SidebarEditMode, ViewMode, SIDEBAR_ASSIGNEES, SIDEBAR_LABELS, SIDEBAR_STATUS,
 };
 
 pub struct AppState {
@@ -90,6 +90,9 @@ pub struct AppState {
     // Comment list
     pub comment_list_state: Option<CommentListState>,
 
+    // Reaction picker
+    pub reaction_picker_state: Option<ReactionPickerState>,
+
     // Loading
     pub loading: LoadingState,
 
@@ -136,6 +139,7 @@ impl AppState {
             edit_card_state: None,
             grab_state: None,
             comment_list_state: None,
+            reaction_picker_state: None,
             loading: LoadingState::Idle,
             views: Vec::new(),
             active_view: None,
@@ -415,6 +419,19 @@ impl AppState {
                 self.loading = LoadingState::Error(e);
                 Command::None
             }
+            AppEvent::ReactionToggled(Ok(())) => {
+                // 楽観的更新済み
+                Command::None
+            }
+            AppEvent::ReactionToggled(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
             AppEvent::CustomFieldUpdated(Ok(())) => {
                 // 楽観的更新済み
                 Command::None
@@ -483,6 +500,7 @@ impl AppState {
             ViewMode::CardGrab => self.handle_card_grab_key(key),
             ViewMode::EditCard => self.handle_edit_card_key(key),
             ViewMode::CommentList => self.handle_comment_list_key(key),
+            ViewMode::ReactionPicker => self.handle_reaction_picker_key(key),
         }
     }
 
@@ -1599,6 +1617,7 @@ impl AppState {
             Action::EditCard => self.start_edit_card(),
             Action::NewComment => self.start_new_comment(),
             Action::OpenCommentList => self.open_comment_list(),
+            Action::OpenReactionPicker => self.open_reaction_picker_for_card(),
             _ => Command::None,
         }
     }
@@ -2023,8 +2042,160 @@ impl AppState {
                     existing: None,
                 }
             }
+            Action::OpenReactionPicker => self.open_reaction_picker_for_comment(),
             _ => Command::None,
         }
+    }
+
+    fn open_reaction_picker_for_card(&mut self) -> Command {
+        let card = match self.selected_card_ref() {
+            Some(c) => c,
+            None => return Command::None,
+        };
+        // DraftIssue はリアクション不可
+        if matches!(card.card_type, CardType::DraftIssue) {
+            return Command::None;
+        }
+        let content_id = match &card.content_id {
+            Some(id) => id.clone(),
+            None => return Command::None,
+        };
+        let return_to = self.mode.clone();
+        self.reaction_picker_state = Some(ReactionPickerState {
+            target: ReactionTarget::CardBody { content_id },
+            cursor: 0,
+            return_to,
+        });
+        self.mode = ViewMode::ReactionPicker;
+        Command::None
+    }
+
+    fn open_reaction_picker_for_comment(&mut self) -> Command {
+        let cls = match &self.comment_list_state {
+            Some(s) => s,
+            None => return Command::None,
+        };
+        let card = match self.selected_card_ref() {
+            Some(c) => c,
+            None => return Command::None,
+        };
+        let comment = match card.comments.get(cls.cursor) {
+            Some(c) => c,
+            None => return Command::None,
+        };
+        let content_id = cls.content_id.clone();
+        let comment_id = comment.id.clone();
+        let return_to = self.mode.clone();
+        self.reaction_picker_state = Some(ReactionPickerState {
+            target: ReactionTarget::Comment {
+                comment_id,
+                content_id,
+            },
+            cursor: 0,
+            return_to,
+        });
+        self.mode = ViewMode::ReactionPicker;
+        Command::None
+    }
+
+    fn handle_reaction_picker_key(&mut self, key: KeyEvent) -> Command {
+        use crate::model::project::ReactionContent;
+        let action = match self.keymap.resolve(KeymapMode::ReactionPicker, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
+        match action {
+            Action::ForceQuit => {
+                self.should_quit = true;
+                Command::None
+            }
+            Action::Back | Action::Quit => {
+                let prev = self
+                    .reaction_picker_state
+                    .as_ref()
+                    .map(|s| s.return_to.clone())
+                    .unwrap_or(ViewMode::Detail);
+                self.reaction_picker_state = None;
+                self.mode = prev;
+                Command::None
+            }
+            Action::MoveLeft => {
+                if let Some(ref mut st) = self.reaction_picker_state {
+                    let len = ReactionContent::all().len();
+                    st.cursor = if st.cursor == 0 { len - 1 } else { st.cursor - 1 };
+                }
+                Command::None
+            }
+            Action::MoveRight => {
+                if let Some(ref mut st) = self.reaction_picker_state {
+                    let len = ReactionContent::all().len();
+                    st.cursor = (st.cursor + 1) % len;
+                }
+                Command::None
+            }
+            Action::ToggleReaction => self.toggle_selected_reaction(),
+            _ => Command::None,
+        }
+    }
+
+    /// リアクションを楽観的に toggle し、AddReaction/RemoveReaction コマンドを返す
+    fn toggle_selected_reaction(&mut self) -> Command {
+        use crate::model::project::{apply_reaction_toggle, ReactionContent};
+        let (target, cursor) = match &self.reaction_picker_state {
+            Some(s) => (s.target.clone(), s.cursor),
+            None => return Command::None,
+        };
+        let content = ReactionContent::all()[cursor];
+        let (subject_id, now_reacted) = match &target {
+            ReactionTarget::CardBody { content_id } => {
+                let card = match self.find_card_by_content_id_mut(content_id) {
+                    Some(c) => c,
+                    None => return Command::None,
+                };
+                let reacted = apply_reaction_toggle(&mut card.reactions, content);
+                (content_id.clone(), reacted)
+            }
+            ReactionTarget::Comment {
+                comment_id,
+                content_id,
+            } => {
+                let card = match self.find_card_by_content_id_mut(content_id) {
+                    Some(c) => c,
+                    None => return Command::None,
+                };
+                let comment = match card.comments.iter_mut().find(|c| &c.id == comment_id) {
+                    Some(c) => c,
+                    None => return Command::None,
+                };
+                let reacted = apply_reaction_toggle(&mut comment.reactions, content);
+                (comment_id.clone(), reacted)
+            }
+        };
+
+        if now_reacted {
+            Command::AddReaction {
+                subject_id,
+                content,
+            }
+        } else {
+            Command::RemoveReaction {
+                subject_id,
+                content,
+            }
+        }
+    }
+
+    fn find_card_by_content_id_mut(&mut self, content_id: &str) -> Option<&mut Card> {
+        let board = self.board.as_mut()?;
+        for col in &mut board.columns {
+            for card in &mut col.cards {
+                if card.content_id.as_deref() == Some(content_id) {
+                    return Some(card);
+                }
+            }
+        }
+        None
     }
 
     fn handle_status_select_key(&mut self, key: KeyEvent) -> Command {
@@ -2679,6 +2850,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -2705,6 +2877,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -2724,6 +2897,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -2743,6 +2917,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -2766,6 +2941,7 @@ mod tests {
             custom_fields,
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -4714,6 +4890,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -4876,6 +5053,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -5133,6 +5311,7 @@ mod tests {
             author: author.into(),
             body: body.into(),
             created_at: "2024-01-01T00:00:00Z".into(),
+            reactions: vec![],
         }
     }
 
@@ -5158,6 +5337,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -5401,6 +5581,7 @@ mod tests {
             author: String::new(), // update_comment returns empty author
             body: "updated body".into(),
             created_at: String::new(),
+            reactions: vec![],
         };
         let _ = state.handle_event(AppEvent::CommentUpdated(Ok(updated)));
 
@@ -5425,6 +5606,248 @@ mod tests {
             "Expected FetchComments when 20 comments, got {:?}",
             cmd
         );
+    }
+
+    // ========== リアクションテスト ==========
+
+    fn make_draft_card_with_id(item_id: &str) -> Card {
+        let mut c = make_card(item_id, "Draft");
+        c.card_type = CardType::DraftIssue;
+        c
+    }
+
+    #[test]
+    fn test_detail_r_opens_reaction_picker_for_card_body() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        // Detail ビューを開く
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+
+        // r キー → ReactionPicker
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::ReactionPicker);
+        let picker = state.reaction_picker_state.as_ref().unwrap();
+        assert!(matches!(picker.target, ReactionTarget::CardBody { .. }));
+        assert_eq!(picker.return_to, ViewMode::Detail);
+        assert_eq!(picker.cursor, 0);
+    }
+
+    #[test]
+    fn test_detail_r_does_nothing_for_draft_issue() {
+        let card = make_draft_card_with_id("1");
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        // DraftIssue では Picker に遷移しない
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert!(state.reaction_picker_state.is_none());
+    }
+
+    #[test]
+    fn test_comment_list_r_opens_reaction_picker_for_comment() {
+        let comments = vec![
+            make_comment("c1", "alice", "hi"),
+            make_comment("c2", "bob", "hello"),
+        ];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+        )));
+        assert_eq!(state.mode, ViewMode::CommentList);
+
+        // j で 2 個目のコメントを選択
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+
+        // r キー → ReactionPicker (対象は c2)
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::ReactionPicker);
+        let picker = state.reaction_picker_state.as_ref().unwrap();
+        match &picker.target {
+            ReactionTarget::Comment { comment_id, .. } => {
+                assert_eq!(comment_id, "c2");
+            }
+            _ => panic!("Expected Comment target"),
+        }
+        assert_eq!(picker.return_to, ViewMode::CommentList);
+    }
+
+    #[test]
+    fn test_reaction_picker_navigation_wraps() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+
+        // cursor = 0 → h (MoveLeft) で 7 にラップ
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('h'))));
+        assert_eq!(state.reaction_picker_state.as_ref().unwrap().cursor, 7);
+
+        // l (MoveRight) で 0 に戻る
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+        assert_eq!(state.reaction_picker_state.as_ref().unwrap().cursor, 0);
+
+        // l で 1
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+        assert_eq!(state.reaction_picker_state.as_ref().unwrap().cursor, 1);
+    }
+
+    #[test]
+    fn test_reaction_picker_enter_adds_reaction_optimistic() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+
+        // cursor = 0 (ThumbsUp) で Enter → AddReaction + 楽観的更新
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        match cmd {
+            Command::AddReaction { subject_id, content } => {
+                assert_eq!(subject_id, "issue_1");
+                assert_eq!(content, ReactionContent::ThumbsUp);
+            }
+            other => panic!("Expected AddReaction, got {:?}", other),
+        }
+        // 楽観的更新
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.reactions.len(), 1);
+        assert_eq!(card.reactions[0].content, ReactionContent::ThumbsUp);
+        assert_eq!(card.reactions[0].count, 1);
+        assert!(card.reactions[0].viewer_has_reacted);
+    }
+
+    #[test]
+    fn test_reaction_picker_enter_removes_reaction_optimistic() {
+        // 既にリアクション済みのカード
+        let mut card = make_issue_card_with_comments("1", "Card A", vec![]);
+        card.reactions.push(ReactionSummary {
+            content: ReactionContent::ThumbsUp,
+            count: 3,
+            viewer_has_reacted: true,
+        });
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+
+        // cursor = 0 (ThumbsUp) で Enter → RemoveReaction + 楽観的更新
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        match cmd {
+            Command::RemoveReaction { subject_id, content } => {
+                assert_eq!(subject_id, "issue_1");
+                assert_eq!(content, ReactionContent::ThumbsUp);
+            }
+            other => panic!("Expected RemoveReaction, got {:?}", other),
+        }
+        // 楽観的更新: count=2, viewer_has_reacted=false
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.reactions.len(), 1);
+        assert_eq!(card.reactions[0].count, 2);
+        assert!(!card.reactions[0].viewer_has_reacted);
+    }
+
+    #[test]
+    fn test_reaction_picker_esc_returns_to_previous_viewmode() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        assert_eq!(state.mode, ViewMode::ReactionPicker);
+
+        // Esc → Detail に戻る
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert!(state.reaction_picker_state.is_none());
+    }
+
+    #[test]
+    fn test_reaction_picker_esc_returns_to_comment_list() {
+        let comments = vec![make_comment("c1", "alice", "hi")];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+        )));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        assert_eq!(state.mode, ViewMode::ReactionPicker);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        // CommentList に戻るべき
+        assert_eq!(state.mode, ViewMode::CommentList);
+    }
+
+    #[test]
+    fn test_reaction_toggled_error_triggers_refresh() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        // current_project を設定して refresh 可能にする
+        state.current_project = Some(ProjectSummary {
+            id: "pid".into(),
+            title: "Proj".into(),
+            number: 1,
+            description: None,
+        });
+
+        let cmd = state.handle_event(AppEvent::ReactionToggled(Err("API err".into())));
+        // エラー時はボードリロード (Loading で上書きされる)
+        assert!(matches!(cmd, Command::LoadBoard { .. }));
+    }
+
+    #[test]
+    fn test_apply_reaction_toggle_add_new() {
+        let mut reactions: Vec<ReactionSummary> = vec![];
+        let now = apply_reaction_toggle(&mut reactions, ReactionContent::Heart);
+        assert!(now);
+        assert_eq!(reactions.len(), 1);
+        assert_eq!(reactions[0].content, ReactionContent::Heart);
+        assert_eq!(reactions[0].count, 1);
+        assert!(reactions[0].viewer_has_reacted);
+    }
+
+    #[test]
+    fn test_apply_reaction_toggle_remove_last() {
+        let mut reactions = vec![ReactionSummary {
+            content: ReactionContent::Heart,
+            count: 1,
+            viewer_has_reacted: true,
+        }];
+        let now = apply_reaction_toggle(&mut reactions, ReactionContent::Heart);
+        assert!(!now);
+        assert!(reactions.is_empty());
+    }
+
+    #[test]
+    fn test_apply_reaction_toggle_increment_when_others_reacted() {
+        // 他人が 2 reacted しているが自分はまだ
+        let mut reactions = vec![ReactionSummary {
+            content: ReactionContent::Rocket,
+            count: 2,
+            viewer_has_reacted: false,
+        }];
+        let now = apply_reaction_toggle(&mut reactions, ReactionContent::Rocket);
+        assert!(now);
+        assert_eq!(reactions[0].count, 3);
+        assert!(reactions[0].viewer_has_reacted);
     }
 
     // --- compute_board_scroll_x tests ---

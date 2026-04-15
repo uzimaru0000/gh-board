@@ -152,6 +152,7 @@ pub enum KeymapMode {
     StatusSelect,
     SidebarEdit,
     CommentList,
+    ReactionPicker,
     CreateCardType,
     CreateCardBody,
     EditCardBody,
@@ -312,6 +313,7 @@ impl Keymap {
         detail_content.insert(KeyBind::char('e'), Action::EditCard);
         detail_content.insert(KeyBind::char('c'), Action::NewComment);
         detail_content.insert(KeyBind::char('C'), Action::OpenCommentList);
+        detail_content.insert(KeyBind::char('r'), Action::OpenReactionPicker);
         keymap.modes.insert(KeymapMode::DetailContent, detail_content);
 
         // Detail sidebar
@@ -360,7 +362,20 @@ impl Keymap {
         comment_list.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
         comment_list.insert(KeyBind::char('e'), Action::EditComment);
         comment_list.insert(KeyBind::char('c'), Action::NewComment);
+        comment_list.insert(KeyBind::char('r'), Action::OpenReactionPicker);
         keymap.modes.insert(KeymapMode::CommentList, comment_list);
+
+        // ReactionPicker mode
+        let mut reaction_picker = HashMap::new();
+        reaction_picker.insert(KeyBind::key(KeyCode::Esc), Action::Back);
+        reaction_picker.insert(KeyBind::char('q'), Action::Back);
+        reaction_picker.insert(KeyBind::char('h'), Action::MoveLeft);
+        reaction_picker.insert(KeyBind::key(KeyCode::Left), Action::MoveLeft);
+        reaction_picker.insert(KeyBind::char('l'), Action::MoveRight);
+        reaction_picker.insert(KeyBind::key(KeyCode::Right), Action::MoveRight);
+        reaction_picker.insert(KeyBind::key(KeyCode::Enter), Action::ToggleReaction);
+        reaction_picker.insert(KeyBind::char(' '), Action::ToggleReaction);
+        keymap.modes.insert(KeymapMode::ReactionPicker, reaction_picker);
 
         // EditCard global keys
         let mut edit_card_global = HashMap::new();
@@ -397,6 +412,7 @@ impl Keymap {
             ("status_select", KeymapMode::StatusSelect),
             ("sidebar_edit", KeymapMode::SidebarEdit),
             ("comment_list", KeymapMode::CommentList),
+            ("reaction_picker", KeymapMode::ReactionPicker),
             ("create_card_type", KeymapMode::CreateCardType),
             ("create_card_body", KeymapMode::CreateCardBody),
             ("edit_card_body", KeymapMode::EditCardBody),
@@ -536,6 +552,8 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "toggle_type" => Some(Action::ToggleType),
         "open_editor" => Some(Action::OpenEditor),
         "toggle_item" => Some(Action::ToggleItem),
+        "open_reaction_picker" => Some(Action::OpenReactionPicker),
+        "toggle_reaction" => Some(Action::ToggleReaction),
         _ => None,
     }
 }
@@ -582,6 +600,8 @@ pub fn action_name(action: Action) -> &'static str {
         Action::ToggleType => "toggle_type",
         Action::OpenEditor => "open_editor",
         Action::ToggleItem => "toggle_item",
+        Action::OpenReactionPicker => "open_reaction_picker",
+        Action::ToggleReaction => "toggle_reaction",
     }
 }
 

@@ -18,6 +18,7 @@ pub enum ViewMode {
     CardGrab,
     EditCard,
     CommentList,
+    ReactionPicker,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -149,6 +150,24 @@ impl Default for CreateCardState {
 pub struct CommentListState {
     pub cursor: usize,
     pub content_id: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReactionPickerState {
+    pub target: ReactionTarget,
+    pub cursor: usize,
+    pub return_to: ViewMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReactionTarget {
+    /// Issue/PR 本体のリアクション (subject_id = content_id)
+    CardBody { content_id: String },
+    /// コメントのリアクション (subject_id = comment_id)
+    Comment {
+        comment_id: String,
+        content_id: String,
+    },
 }
 
 #[derive(Clone, Debug)]

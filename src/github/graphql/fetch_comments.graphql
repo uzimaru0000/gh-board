@@ -4,13 +4,33 @@ query FetchComments($id: ID!, $cursor: String) {
     ... on Issue {
       comments(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { id author { __typename login } body createdAt }
+        nodes {
+          id
+          author { __typename login }
+          body
+          createdAt
+          reactionGroups {
+            content
+            viewerHasReacted
+            reactors { totalCount }
+          }
+        }
       }
     }
     ... on PullRequest {
       comments(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { id author { __typename login } body createdAt }
+        nodes {
+          id
+          author { __typename login }
+          body
+          createdAt
+          reactionGroups {
+            content
+            viewerHasReacted
+            reactors { totalCount }
+          }
+        }
       }
     }
   }

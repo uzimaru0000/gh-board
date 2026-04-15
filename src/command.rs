@@ -83,6 +83,14 @@ pub enum Command {
         content_id: String,
         existing: Option<(String, String)>,
     },
+    AddReaction {
+        subject_id: String,
+        content: crate::model::project::ReactionContent,
+    },
+    RemoveReaction {
+        subject_id: String,
+        content: crate::model::project::ReactionContent,
+    },
     OpenUrl(String),
     UpdateCustomField {
         project_id: String,

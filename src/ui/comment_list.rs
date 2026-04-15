@@ -100,6 +100,24 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 Span::styled(first_line, body_style),
             ]));
 
+            if !comment.reactions.is_empty() {
+                let mut reac_spans = vec![Span::raw("    ")];
+                for r in comment.reactions.iter().filter(|r| r.count > 0) {
+                    let style = if r.viewer_has_reacted {
+                        Style::default()
+                            .fg(theme().green)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme().text_muted)
+                    };
+                    reac_spans.push(Span::styled(
+                        format!("{} {}  ", r.content.emoji(), r.count),
+                        style,
+                    ));
+                }
+                lines.push(Line::from(reac_spans));
+            }
+
             if i < card.comments.len() - 1 {
                 lines.push(Line::from(""));
             }
@@ -130,6 +148,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(":edit  ", desc_style),
         Span::styled("c", hint_style),
         Span::styled(":new  ", desc_style),
+        Span::styled("r", hint_style),
+        Span::styled(":react  ", desc_style),
         Span::styled("Esc", hint_style),
         Span::styled(":close", desc_style),
     ]);
