@@ -1127,7 +1127,18 @@ fn build_board(
                 field_definitions.push(def);
             }
             FieldNodes::ProjectV2IterationField(f) => {
-                let iterations = f
+                let completed = f
+                    .configuration
+                    .completed_iterations
+                    .into_iter()
+                    .map(|it| IterationOption {
+                        id: it.id,
+                        title: it.title,
+                        start_date: it.start_date,
+                        duration: it.duration as i32,
+                        completed: true,
+                    });
+                let upcoming = f
                     .configuration
                     .iterations
                     .into_iter()
@@ -1135,8 +1146,11 @@ fn build_board(
                         id: it.id,
                         title: it.title,
                         start_date: it.start_date,
-                    })
-                    .collect();
+                        duration: it.duration as i32,
+                        completed: false,
+                    });
+                let mut iterations: Vec<IterationOption> = completed.chain(upcoming).collect();
+                iterations.sort_by(|a, b| a.start_date.cmp(&b.start_date));
                 field_definitions.push(FieldDefinition::Iteration {
                     id: f.id,
                     name: f.name,

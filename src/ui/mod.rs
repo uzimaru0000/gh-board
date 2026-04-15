@@ -12,6 +12,7 @@ pub mod help;
 pub mod project_list;
 pub mod reaction_picker;
 pub mod repo_select;
+pub mod roadmap;
 pub mod scroll_fade;
 pub mod statusline;
 pub mod tab_bar;

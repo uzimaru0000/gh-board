@@ -143,6 +143,7 @@ fn parse_key_name(name: &str) -> Result<KeyCode, String> {
 pub enum KeymapMode {
     Board,
     Table,
+    Roadmap,
     ProjectSelect,
     Help,
     Confirm,
@@ -245,6 +246,29 @@ impl Keymap {
         table.insert(KeyBind::char('q'), Action::Quit);
         table.insert(KeyBind::key(KeyCode::Esc), Action::Quit);
         keymap.modes.insert(KeymapMode::Table, table);
+
+        // Roadmap mode (LayoutMode::Roadmap 時の board ハンドラから利用)
+        let mut roadmap = HashMap::new();
+        roadmap.insert(KeyBind::char('j'), Action::MoveDown);
+        roadmap.insert(KeyBind::key(KeyCode::Down), Action::MoveDown);
+        roadmap.insert(KeyBind::char('k'), Action::MoveUp);
+        roadmap.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
+        roadmap.insert(KeyBind::char('g'), Action::FirstItem);
+        roadmap.insert(KeyBind::char('G'), Action::LastItem);
+        roadmap.insert(KeyBind::key(KeyCode::Enter), Action::OpenDetail);
+        roadmap.insert(KeyBind::char('p'), Action::SwitchProject);
+        roadmap.insert(KeyBind::char('r'), Action::Refresh);
+        roadmap.insert(KeyBind::char('?'), Action::ShowHelp);
+        roadmap.insert(KeyBind::char('/'), Action::StartFilter);
+        roadmap.insert(KeyBind::ctrl('u'), Action::ClearFilter);
+        roadmap.insert(KeyBind::char('a'), Action::ArchiveCard);
+        roadmap.insert(KeyBind::char('v'), Action::ShowArchivedList);
+        roadmap.insert(KeyBind::char('n'), Action::NewCard);
+        roadmap.insert(KeyBind::ctrl('g'), Action::ChangeGrouping);
+        roadmap.insert(KeyBind::char('t'), Action::ToggleLayout);
+        roadmap.insert(KeyBind::char('q'), Action::Quit);
+        roadmap.insert(KeyBind::key(KeyCode::Esc), Action::Quit);
+        keymap.modes.insert(KeymapMode::Roadmap, roadmap);
 
         // ProjectSelect mode (文字キーはフィルタ入力に使うため割り当てない)
         let mut project_select = HashMap::new();
