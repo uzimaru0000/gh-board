@@ -109,6 +109,7 @@ pub enum CreateCardField {
     Type,
     Title,
     Body,
+    Submit,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
