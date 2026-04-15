@@ -10,6 +10,7 @@ use crate::app::App;
 use crate::app_state::AppState;
 use crate::model::state::ViewMode;
 use crate::ui::card::{CardWidget, CARD_HEIGHT};
+use crate::ui::scroll_fade::{draw_bottom_arrow, draw_left_arrow, draw_right_arrow, draw_top_arrow};
 use crate::ui::theme::theme;
 
 pub const COLUMN_WIDTH: u16 = 36;
@@ -88,25 +89,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             .map(|(idx, _)| idx)
             .collect();
 
-        let title = format!(" {} ({}) ", column.name, filtered_indices.len());
-        let col_block = Block::default()
-            .title(title)
-            .title_style(title_style)
+        let total = filtered_indices.len();
+
+        // max_visible は Block::inner 計算後に確定するが、title 構築には先に仮算出する必要はない。
+        // 一旦 block を作ってから inner を求め、スクロール情報を含めた title に置き換える。
+        let tmp_block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(border_style);
+            .border_type(BorderType::Rounded);
+        let inner = tmp_block.inner(col_area);
 
-        let inner = col_block.inner(col_area);
-        frame.render_widget(col_block, col_area);
-
-        // Render cards within this column
         let max_visible = (inner.height / CARD_HEIGHT) as usize;
-        if max_visible == 0 || filtered_indices.is_empty() {
-            continue;
-        }
 
         // Calculate scroll offset for this column
-        let scroll = if is_selected_col {
+        let scroll = if is_selected_col && !filtered_indices.is_empty() && max_visible > 0 {
             let selected = app.state.selected_card.min(filtered_indices.len().saturating_sub(1));
             if selected >= app.state.scroll_offset + max_visible {
                 selected - max_visible + 1
@@ -118,6 +113,27 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             0
         };
+
+        // タイトル: スクロール可能なら "N-M/Total"、そうでなければ "(Total)"
+        let title = if AppState::should_show_scrollbar(total, max_visible) {
+            let start = scroll + 1;
+            let end = (scroll + max_visible).min(total);
+            format!(" {} {start}-{end}/{total} ", column.name)
+        } else {
+            format!(" {} ({}) ", column.name, total)
+        };
+        let col_block = Block::default()
+            .title(title)
+            .title_style(title_style)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style);
+
+        frame.render_widget(col_block, col_area);
+
+        if max_visible == 0 || filtered_indices.is_empty() {
+            continue;
+        }
 
         let visible_cards = filtered_indices
             .iter()
@@ -161,6 +177,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         if let Some(area) = grab_shadow_area {
             render_shadow(frame.buffer_mut(), area);
         }
+
+        // カラム上下のボーダー中央に矢印を配置 (画面外にカードがあるときのみ)
+        let has_above = scroll > 0;
+        let has_below = scroll + max_visible < filtered_indices.len();
+        let buf = frame.buffer_mut();
+        if has_above {
+            draw_top_arrow(buf, col_area);
+        }
+        if has_below {
+            draw_bottom_arrow(buf, col_area);
+        }
+    }
+
+    // 横方向の矢印: カラムが左右に隠れている方向のボーダー中央に描画
+    let has_left = scroll_x > 0;
+    let has_right = end < num_cols;
+    let buf = frame.buffer_mut();
+    if has_left {
+        draw_left_arrow(buf, area);
+    }
+    if has_right {
+        draw_right_arrow(buf, area);
     }
 }
 

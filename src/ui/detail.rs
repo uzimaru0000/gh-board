@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::app_state::AppState;
 use crate::model::project::{
     Card, CardType, CiStatus, ColumnColor, CustomFieldValue, IssueState, PrState, ReactionSummary,
     ReviewDecision,
@@ -18,6 +19,7 @@ use crate::model::state::{
     DetailPane, SIDEBAR_ASSIGNEES, SIDEBAR_LABELS, SIDEBAR_MILESTONE, SIDEBAR_STATUS,
 };
 use crate::ui::card::parse_hex_color;
+use crate::ui::scroll_fade::{draw_bottom_arrow, draw_left_arrow, draw_right_arrow, draw_top_arrow};
 use crate::ui::theme::theme;
 
 /// A line tagged as either table content (horizontally scrollable) or normal text (wrappable).
@@ -69,6 +71,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let block_title = format!(" {type_icon}{number_str}{} ", card.title);
 
+    // 縦/横スクロール量のカウンタ (前フレームの Cell 値を使用)
+    let detail_max_scroll = app.state.detail_max_scroll.get();
+    let detail_max_scroll_x = app.state.detail_max_scroll_x.get();
+    let scroll_counter = {
+        let mut parts: Vec<String> = Vec::new();
+        if detail_max_scroll > 0 {
+            let s = app.state.detail_scroll.min(detail_max_scroll);
+            parts.push(format!("↕ {}/{}", s + 1, detail_max_scroll + 1));
+        }
+        if detail_max_scroll_x > 0 {
+            let sx = app.state.detail_scroll_x.min(detail_max_scroll_x);
+            parts.push(format!("↔ {}/{}", sx + 1, detail_max_scroll_x + 1));
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(format!(" {} ", parts.join("  ")))
+        }
+    };
+
     let sidebar_focused = app.state.detail_pane == DetailPane::Sidebar;
     let border_color = if sidebar_focused {
         theme().border_unfocused
@@ -76,7 +98,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         theme().border_focused
     };
 
-    let block = Block::default()
+    let mut block = Block::default()
         .title(block_title)
         .title_style(
             Style::default()
@@ -86,6 +108,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_color));
+    if let Some(counter) = scroll_counter {
+        block = block.title_top(
+            Line::from(Span::styled(
+                counter,
+                Style::default()
+                    .fg(theme().accent)
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .right_aligned(),
+        );
+    }
 
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -338,9 +371,14 @@ fn render_content_pane(
 
     // ── Render ──
     let _ = border_color; // フォーカス表示用に将来使用可能
-    let visible = final_lines.into_iter().skip(scroll).take(content_height);
 
-    for (i, tl) in visible.enumerate() {
+    // 表示中に各行がどの幅を占めるかを取得しておく (横フェード判定用)
+    let visible_lines: Vec<_> = final_lines.into_iter().skip(scroll).take(content_height).collect();
+    let visible_has_overflow_table = visible_lines
+        .iter()
+        .any(|tl| tl.is_table && line_width(&tl.line) > content_width);
+
+    for (i, tl) in visible_lines.into_iter().enumerate() {
         let line_rect = Rect {
             x: content_inner.x,
             y: content_inner.y + i as u16,
@@ -352,6 +390,28 @@ fn render_content_pane(
             frame.render_widget(p, line_rect);
         } else {
             frame.render_widget(tl.line, line_rect);
+        }
+    }
+
+    // 矢印: 上下方向 (popup のボーダー中央に描画)
+    let has_above = scroll > 0;
+    let has_below = AppState::should_show_scrollbar(total_lines, content_height)
+        && scroll + content_height < total_lines;
+    let buf = frame.buffer_mut();
+    if has_above {
+        draw_top_arrow(buf, area);
+    }
+    if has_below {
+        draw_bottom_arrow(buf, area);
+    }
+
+    // 矢印: 横方向 (表示中のテーブル行が領域を超えている場合のみ)
+    if visible_has_overflow_table {
+        if scroll_x > 0 {
+            draw_left_arrow(buf, area);
+        }
+        if scroll_x < max_scroll_x {
+            draw_right_arrow(buf, area);
         }
     }
 }
