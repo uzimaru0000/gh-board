@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Widget},
+    widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget},
 };
 
 use crate::model::project::{Card, CardType, ColumnColor, CustomFieldValue, IssueState, PrState};
@@ -43,8 +43,6 @@ impl Widget for CardWidget<'_> {
             .padding(Padding::horizontal(1));
 
         let inner = block.inner(area);
-        // 前フレームの残渣 (隣カラムのスクロール跡等) を消すため、カード領域全体を明示的にクリア
-        Clear.render(area, buf);
         block.render(area, buf);
 
         if inner.height == 0 || inner.width == 0 {

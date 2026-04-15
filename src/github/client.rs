@@ -826,13 +826,14 @@ fn build_board(
                             }
                         } else if let Some(option_id) = sv.option_id.clone() {
                             let def = field_definitions.iter().find(|d| d.id() == f.id);
-                            let color = match def {
-                                Some(FieldDefinition::SingleSelect { options, .. }) => options
-                                    .iter()
-                                    .find(|o| o.id == option_id)
-                                    .and_then(|o| o.color.clone()),
-                                _ => None,
+                            // 定義に存在するフィールドのみ取り込む (Status/組み込みフィールド除外)
+                            let Some(FieldDefinition::SingleSelect { options, .. }) = def else {
+                                continue;
                             };
+                            let color = options
+                                .iter()
+                                .find(|o| o.id == option_id)
+                                .and_then(|o| o.color.clone());
                             card.custom_fields.push(CustomFieldValue::SingleSelect {
                                 field_id: f.id.clone(),
                                 option_id,
@@ -844,7 +845,12 @@ fn build_board(
                 }
                 FVNode::ProjectV2ItemFieldTextValue(tv) => {
                     use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldTextValueField as TField;
-                    if let TField::ProjectV2Field(f) = &tv.field {
+                    if let TField::ProjectV2Field(f) = &tv.field
+                        && matches!(
+                            field_definitions.iter().find(|d| d.id() == f.id),
+                            Some(FieldDefinition::Text { .. })
+                        )
+                    {
                         card.custom_fields.push(CustomFieldValue::Text {
                             field_id: f.id.clone(),
                             text: tv.text.clone().unwrap_or_default(),
@@ -855,6 +861,10 @@ fn build_board(
                     use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldNumberValueField as NField;
                     if let NField::ProjectV2Field(f) = &nv.field
                         && let Some(n) = nv.number
+                        && matches!(
+                            field_definitions.iter().find(|d| d.id() == f.id),
+                            Some(FieldDefinition::Number { .. })
+                        )
                     {
                         card.custom_fields.push(CustomFieldValue::Number {
                             field_id: f.id.clone(),
@@ -866,6 +876,10 @@ fn build_board(
                     use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldDateValueField as DField;
                     if let DField::ProjectV2Field(f) = &dv.field
                         && let Some(d) = dv.date.clone()
+                        && matches!(
+                            field_definitions.iter().find(|d| d.id() == f.id),
+                            Some(FieldDefinition::Date { .. })
+                        )
                     {
                         card.custom_fields.push(CustomFieldValue::Date {
                             field_id: f.id.clone(),
@@ -875,7 +889,12 @@ fn build_board(
                 }
                 FVNode::ProjectV2ItemFieldIterationValue(iv) => {
                     use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldIterationValueField as IField;
-                    if let IField::ProjectV2IterationField(f) = &iv.field {
+                    if let IField::ProjectV2IterationField(f) = &iv.field
+                        && matches!(
+                            field_definitions.iter().find(|d| d.id() == f.id),
+                            Some(FieldDefinition::Iteration { .. })
+                        )
+                    {
                         card.custom_fields.push(CustomFieldValue::Iteration {
                             field_id: f.id.clone(),
                             iteration_id: iv.iteration_id.clone(),
