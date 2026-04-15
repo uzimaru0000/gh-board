@@ -79,7 +79,8 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
     let action_entries = vec![
         HelpEntry { action: Action::GrabCard, description: "Grab card (move mode)" },
         HelpEntry { action: Action::NewCard, description: "New card (draft/issue)" },
-        HelpEntry { action: Action::DeleteCard, description: "Delete card" },
+        HelpEntry { action: Action::ArchiveCard, description: "Archive card" },
+        HelpEntry { action: Action::ShowArchivedList, description: "Show archived items" },
         HelpEntry { action: Action::OpenDetail, description: "View card detail" },
         HelpEntry { action: Action::SwitchProject, description: "Switch project" },
         HelpEntry { action: Action::ChangeGrouping, description: "Change grouping field" },
@@ -125,7 +126,7 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
     let sidebar_entries = vec![
         HelpEntry { action: Action::MoveDown, description: "Navigate sections (incl. custom fields)" },
         HelpEntry { action: Action::Select, description: "Edit / Select" },
-        HelpEntry { action: Action::DeleteCard, description: "Delete card" },
+        HelpEntry { action: Action::ArchiveCard, description: "Archive card" },
         HelpEntry { action: Action::NextTab, description: "Switch to content" },
         HelpEntry { action: Action::Back, description: "Back to content" },
     ];

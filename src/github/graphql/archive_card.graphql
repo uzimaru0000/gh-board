@@ -1,0 +1,10 @@
+mutation ArchiveCard($projectId: ID!, $itemId: ID!) {
+  archiveProjectV2Item(input: {
+    projectId: $projectId
+    itemId: $itemId
+  }) {
+    item {
+      id
+    }
+  }
+}

@@ -154,6 +154,7 @@ pub enum KeymapMode {
     CommentList,
     GroupBySelect,
     ReactionPicker,
+    ArchivedList,
     CreateCardType,
     CreateCardBody,
     CreateCardSubmit,
@@ -210,7 +211,8 @@ impl Keymap {
         board.insert(KeyBind::char('?'), Action::ShowHelp);
         board.insert(KeyBind::char('/'), Action::StartFilter);
         board.insert(KeyBind::ctrl('u'), Action::ClearFilter);
-        board.insert(KeyBind::char('d'), Action::DeleteCard);
+        board.insert(KeyBind::char('a'), Action::ArchiveCard);
+        board.insert(KeyBind::char('v'), Action::ShowArchivedList);
         board.insert(KeyBind::char('n'), Action::NewCard);
         board.insert(KeyBind::char(' '), Action::GrabCard);
         board.insert(KeyBind::ctrl('g'), Action::ChangeGrouping);
@@ -332,7 +334,7 @@ impl Keymap {
         detail_sidebar.insert(KeyBind::char('k'), Action::MoveUp);
         detail_sidebar.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
         detail_sidebar.insert(KeyBind::key(KeyCode::Enter), Action::Select);
-        detail_sidebar.insert(KeyBind::char('d'), Action::DeleteCard);
+        detail_sidebar.insert(KeyBind::char('a'), Action::ArchiveCard);
         keymap.modes.insert(KeymapMode::DetailSidebar, detail_sidebar);
 
         // Status select dropdown
@@ -393,6 +395,19 @@ impl Keymap {
         reaction_picker.insert(KeyBind::char(' '), Action::ToggleReaction);
         keymap.modes.insert(KeymapMode::ReactionPicker, reaction_picker);
 
+        // ArchivedList mode
+        let mut archived_list = HashMap::new();
+        archived_list.insert(KeyBind::key(KeyCode::Esc), Action::Back);
+        archived_list.insert(KeyBind::char('q'), Action::Back);
+        archived_list.insert(KeyBind::char('j'), Action::MoveDown);
+        archived_list.insert(KeyBind::key(KeyCode::Down), Action::MoveDown);
+        archived_list.insert(KeyBind::char('k'), Action::MoveUp);
+        archived_list.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
+        archived_list.insert(KeyBind::key(KeyCode::Enter), Action::OpenDetail);
+        archived_list.insert(KeyBind::char('u'), Action::UnarchiveCard);
+        archived_list.insert(KeyBind::char('r'), Action::Refresh);
+        keymap.modes.insert(KeymapMode::ArchivedList, archived_list);
+
         // EditCard global keys
         let mut edit_card_global = HashMap::new();
         edit_card_global.insert(KeyBind::ctrl('s'), Action::Submit);
@@ -430,6 +445,7 @@ impl Keymap {
             ("comment_list", KeymapMode::CommentList),
             ("group_by_select", KeymapMode::GroupBySelect),
             ("reaction_picker", KeymapMode::ReactionPicker),
+            ("archived_list", KeymapMode::ArchivedList),
             ("create_card_type", KeymapMode::CreateCardType),
             ("create_card_body", KeymapMode::CreateCardBody),
             ("edit_card_body", KeymapMode::EditCardBody),
@@ -545,7 +561,9 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "open_detail" => Some(Action::OpenDetail),
         "grab_card" => Some(Action::GrabCard),
         "new_card" => Some(Action::NewCard),
-        "delete_card" => Some(Action::DeleteCard),
+        "archive_card" => Some(Action::ArchiveCard),
+        "unarchive_card" => Some(Action::UnarchiveCard),
+        "show_archived_list" => Some(Action::ShowArchivedList),
         "start_filter" => Some(Action::StartFilter),
         "clear_filter" => Some(Action::ClearFilter),
         "refresh" => Some(Action::Refresh),
@@ -592,7 +610,9 @@ pub fn action_name(action: Action) -> &'static str {
         Action::OpenDetail => "open_detail",
         Action::GrabCard => "grab_card",
         Action::NewCard => "new_card",
-        Action::DeleteCard => "delete_card",
+        Action::ArchiveCard => "archive_card",
+        Action::UnarchiveCard => "unarchive_card",
+        Action::ShowArchivedList => "show_archived_list",
         Action::StartFilter => "start_filter",
         Action::ClearFilter => "clear_filter",
         Action::Refresh => "refresh",
@@ -727,8 +747,12 @@ mod tests {
         let keymap = Keymap::default_keymap();
 
         assert_eq!(
-            keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('d'), KeyModifiers::NONE)),
-            Some(Action::DeleteCard)
+            keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('a'), KeyModifiers::NONE)),
+            Some(Action::ArchiveCard)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('v'), KeyModifiers::NONE)),
+            Some(Action::ShowArchivedList)
         );
         assert_eq!(
             keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('n'), KeyModifiers::NONE)),

@@ -20,6 +20,7 @@ pub enum ViewMode {
     CommentList,
     GroupBySelect,
     ReactionPicker,
+    ArchivedList,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,7 +94,15 @@ pub struct ConfirmState {
 
 #[derive(Clone, Debug)]
 pub enum ConfirmAction {
-    DeleteCard { item_id: String },
+    ArchiveCard { item_id: String },
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ArchivedListState {
+    pub cards: Vec<super::project::Card>,
+    pub selected: usize,
+    pub loading: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug)]

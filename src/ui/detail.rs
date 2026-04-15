@@ -416,7 +416,7 @@ fn render_content_pane(
     }
 }
 
-/// 右ペイン: サイドバー (Status, Assignees, Labels, Delete)
+/// 右ペイン: サイドバー (Status, Assignees, Labels, Archive)
 fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     let card = match app.state.selected_card_ref() {
         Some(c) => c,
@@ -619,17 +619,22 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     let btn_width = inner.width as usize;
 
-    // ── Delete button ──
-    let delete_idx = app.state.sidebar_delete_index();
-    let is_delete_focused = focused && selected == delete_idx;
-    let btn_bg = if is_delete_focused {
-        theme().red
+    // ── Archive button ──
+    let archive_idx = app.state.sidebar_archive_index();
+    let is_archive_focused = focused && selected == archive_idx;
+    let btn_bg = if is_archive_focused {
+        theme().yellow
     } else {
         theme().border_unfocused
     };
     let edge_style = Style::default().fg(btn_bg);
-    let fill_style = Style::default().fg(theme().text).bg(btn_bg);
-    let label = "Delete";
+    let text_color = if is_archive_focused {
+        theme().text_inverted
+    } else {
+        theme().text
+    };
+    let fill_style = Style::default().fg(text_color).bg(btn_bg);
+    let label = "Archive";
     let pad_total = btn_width.saturating_sub(label.len());
     let pad_left = pad_total / 2;
     let pad_right = pad_total - pad_left;
@@ -1379,6 +1384,7 @@ mod tests {
             pr_status,
             linked_prs: vec![],
             reactions: vec![],
+            archived: false,
         }
     }
 
@@ -1399,6 +1405,7 @@ mod tests {
             pr_status: None,
             linked_prs: linked,
             reactions: vec![],
+            archived: false,
         }
     }
 
