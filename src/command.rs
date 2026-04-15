@@ -10,12 +10,13 @@ pub enum Command {
     },
     LoadBoard {
         project_id: String,
+        preferred_grouping_field_name: Option<String>,
     },
     MoveCard {
         project_id: String,
         item_id: String,
         field_id: String,
-        option_id: String,
+        value: CustomFieldValueInput,
     },
     DeleteCard {
         project_id: String,
@@ -25,16 +26,15 @@ pub enum Command {
         project_id: String,
         title: String,
         body: String,
-        field_id: String,
-        option_id: String,
+        /// 作成後に設定する初期フィールド値 (SingleSelect 限定。Iteration や None 軸では None)
+        initial_status: Option<InitialStatus>,
     },
     CreateIssue {
         project_id: String,
         repository_id: String,
         title: String,
         body: String,
-        field_id: String,
-        option_id: String,
+        initial_status: Option<InitialStatus>,
     },
     OpenEditor {
         content: String,
@@ -105,4 +105,10 @@ pub enum CustomFieldValueInput {
     Text { text: String },
     Number { number: f64 },
     Date { date: String },
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct InitialStatus {
+    pub field_id: String,
+    pub option_id: String,
 }

@@ -64,14 +64,6 @@ pub struct ProjectBoard;
 #[derive(GraphQLQuery)]
 #[graphql(
     schema_path = "schema.graphql",
-    query_path = "src/github/graphql/move_card.graphql",
-    response_derives = "Debug"
-)]
-pub struct MoveCard;
-
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "schema.graphql",
     query_path = "src/github/graphql/delete_card.graphql",
     response_derives = "Debug"
 )]
@@ -212,14 +204,6 @@ pub struct UpdateIssueComment;
     response_derives = "Debug"
 )]
 pub struct ViewerLogin;
-
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "schema.graphql",
-    query_path = "src/github/graphql/update_field_value.graphql",
-    response_derives = "Debug"
-)]
-pub struct UpdateFieldValue;
 
 #[derive(GraphQLQuery)]
 #[graphql(

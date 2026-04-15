@@ -66,6 +66,7 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg
 
     let mut app = App::new(github, event_tx, owner.clone());
     app.state.set_views(cfg.view);
+    app.state.preferred_grouping_field_name = cfg.board.group_by.clone();
 
     let keymap = keymap::Keymap::default_keymap().with_overrides(&cfg.keys);
     app.state.set_keymap(keymap);
@@ -258,6 +259,11 @@ fn render(frame: &mut Frame, app: &App) {
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
             ui::comment_list::render(frame, area, app);
+        }
+        ViewMode::GroupBySelect => {
+            render_board_with_tabs(frame, main_area, app);
+            ui::statusline::render(frame, area, app);
+            ui::group_by_select::render(frame, area, app);
         }
     }
 

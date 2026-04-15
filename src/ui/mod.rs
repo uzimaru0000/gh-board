@@ -6,6 +6,7 @@ pub mod detail;
 pub mod create_card;
 pub mod edit_card;
 pub mod filter_bar;
+pub mod group_by_select;
 pub mod help;
 pub mod project_list;
 pub mod repo_select;

@@ -152,6 +152,7 @@ pub enum KeymapMode {
     StatusSelect,
     SidebarEdit,
     CommentList,
+    GroupBySelect,
     CreateCardType,
     CreateCardBody,
     EditCardBody,
@@ -210,8 +211,7 @@ impl Keymap {
         board.insert(KeyBind::char('d'), Action::DeleteCard);
         board.insert(KeyBind::char('n'), Action::NewCard);
         board.insert(KeyBind::char(' '), Action::GrabCard);
-        board.insert(KeyBind::char('H'), Action::MoveCardLeft);
-        board.insert(KeyBind::char('L'), Action::MoveCardRight);
+        board.insert(KeyBind::ctrl('g'), Action::ChangeGrouping);
         board.insert(KeyBind::char('q'), Action::Quit);
         board.insert(KeyBind::key(KeyCode::Esc), Action::Quit);
         keymap.modes.insert(KeymapMode::Board, board);
@@ -362,6 +362,17 @@ impl Keymap {
         comment_list.insert(KeyBind::char('c'), Action::NewComment);
         keymap.modes.insert(KeymapMode::CommentList, comment_list);
 
+        // GroupBySelect mode
+        let mut group_by_select = HashMap::new();
+        group_by_select.insert(KeyBind::key(KeyCode::Esc), Action::Back);
+        group_by_select.insert(KeyBind::char('q'), Action::Back);
+        group_by_select.insert(KeyBind::char('j'), Action::MoveDown);
+        group_by_select.insert(KeyBind::key(KeyCode::Down), Action::MoveDown);
+        group_by_select.insert(KeyBind::char('k'), Action::MoveUp);
+        group_by_select.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
+        group_by_select.insert(KeyBind::key(KeyCode::Enter), Action::Select);
+        keymap.modes.insert(KeymapMode::GroupBySelect, group_by_select);
+
         // EditCard global keys
         let mut edit_card_global = HashMap::new();
         edit_card_global.insert(KeyBind::ctrl('s'), Action::Submit);
@@ -397,6 +408,7 @@ impl Keymap {
             ("status_select", KeymapMode::StatusSelect),
             ("sidebar_edit", KeymapMode::SidebarEdit),
             ("comment_list", KeymapMode::CommentList),
+            ("group_by_select", KeymapMode::GroupBySelect),
             ("create_card_type", KeymapMode::CreateCardType),
             ("create_card_body", KeymapMode::CreateCardBody),
             ("edit_card_body", KeymapMode::EditCardBody),
@@ -510,8 +522,6 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "next_tab" => Some(Action::NextTab),
         "prev_tab" => Some(Action::PrevTab),
         "open_detail" => Some(Action::OpenDetail),
-        "move_card_left" => Some(Action::MoveCardLeft),
-        "move_card_right" => Some(Action::MoveCardRight),
         "grab_card" => Some(Action::GrabCard),
         "new_card" => Some(Action::NewCard),
         "delete_card" => Some(Action::DeleteCard),
@@ -520,6 +530,7 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "refresh" => Some(Action::Refresh),
         "show_help" => Some(Action::ShowHelp),
         "switch_project" => Some(Action::SwitchProject),
+        "change_grouping" => Some(Action::ChangeGrouping),
         "open_in_browser" => Some(Action::OpenInBrowser),
         "edit_card" => Some(Action::EditCard),
         "new_comment" => Some(Action::NewComment),
@@ -556,8 +567,6 @@ pub fn action_name(action: Action) -> &'static str {
         Action::NextTab => "next_tab",
         Action::PrevTab => "prev_tab",
         Action::OpenDetail => "open_detail",
-        Action::MoveCardLeft => "move_card_left",
-        Action::MoveCardRight => "move_card_right",
         Action::GrabCard => "grab_card",
         Action::NewCard => "new_card",
         Action::DeleteCard => "delete_card",
@@ -566,6 +575,7 @@ pub fn action_name(action: Action) -> &'static str {
         Action::Refresh => "refresh",
         Action::ShowHelp => "show_help",
         Action::SwitchProject => "switch_project",
+        Action::ChangeGrouping => "change_grouping",
         Action::OpenInBrowser => "open_in_browser",
         Action::EditCard => "edit_card",
         Action::NewComment => "new_comment",
@@ -706,14 +716,6 @@ mod tests {
         assert_eq!(
             keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Enter, KeyModifiers::NONE)),
             Some(Action::OpenDetail)
-        );
-        assert_eq!(
-            keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('H'), KeyModifiers::NONE)),
-            Some(Action::MoveCardLeft)
-        );
-        assert_eq!(
-            keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('L'), KeyModifiers::NONE)),
-            Some(Action::MoveCardRight)
         );
     }
 

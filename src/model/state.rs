@@ -18,6 +18,7 @@ pub enum ViewMode {
     CardGrab,
     EditCard,
     CommentList,
+    GroupBySelect,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,6 +153,12 @@ pub struct CommentListState {
 }
 
 #[derive(Clone, Debug)]
+pub struct GroupBySelectState {
+    pub cursor: usize,
+    pub candidates: Vec<super::project::Grouping>,
+}
+
+#[derive(Clone, Debug)]
 pub struct RepoSelectState {
     pub selected_index: usize,
     pub pending_create: PendingIssueCreate,
@@ -161,8 +168,7 @@ pub struct RepoSelectState {
 pub struct PendingIssueCreate {
     pub title: String,
     pub body: String,
-    pub field_id: String,
-    pub option_id: String,
+    pub initial_status: Option<super::super::command::InitialStatus>,
 }
 
 #[derive(Clone, Debug)]

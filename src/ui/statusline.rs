@@ -61,6 +61,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut spans = vec![left, Span::raw(" ")];
 
+    if let Some(grouping_name) = app
+        .state
+        .board
+        .as_ref()
+        .and_then(|b| b.grouping.field_name())
+    {
+        spans.push(Span::styled(
+            format!("[group: {grouping_name}]"),
+            Style::default()
+                .fg(theme().blue)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw(" "));
+    }
+
     if let Some(view_idx) = app.state.active_view {
         if let Some(view) = app.state.views.get(view_idx) {
             let view_text = format!("[view: {}]", view.name);
@@ -103,7 +118,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let hints: Vec<String> = [
             (Action::OpenDetail, "detail"),
             (Action::GrabCard, "grab"),
-            (Action::MoveCardLeft, "move"),
             (Action::NewCard, "new"),
             (Action::DeleteCard, "delete"),
             (Action::StartFilter, "filter"),
@@ -123,22 +137,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
-        // MoveCardLeft/MoveCardRight を統合表示
-        let move_l = short_key(app, mode, Action::MoveCardLeft);
-        let move_r = short_key(app, mode, Action::MoveCardRight);
-        let mut final_hints: Vec<String> = Vec::new();
-        for hint in &hints {
-            if hint.ends_with(":move") {
-                final_hints.push(format!("{move_l}/{move_r}:move"));
-            } else {
-                final_hints.push(hint.clone());
-            }
-        }
-        // remove duplicate ":move" entry from MoveCardRight
-        final_hints.dedup_by(|a, b| a.ends_with(":move") && b.ends_with(":move"));
-
         spans.push(Span::styled(
-            format!("{} ", final_hints.join("  ")),
+            format!("{} ", hints.join("  ")),
             Style::default().fg(theme().text_muted),
         ));
     }

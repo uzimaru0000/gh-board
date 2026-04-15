@@ -78,12 +78,11 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
     lines.push(Line::from(Span::styled(" Actions", section_style)));
     let action_entries = vec![
         HelpEntry { action: Action::GrabCard, description: "Grab card (move mode)" },
-        HelpEntry { action: Action::MoveCardLeft, description: "Move card left" },
-        HelpEntry { action: Action::MoveCardRight, description: "Move card right" },
         HelpEntry { action: Action::NewCard, description: "New card (draft/issue)" },
         HelpEntry { action: Action::DeleteCard, description: "Delete card" },
         HelpEntry { action: Action::OpenDetail, description: "View card detail" },
         HelpEntry { action: Action::SwitchProject, description: "Switch project" },
+        HelpEntry { action: Action::ChangeGrouping, description: "Change grouping field" },
         HelpEntry { action: Action::StartFilter, description: "Filter (label: assignee: milestone: |:OR)" },
         HelpEntry { action: Action::ClearFilter, description: "Clear filter / view" },
         HelpEntry { action: Action::Refresh, description: "Refresh" },
@@ -159,6 +158,15 @@ fn add_section_lines(
     }
 }
 
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::vertical([Constraint::Percentage(percent_y)])
+        .flex(Flex::Center)
+        .split(area);
+    Layout::horizontal([Constraint::Percentage(percent_x)])
+        .flex(Flex::Center)
+        .split(vertical[0])[0]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,13 +190,4 @@ mod tests {
         assert!(filter_str.contains("/"));
         assert!(filter_str.contains("f"));
     }
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([Constraint::Percentage(percent_y)])
-        .flex(Flex::Center)
-        .split(area);
-    Layout::horizontal([Constraint::Percentage(percent_x)])
-        .flex(Flex::Center)
-        .split(vertical[0])[0]
 }
