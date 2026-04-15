@@ -3,9 +3,11 @@ use graphql_client::GraphQLQuery;
 use tokio::process::Command;
 
 use super::queries::*;
+use crate::command::CustomFieldValueInput;
 use crate::model::project::{
-    Board, Card, CardType, CiStatus, Column, ColumnColor, Comment, IssueState, Label, LinkedPr,
-    PrState, PrStatus, ProjectSummary, Repository, ReviewDecision,
+    Board, Card, CardType, CiStatus, Column, ColumnColor, Comment, CustomFieldValue,
+    FieldDefinition, IssueState, IterationOption, Label, LinkedPr, PrState, PrStatus,
+    ProjectSummary, Repository, ReviewDecision, SingleSelectOption,
 };
 
 // Type aliases for readability
@@ -264,6 +266,76 @@ impl GitHubClient {
             item_id: item_id.to_string(),
         };
         self.query::<DeleteCard>(vars).await?;
+        Ok(())
+    }
+
+    pub async fn update_custom_field(
+        &self,
+        project_id: &str,
+        item_id: &str,
+        field_id: &str,
+        value: &CustomFieldValueInput,
+    ) -> anyhow::Result<()> {
+        use update_field_value::ProjectV2FieldValue;
+        let gql_value = match value {
+            CustomFieldValueInput::SingleSelect { option_id } => ProjectV2FieldValue {
+                date: None,
+                iteration_id: None,
+                number: None,
+                single_select_option_id: Some(option_id.clone()),
+                text: None,
+            },
+            CustomFieldValueInput::Iteration { iteration_id } => ProjectV2FieldValue {
+                date: None,
+                iteration_id: Some(iteration_id.clone()),
+                number: None,
+                single_select_option_id: None,
+                text: None,
+            },
+            CustomFieldValueInput::Text { text } => ProjectV2FieldValue {
+                date: None,
+                iteration_id: None,
+                number: None,
+                single_select_option_id: None,
+                text: Some(text.clone()),
+            },
+            CustomFieldValueInput::Number { number } => ProjectV2FieldValue {
+                date: None,
+                iteration_id: None,
+                number: Some(*number),
+                single_select_option_id: None,
+                text: None,
+            },
+            CustomFieldValueInput::Date { date } => ProjectV2FieldValue {
+                date: Some(date.clone()),
+                iteration_id: None,
+                number: None,
+                single_select_option_id: None,
+                text: None,
+            },
+        };
+        let vars = update_field_value::Variables {
+            project_id: project_id.to_string(),
+            item_id: item_id.to_string(),
+            field_id: field_id.to_string(),
+            value: gql_value,
+        };
+        self.query::<UpdateFieldValue>(vars).await?;
+        Ok(())
+    }
+
+    pub async fn clear_custom_field(
+        &self,
+        project_id: &str,
+        item_id: &str,
+        field_id: &str,
+    ) -> anyhow::Result<()> {
+        let vars = clear_field_value::Variables {
+            project_id: project_id.to_string(),
+            item_id: item_id.to_string(),
+            field_id: field_id.to_string(),
+        };
+        self.query::<ClearFieldValue>(vars).await?;
         Ok(())
     }
 
@@ -656,20 +728,72 @@ fn build_board(
 ) -> anyhow::Result<Board> {
     let field_nodes = field_nodes.unwrap_or_default();
 
-    // Find Status field (or first single-select as fallback)
+    // Find Status field (or first single-select as fallback) and collect other fields
     let mut first_ss: Option<(String, Vec<SSOption>)> = None;
     let mut status_match: Option<(String, Vec<SSOption>)> = None;
+    let mut field_definitions: Vec<FieldDefinition> = Vec::new();
+    let mut status_candidate_ss: Option<(String, Vec<SSOption>)> = None;
 
     for node in field_nodes.into_iter().flatten() {
-        if let FieldNodes::ProjectV2SingleSelectField(ssf) = node {
-            if ssf.name == "Status" {
-                status_match = Some((ssf.id, ssf.options));
-                break;
+        match node {
+            FieldNodes::ProjectV2SingleSelectField(ssf) => {
+                if ssf.name == "Status" {
+                    status_match = Some((ssf.id.clone(), ssf.options.clone()));
+                    continue;
+                }
+                if first_ss.is_none() && status_candidate_ss.is_none() {
+                    status_candidate_ss = Some((ssf.id.clone(), ssf.options.clone()));
+                }
+                field_definitions.push(FieldDefinition::SingleSelect {
+                    id: ssf.id,
+                    name: ssf.name,
+                    options: ssf
+                        .options
+                        .into_iter()
+                        .map(|o| SingleSelectOption {
+                            id: o.id,
+                            name: o.name,
+                            color: convert_column_color(&o.color),
+                        })
+                        .collect(),
+                });
             }
-            if first_ss.is_none() {
-                first_ss = Some((ssf.id, ssf.options));
+            FieldNodes::ProjectV2Field(f) => {
+                use project_board::ProjectV2FieldType;
+                let name = f.name;
+                let id = f.id;
+                let def = match f.data_type {
+                    ProjectV2FieldType::TEXT => FieldDefinition::Text { id, name },
+                    ProjectV2FieldType::NUMBER => FieldDefinition::Number { id, name },
+                    ProjectV2FieldType::DATE => FieldDefinition::Date { id, name },
+                    // TITLE/ASSIGNEES/LABELS/MILESTONE/LINKED_PULL_REQUESTS/REPOSITORY/REVIEWERS
+                    // 等の組み込みフィールドはスキップ
+                    _ => continue,
+                };
+                field_definitions.push(def);
+            }
+            FieldNodes::ProjectV2IterationField(f) => {
+                let iterations = f
+                    .configuration
+                    .iterations
+                    .into_iter()
+                    .map(|it| IterationOption {
+                        id: it.id,
+                        title: it.title,
+                        start_date: it.start_date,
+                    })
+                    .collect();
+                field_definitions.push(FieldDefinition::Iteration {
+                    id: f.id,
+                    name: f.name,
+                    iterations,
+                });
             }
         }
+    }
+
+    if first_ss.is_none() {
+        first_ss = status_candidate_ss;
     }
 
     let (status_field_id, options) = status_match
@@ -689,17 +813,99 @@ fn build_board(
     let mut no_status_cards = Vec::new();
 
     for item in items {
-        let card = convert_item(&item);
+        let mut card = convert_item(&item);
 
         let fv_nodes = item.field_values.nodes.unwrap_or_default();
-        let status_option_id = fv_nodes.iter().flatten().find_map(|fv| {
-            if let FVNode::ProjectV2ItemFieldSingleSelectValue(sv) = fv
-                && let SSValueField::ProjectV2SingleSelectField(f) = &sv.field
-                    && f.id == status_field_id {
-                        return sv.option_id.clone();
+        let mut status_option_id: Option<String> = None;
+        for fv in fv_nodes.iter().flatten() {
+            match fv {
+                FVNode::ProjectV2ItemFieldSingleSelectValue(sv) => {
+                    if let SSValueField::ProjectV2SingleSelectField(f) = &sv.field {
+                        if f.id == status_field_id {
+                            if let Some(oid) = sv.option_id.clone() {
+                                status_option_id = Some(oid);
+                            }
+                        } else if let Some(option_id) = sv.option_id.clone() {
+                            let def = field_definitions.iter().find(|d| d.id() == f.id);
+                            // 定義に存在するフィールドのみ取り込む (Status/組み込みフィールド除外)
+                            let Some(FieldDefinition::SingleSelect { options, .. }) = def else {
+                                continue;
+                            };
+                            let color = options
+                                .iter()
+                                .find(|o| o.id == option_id)
+                                .and_then(|o| o.color.clone());
+                            card.custom_fields.push(CustomFieldValue::SingleSelect {
+                                field_id: f.id.clone(),
+                                option_id,
+                                name: sv.name.clone().unwrap_or_default(),
+                                color,
+                            });
+                        }
                     }
-            None
-        });
+                }
+                FVNode::ProjectV2ItemFieldTextValue(tv) => {
+                    use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldTextValueField as TField;
+                    if let TField::ProjectV2Field(f) = &tv.field
+                        && matches!(
+                            field_definitions.iter().find(|d| d.id() == f.id),
+                            Some(FieldDefinition::Text { .. })
+                        )
+                    {
+                        card.custom_fields.push(CustomFieldValue::Text {
+                            field_id: f.id.clone(),
+                            text: tv.text.clone().unwrap_or_default(),
+                        });
+                    }
+                }
+                FVNode::ProjectV2ItemFieldNumberValue(nv) => {
+                    use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldNumberValueField as NField;
+                    if let NField::ProjectV2Field(f) = &nv.field
+                        && let Some(n) = nv.number
+                        && matches!(
+                            field_definitions.iter().find(|d| d.id() == f.id),
+                            Some(FieldDefinition::Number { .. })
+                        )
+                    {
+                        card.custom_fields.push(CustomFieldValue::Number {
+                            field_id: f.id.clone(),
+                            number: n,
+                        });
+                    }
+                }
+                FVNode::ProjectV2ItemFieldDateValue(dv) => {
+                    use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldDateValueField as DField;
+                    if let DField::ProjectV2Field(f) = &dv.field
+                        && let Some(d) = dv.date.clone()
+                        && matches!(
+                            field_definitions.iter().find(|d| d.id() == f.id),
+                            Some(FieldDefinition::Date { .. })
+                        )
+                    {
+                        card.custom_fields.push(CustomFieldValue::Date {
+                            field_id: f.id.clone(),
+                            date: d,
+                        });
+                    }
+                }
+                FVNode::ProjectV2ItemFieldIterationValue(iv) => {
+                    use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldIterationValueField as IField;
+                    if let IField::ProjectV2IterationField(f) = &iv.field
+                        && matches!(
+                            field_definitions.iter().find(|d| d.id() == f.id),
+                            Some(FieldDefinition::Iteration { .. })
+                        )
+                    {
+                        card.custom_fields.push(CustomFieldValue::Iteration {
+                            field_id: f.id.clone(),
+                            iteration_id: iv.iteration_id.clone(),
+                            title: iv.title.clone(),
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
 
         match status_option_id {
             Some(opt_id) => {
@@ -730,6 +936,7 @@ fn build_board(
         status_field_id,
         columns,
         repositories,
+        field_definitions,
     })
 }
 
@@ -899,6 +1106,7 @@ fn convert_item(item: &ItemNode) -> Card {
                         .collect()
                 })
                 .unwrap_or_default(),
+            custom_fields: Vec::new(),
         },
         Some(Content::PullRequest(pr)) => Card {
             pr_status: Some(build_pr_status(pr)),
@@ -958,6 +1166,7 @@ fn convert_item(item: &ItemNode) -> Card {
                         .collect()
                 })
                 .unwrap_or_default(),
+            custom_fields: Vec::new(),
         },
         Some(Content::DraftIssue(draft)) => Card {
             pr_status: None,
@@ -973,6 +1182,7 @@ fn convert_item(item: &ItemNode) -> Card {
             body: Some(draft.body.clone()),
             comments: Vec::new(),
             milestone: None,
+            custom_fields: Vec::new(),
         },
         None => Card {
             pr_status: None,
@@ -988,6 +1198,7 @@ fn convert_item(item: &ItemNode) -> Card {
             body: None,
             comments: Vec::new(),
             milestone: None,
+            custom_fields: Vec::new(),
         },
     }
 }

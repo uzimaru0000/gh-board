@@ -2,6 +2,10 @@
 
 GitHub Projects V2 をターミナル上でカンバンボード形式で操作する `gh` CLI 拡張。
 
+## 作業ディレクトリ
+
+worktree (`.claude/worktrees/<name>/`) 配下で起動された場合は、その worktree 内でのみ作業する。`cd` でリポジトリルートや他の worktree に移動しない。ビルド・テスト・コミット・PR 作成はすべて現在の worktree から行う。
+
 ## 技術スタック
 
 - Rust (edition 2024)
