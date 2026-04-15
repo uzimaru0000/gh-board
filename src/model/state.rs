@@ -35,6 +35,20 @@ pub const SIDEBAR_ASSIGNEES: usize = 1;
 pub const SIDEBAR_LABELS: usize = 2;
 pub const SIDEBAR_MILESTONE: usize = 3;
 
+/// 詳細ビューサイドバーの論理セクション。
+/// インデックスは `AppState::sidebar_sections()` で動的に解決される。
+#[derive(Clone, Debug, PartialEq)]
+pub enum SidebarSection {
+    Status,
+    Assignees,
+    Labels,
+    Milestone,
+    CustomField(usize),
+    Parent,
+    SubIssue(usize),
+    Archive,
+}
+
 #[derive(Clone, Debug)]
 pub enum SidebarEditMode {
     Labels {

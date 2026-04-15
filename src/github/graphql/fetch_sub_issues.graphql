@@ -1,0 +1,16 @@
+query FetchSubIssues($id: ID!) {
+  node(id: $id) {
+    __typename
+    ... on Issue {
+      subIssues(first: 50) {
+        nodes {
+          id
+          number
+          title
+          url
+          state
+        }
+      }
+    }
+  }
+}

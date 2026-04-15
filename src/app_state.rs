@@ -40,9 +40,10 @@ use crate::model::state::{
     ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
     CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
     GroupBySelectState, LoadingState, NewCardType, PendingIssueCreate, ReactionPickerState,
-    ReactionTarget, RepoSelectState, SidebarEditMode, ViewMode, SIDEBAR_ASSIGNEES, SIDEBAR_LABELS,
-    SIDEBAR_STATUS,
+    ReactionTarget, RepoSelectState, SidebarEditMode, SidebarSection, ViewMode,
 };
+#[cfg(test)]
+use crate::model::state::{SIDEBAR_ASSIGNEES, SIDEBAR_LABELS};
 
 pub struct AppState {
     pub mode: ViewMode,
@@ -85,6 +86,11 @@ pub struct AppState {
     pub status_select_open: bool,
     pub status_select_cursor: usize,
     pub sidebar_edit: Option<SidebarEditMode>,
+    /// Parent / Sub-issue を Enter で開いた時のオーバーレイスタック。
+    /// 末尾が現在表示中のカード (current_detail_card)。空ならボードの selected を表示。
+    pub detail_stack: Vec<Card>,
+    /// FetchIssueDetail 中の判定 (重複発行防止)
+    pub detail_loading_id: Option<String>,
 
     // Edit card
     pub edit_card_state: Option<EditCardState>,
@@ -158,6 +164,8 @@ impl AppState {
             status_select_open: false,
             status_select_cursor: 0,
             sidebar_edit: None,
+            detail_stack: Vec::new(),
+            detail_loading_id: None,
             edit_card_state: None,
             grab_state: None,
             comment_list_state: None,
@@ -555,6 +563,56 @@ impl AppState {
                 Command::None
             }
             AppEvent::CommentsLoaded(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                Command::None
+            }
+            AppEvent::SubIssuesLoaded(Ok((item_id, sub_issues))) => {
+                // detail_stack のトップにも反映 (FetchIssueDetail で開いた Issue が item_id を共有)
+                if let Some(top) = self.detail_stack.last_mut()
+                    && top.item_id == item_id
+                {
+                    top.sub_issues = sub_issues.clone();
+                }
+                if let Some(board) = &mut self.board {
+                    for col in &mut board.columns {
+                        for card in &mut col.cards {
+                            if card.item_id == item_id {
+                                card.sub_issues = sub_issues;
+                                return Command::None;
+                            }
+                        }
+                    }
+                }
+                Command::None
+            }
+            AppEvent::SubIssuesLoaded(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                Command::None
+            }
+            AppEvent::IssueDetailLoaded(Ok(card)) => {
+                self.detail_loading_id = None;
+                let card = *card;
+                let needs_subs = matches!(card.card_type, CardType::Issue { .. })
+                    && card
+                        .sub_issues_summary
+                        .as_ref()
+                        .is_some_and(|s| s.total > 0);
+                let item_id = card.item_id.clone();
+                let content_id = card.content_id.clone();
+                self.push_detail_stack(card);
+                self.mode = ViewMode::Detail;
+                if needs_subs
+                    && let Some(cid) = content_id
+                {
+                    return Command::FetchSubIssues {
+                        item_id,
+                        content_id: cid,
+                    };
+                }
+                Command::None
+            }
+            AppEvent::IssueDetailLoaded(Err(e)) => {
+                self.detail_loading_id = None;
                 self.loading = LoadingState::Error(e);
                 Command::None
             }
@@ -1969,12 +2027,34 @@ impl AppState {
         self.mode = ViewMode::Detail;
 
         // コメントが20件（上限）の場合、追加コメントを取得
-        if let Some(card) = self.selected_card_ref()
-            && card.comments.len() >= 20
-                && let Some(content_id) = card.content_id.clone() {
-                    return Command::FetchComments { content_id };
-                }
-        Command::None
+        // sub-issue サマリーを持つ Issue の場合、子 Issue 一覧を取得
+        let mut commands: Vec<Command> = Vec::new();
+        if let Some(card) = self.selected_card_ref() {
+            let content_id = card.content_id.clone();
+            if card.comments.len() >= 20
+                && let Some(cid) = content_id.clone()
+            {
+                commands.push(Command::FetchComments { content_id: cid });
+            }
+            let needs_sub_issues = matches!(card.card_type, CardType::Issue { .. })
+                && card
+                    .sub_issues_summary
+                    .as_ref()
+                    .is_some_and(|s| s.total > 0);
+            if needs_sub_issues
+                && let Some(cid) = content_id
+            {
+                commands.push(Command::FetchSubIssues {
+                    item_id: card.item_id.clone(),
+                    content_id: cid,
+                });
+            }
+        }
+        match commands.len() {
+            0 => Command::None,
+            1 => commands.into_iter().next().unwrap(),
+            _ => Command::Batch(commands),
+        }
     }
 
     fn handle_detail_key(&mut self, key: KeyEvent) -> Command {
@@ -2007,13 +2087,15 @@ impl AppState {
 
         match action {
             Action::Quit => {
-                self.mode = ViewMode::Board;
+                if !self.pop_detail_stack() {
+                    self.mode = ViewMode::Board;
+                }
                 Command::None
             }
             Action::Back => {
                 if self.detail_pane == DetailPane::Sidebar {
                     self.detail_pane = DetailPane::Content;
-                } else {
+                } else if !self.pop_detail_stack() {
                     self.mode = ViewMode::Board;
                 }
                 Command::None
@@ -2254,24 +2336,62 @@ impl AppState {
         }
     }
 
-    /// サイドバーの総セクション数 (Status/Assignees/Labels/Milestone + custom_fields + Archive)
+    /// 現在の詳細ビュー対象カード (detail_stack 優先、なければ board 上の selected)
+    pub fn current_detail_card(&self) -> Option<&Card> {
+        if let Some(last) = self.detail_stack.last() {
+            return Some(last);
+        }
+        self.selected_card_ref()
+    }
+
+    /// サイドバーの論理セクションを動的に列挙する。
+    /// selected card に parent / sub-issues があれば追加し、末尾は Archive。
+    pub fn sidebar_sections(&self) -> Vec<SidebarSection> {
+        let mut sections = vec![
+            SidebarSection::Status,
+            SidebarSection::Assignees,
+            SidebarSection::Labels,
+            SidebarSection::Milestone,
+        ];
+        for (i, _) in self.field_definitions().iter().enumerate() {
+            sections.push(SidebarSection::CustomField(i));
+        }
+        if let Some(card) = self.current_detail_card()
+            && matches!(card.card_type, CardType::Issue { .. })
+        {
+            if card.parent_issue.is_some() {
+                sections.push(SidebarSection::Parent);
+            }
+            let has_subs = card
+                .sub_issues_summary
+                .as_ref()
+                .is_some_and(|s| s.total > 0);
+            if has_subs {
+                // summary はあっても sub_issues がまだ空 (ロード前) の可能性もある。
+                // 実データが揃っていればその数だけ選択可能行を出す。
+                for (i, _) in card.sub_issues.iter().enumerate() {
+                    sections.push(SidebarSection::SubIssue(i));
+                }
+            }
+        }
+        sections.push(SidebarSection::Archive);
+        sections
+    }
+
+    pub fn sidebar_section_at(&self, index: usize) -> Option<SidebarSection> {
+        self.sidebar_sections().into_iter().nth(index)
+    }
+
+    /// サイドバーの総セクション数
     pub fn sidebar_section_count(&self) -> usize {
-        4 + self.field_definitions().len() + 1
+        self.sidebar_sections().len()
     }
 
     /// Archive セクションのインデックス (動的)
     pub fn sidebar_archive_index(&self) -> usize {
-        4 + self.field_definitions().len()
+        self.sidebar_section_count().saturating_sub(1)
     }
 
-    /// サイドバーインデックスが カスタムフィールド行なら、対応する FieldDefinition の index を返す
-    pub fn sidebar_field_index(&self, sidebar_index: usize) -> Option<usize> {
-        if sidebar_index >= 4 && sidebar_index < self.sidebar_archive_index() {
-            Some(sidebar_index - 4)
-        } else {
-            None
-        }
-    }
 
     fn field_definitions(&self) -> &[FieldDefinition] {
         self.board
@@ -2292,26 +2412,30 @@ impl AppState {
                 Command::None
             }
             Action::Select => {
-                let idx = self.sidebar_selected;
-                let archive_idx = self.sidebar_archive_index();
-                match idx {
-                    SIDEBAR_STATUS => {
+                let section = self.sidebar_section_at(self.sidebar_selected);
+                // detail_stack 上の Issue (ボード外) は編集系操作を無効にし、
+                // ナビゲーション (Parent / SubIssue) のみ受け付ける
+                let is_stacked = !self.detail_stack.is_empty();
+                match section {
+                    Some(SidebarSection::Parent) => self.open_parent_detail(),
+                    Some(SidebarSection::SubIssue(i)) => self.open_sub_issue_detail(i),
+                    _ if is_stacked => Command::None,
+                    Some(SidebarSection::Status) => {
                         self.status_select_open = true;
                         self.status_select_cursor = self.selected_column;
                         Command::None
                     }
-                    SIDEBAR_LABELS => self.open_label_edit(),
-                    SIDEBAR_ASSIGNEES => self.open_assignee_edit(),
-                    i if i == archive_idx => {
+                    Some(SidebarSection::Labels) => self.open_label_edit(),
+                    Some(SidebarSection::Assignees) => self.open_assignee_edit(),
+                    Some(SidebarSection::Archive) => {
                         self.start_archive_card(ViewMode::Detail);
                         Command::None
                     }
-                    _ => {
-                        if let Some(field_idx) = self.sidebar_field_index(idx) {
-                            self.open_custom_field_edit(field_idx);
-                        }
+                    Some(SidebarSection::CustomField(i)) => {
+                        self.open_custom_field_edit(i);
                         Command::None
                     }
+                    Some(SidebarSection::Milestone) | None => Command::None,
                 }
             }
             Action::ArchiveCard => {
@@ -2320,6 +2444,62 @@ impl AppState {
             }
             _ => Command::None,
         }
+    }
+
+    fn open_parent_detail(&mut self) -> Command {
+        let Some(card) = self.current_detail_card() else {
+            return Command::None;
+        };
+        let Some(parent) = card.parent_issue.as_ref() else {
+            return Command::None;
+        };
+        let id = parent.id.clone();
+        if self.detail_loading_id.as_deref() == Some(&id) {
+            return Command::None;
+        }
+        self.detail_loading_id = Some(id.clone());
+        Command::FetchIssueDetail { content_id: id }
+    }
+
+    fn open_sub_issue_detail(&mut self, idx: usize) -> Command {
+        let Some(card) = self.current_detail_card() else {
+            return Command::None;
+        };
+        let Some(sub) = card.sub_issues.get(idx) else {
+            return Command::None;
+        };
+        let id = sub.id.clone();
+        if self.detail_loading_id.as_deref() == Some(&id) {
+            return Command::None;
+        }
+        self.detail_loading_id = Some(id.clone());
+        Command::FetchIssueDetail { content_id: id }
+    }
+
+    /// detail_stack を 1 段戻す。空なら false (詳細ビュー自体を閉じる)。
+    pub fn pop_detail_stack(&mut self) -> bool {
+        if self.detail_stack.pop().is_some() {
+            self.sidebar_selected = 0;
+            self.detail_scroll = 0;
+            self.detail_scroll_x = 0;
+            self.detail_pane = DetailPane::Content;
+            self.sidebar_edit = None;
+            self.status_select_open = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// FetchIssueDetail で取得した Card を detail_stack に push し、表示状態をリセット
+    pub fn push_detail_stack(&mut self, card: Card) {
+        self.detail_stack.push(card);
+        self.sidebar_selected = 0;
+        self.detail_scroll = 0;
+        self.detail_scroll_x = 0;
+        self.detail_pane = DetailPane::Content;
+        self.sidebar_edit = None;
+        self.status_select_open = false;
     }
 
     fn open_custom_field_edit(&mut self, field_idx: usize) {
@@ -3418,6 +3598,9 @@ mod tests {
             linked_prs: vec![],
             reactions: vec![],
             archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
         }
     }
 
@@ -3446,6 +3629,9 @@ mod tests {
             linked_prs: vec![],
             reactions: vec![],
             archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
         }
     }
 
@@ -3467,6 +3653,9 @@ mod tests {
             linked_prs: vec![],
             reactions: vec![],
             archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
         }
     }
 
@@ -3488,6 +3677,9 @@ mod tests {
             linked_prs: vec![],
             reactions: vec![],
             archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
         }
     }
 
@@ -3513,6 +3705,9 @@ mod tests {
             linked_prs: vec![],
             reactions: vec![],
             archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
         }
     }
 
@@ -5936,6 +6131,9 @@ mod tests {
             linked_prs: vec![],
             reactions: vec![],
             archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
         }
     }
 
@@ -6100,6 +6298,9 @@ mod tests {
             linked_prs: vec![],
             reactions: vec![],
             archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
         }
     }
 
@@ -6385,6 +6586,9 @@ mod tests {
             linked_prs: vec![],
             reactions: vec![],
             archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
         }
     }
 
@@ -6634,6 +6838,184 @@ mod tests {
 
         let card = &state.board.as_ref().unwrap().columns[0].cards[0];
         assert_eq!(card.comments[0].body, "updated body");
+    }
+
+    #[test]
+    fn test_detail_opens_fetch_sub_issues_when_has_summary() {
+        use crate::model::project::SubIssuesSummary;
+        let mut card = make_issue_card("1", "Parent");
+        card.sub_issues_summary = Some(SubIssuesSummary { completed: 1, total: 3 });
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert_eq!(
+            cmd,
+            Command::FetchSubIssues {
+                item_id: "1".into(),
+                content_id: "issue_1".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_detail_no_fetch_sub_issues_when_summary_empty() {
+        use crate::model::project::SubIssuesSummary;
+        let mut card = make_issue_card("1", "No subs");
+        card.sub_issues_summary = Some(SubIssuesSummary { completed: 0, total: 0 });
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn test_detail_no_fetch_sub_issues_for_draft() {
+        let card = make_draft_card("1", "Draft", "body");
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn test_sidebar_sections_includes_parent_and_subs() {
+        use crate::model::project::{IssueState, ParentIssueRef, SubIssueRef, SubIssuesSummary};
+        let mut card = make_issue_card("1", "Parent");
+        card.parent_issue = Some(ParentIssueRef {
+            id: "p1".into(),
+            number: 9,
+            title: "Parent Issue".into(),
+            url: None,
+        });
+        card.sub_issues_summary = Some(SubIssuesSummary { completed: 0, total: 2 });
+        card.sub_issues = vec![
+            SubIssueRef {
+                id: "s1".into(),
+                number: 10,
+                title: "A".into(),
+                state: IssueState::Open,
+                url: None,
+            },
+            SubIssueRef {
+                id: "s2".into(),
+                number: 11,
+                title: "B".into(),
+                state: IssueState::Closed,
+                url: None,
+            },
+        ];
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let state = make_state_with_board(board);
+
+        let sections = state.sidebar_sections();
+        // Status, Assignees, Labels, Milestone, Parent, SubIssue(0), SubIssue(1), Archive
+        assert_eq!(sections.len(), 8);
+        assert!(matches!(sections[4], SidebarSection::Parent));
+        assert!(matches!(sections[5], SidebarSection::SubIssue(0)));
+        assert!(matches!(sections[6], SidebarSection::SubIssue(1)));
+        assert!(matches!(sections[7], SidebarSection::Archive));
+    }
+
+    #[test]
+    fn test_enter_on_sub_issue_fetches_issue_detail() {
+        use crate::model::project::{IssueState, SubIssueRef, SubIssuesSummary};
+        let mut card = make_issue_card("1", "Parent");
+        card.sub_issues_summary = Some(SubIssuesSummary { completed: 0, total: 1 });
+        card.sub_issues = vec![SubIssueRef {
+            id: "sub1".into(),
+            number: 10,
+            title: "Child".into(),
+            state: IssueState::Open,
+            url: None,
+        }];
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        // sections: Status(0) Assignees(1) Labels(2) Milestone(3) Parent?(no)  SubIssue(0)=4 Archive=5
+        state.sidebar_selected = 4;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::FetchIssueDetail {
+                content_id: "sub1".into(),
+            }
+        );
+        assert_eq!(state.detail_loading_id.as_deref(), Some("sub1"));
+    }
+
+    #[test]
+    fn test_issue_detail_loaded_pushes_stack() {
+        let card = make_issue_card("1", "Parent");
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+
+        let mut overlay = make_issue_card("sub1", "Child");
+        overlay.item_id = "sub1".into();
+        overlay.content_id = Some("sub1".into());
+        overlay.number = Some(10);
+
+        let _ = state.handle_event(AppEvent::IssueDetailLoaded(Ok(Box::new(overlay.clone()))));
+        assert_eq!(state.detail_stack.len(), 1);
+        assert_eq!(state.current_detail_card().unwrap().title, "Child");
+        assert!(state.detail_loading_id.is_none());
+    }
+
+    #[test]
+    fn test_esc_pops_detail_stack_before_closing() {
+        let card = make_issue_card("1", "Parent");
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+        let overlay = make_issue_card("sub1", "Child");
+        state.push_detail_stack(overlay);
+        assert_eq!(state.detail_stack.len(), 1);
+
+        // 1回目 Esc: stack を pop、Detail のまま
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert_eq!(state.detail_stack.len(), 0);
+
+        // 2回目 Esc: 通常通り Board に戻る
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn test_sub_issues_loaded_updates_card() {
+        use crate::model::project::{IssueState, SubIssueRef};
+        let card = make_issue_card("1", "Parent");
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let subs = vec![
+            SubIssueRef {
+                id: "sub1".into(),
+                number: 10,
+                title: "Child A".into(),
+                state: IssueState::Open,
+                url: Some("https://github.com/owner/repo/issues/10".into()),
+            },
+            SubIssueRef {
+                id: "sub2".into(),
+                number: 11,
+                title: "Child B".into(),
+                state: IssueState::Closed,
+                url: None,
+            },
+        ];
+        let _ = state.handle_event(AppEvent::SubIssuesLoaded(Ok(("1".into(), subs))));
+
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.sub_issues.len(), 2);
+        assert_eq!(card.sub_issues[0].number, 10);
+        assert_eq!(card.sub_issues[1].state, IssueState::Closed);
     }
 
     #[test]

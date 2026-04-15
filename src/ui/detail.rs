@@ -16,7 +16,8 @@ use crate::model::project::{
     ReviewDecision,
 };
 use crate::model::state::{
-    DetailPane, SIDEBAR_ASSIGNEES, SIDEBAR_LABELS, SIDEBAR_MILESTONE, SIDEBAR_STATUS,
+    DetailPane, SidebarSection, SIDEBAR_ASSIGNEES, SIDEBAR_LABELS, SIDEBAR_MILESTONE,
+    SIDEBAR_STATUS,
 };
 use crate::ui::card::parse_hex_color;
 use crate::ui::scroll_fade::{draw_bottom_arrow, draw_left_arrow, draw_right_arrow, draw_top_arrow};
@@ -29,7 +30,7 @@ struct TaggedLine {
 }
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let card = match app.state.selected_card_ref() {
+    let card = match app.state.current_detail_card() {
         Some(c) => c,
         None => return,
     };
@@ -418,7 +419,7 @@ fn render_content_pane(
 
 /// 右ペイン: サイドバー (Status, Assignees, Labels, Archive)
 fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
-    let card = match app.state.selected_card_ref() {
+    let card = match app.state.current_detail_card() {
         Some(c) => c,
         None => return,
     };
@@ -438,7 +439,16 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     let dim_style = Style::default().fg(theme().text_muted);
     let selected_marker = if focused { "▶ " } else { "  " };
 
+    let sections_layout = app.state.sidebar_sections();
+    let mut section_line_offsets: Vec<u16> = vec![0; sections_layout.len()];
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let record = |idx_opt: Option<usize>, offsets: &mut [u16], lines_len: usize| {
+        if let Some(i) = idx_opt
+            && i < offsets.len()
+        {
+            offsets[i] = lines_len as u16;
+        }
+    };
 
     // ── Status section ──
     let status_header_style = if focused && selected == SIDEBAR_STATUS {
@@ -448,6 +458,13 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         header_style
     };
+    record(
+        sections_layout
+            .iter()
+            .position(|s| matches!(s, SidebarSection::Status)),
+        &mut section_line_offsets,
+        lines.len(),
+    );
     lines.push(Line::from(Span::styled("Status", status_header_style)));
 
     let board = app.state.board.as_ref();
@@ -522,6 +539,13 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         header_style
     };
+    record(
+        sections_layout
+            .iter()
+            .position(|s| matches!(s, SidebarSection::Assignees)),
+        &mut section_line_offsets,
+        lines.len(),
+    );
     lines.push(Line::from(Span::styled("Assignees", assignee_header_style)));
     if card.assignees.is_empty() {
         lines.push(Line::from(Span::styled("  --", dim_style)));
@@ -543,6 +567,13 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         header_style
     };
+    record(
+        sections_layout
+            .iter()
+            .position(|s| matches!(s, SidebarSection::Labels)),
+        &mut section_line_offsets,
+        lines.len(),
+    );
     lines.push(Line::from(Span::styled("Labels", label_header_style)));
     if card.labels.is_empty() {
         lines.push(Line::from(Span::styled("  --", dim_style)));
@@ -568,6 +599,13 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         header_style
     };
+    record(
+        sections_layout
+            .iter()
+            .position(|s| matches!(s, SidebarSection::Milestone)),
+        &mut section_line_offsets,
+        lines.len(),
+    );
     lines.push(Line::from(Span::styled("Milestone", milestone_header_style)));
     let milestone_text = card
         .milestone
@@ -591,6 +629,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     // ── Custom fields sections ──
+    let sections = &sections_layout;
     let field_defs = app
         .state
         .board
@@ -598,7 +637,10 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
         .map(|b| b.field_definitions.as_slice())
         .unwrap_or(&[]);
     for (i, field) in field_defs.iter().enumerate() {
-        let sidebar_idx = 4 + i;
+        let sidebar_idx = sections
+            .iter()
+            .position(|s| matches!(s, SidebarSection::CustomField(j) if *j == i))
+            .unwrap_or(0);
         let header = if focused && selected == sidebar_idx {
             Style::default()
                 .fg(theme().accent)
@@ -606,6 +648,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             header_style
         };
+        record(Some(sidebar_idx), &mut section_line_offsets, lines.len());
         lines.push(Line::from(Span::styled(field.name().to_string(), header)));
         let current = card
             .custom_fields
@@ -613,6 +656,81 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
             .find(|v| v.field_id() == field.id());
         lines.push(render_custom_field_value_line(current));
         lines.push(Line::from(""));
+    }
+
+    // ── Parent / Sub-issues sections (Issue only) ──
+    if matches!(card.card_type, CardType::Issue { .. }) {
+        if let Some(parent) = &card.parent_issue {
+            let parent_idx = sections
+                .iter()
+                .position(|s| matches!(s, SidebarSection::Parent));
+            let focused_here = focused && parent_idx == Some(selected);
+            let header_s = if focused_here {
+                Style::default()
+                    .fg(theme().accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                header_style
+            };
+            record(parent_idx, &mut section_line_offsets, lines.len());
+            lines.push(Line::from(Span::styled("Parent", header_s)));
+            let marker = if focused_here { selected_marker } else { "  " };
+            let title_color = if focused_here {
+                theme().accent
+            } else {
+                theme().text
+            };
+            lines.push(Line::from(vec![
+                Span::raw(marker.to_string()),
+                Span::styled(
+                    format!("#{} ", parent.number),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                Span::styled(parent.title.clone(), Style::default().fg(title_color)),
+            ]));
+            lines.push(Line::from(""));
+        }
+
+        if let Some(summary) = &card.sub_issues_summary
+            && summary.total > 0
+        {
+            let header_text = format!("Sub-issues [{}/{}]", summary.completed, summary.total);
+            lines.push(Line::from(Span::styled(header_text, header_style)));
+            if card.sub_issues.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  ...".to_string(),
+                    dim_style,
+                )));
+            } else {
+                for (i, sub) in card.sub_issues.iter().enumerate() {
+                    let idx_in_sections = sections
+                        .iter()
+                        .position(|s| matches!(s, SidebarSection::SubIssue(j) if *j == i));
+                    let focused_here = focused && idx_in_sections == Some(selected);
+                    let marker = if focused_here { selected_marker } else { "  " };
+                    let (glyph, color) = match sub.state {
+                        IssueState::Open => ("\u{f41b} ", theme().green),
+                        IssueState::Closed => ("\u{f41d} ", theme().purple),
+                    };
+                    let title_color = if focused_here {
+                        theme().accent
+                    } else {
+                        theme().text
+                    };
+                    record(idx_in_sections, &mut section_line_offsets, lines.len());
+                    lines.push(Line::from(vec![
+                        Span::raw(marker.to_string()),
+                        Span::styled(glyph.to_string(), Style::default().fg(color)),
+                        Span::styled(
+                            format!("#{} ", sub.number),
+                            Style::default().add_modifier(Modifier::DIM),
+                        ),
+                        Span::styled(sub.title.clone(), Style::default().fg(title_color)),
+                    ]));
+                }
+            }
+            lines.push(Line::from(""));
+        }
     }
 
     let block = Block::default().padding(Padding::horizontal(1));
@@ -638,6 +756,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     let pad_total = btn_width.saturating_sub(label.len());
     let pad_left = pad_total / 2;
     let pad_right = pad_total - pad_left;
+    record(Some(archive_idx), &mut section_line_offsets, lines.len());
     lines.push(Line::from(Span::styled(
         "▄".repeat(btn_width),
         edge_style,
@@ -651,8 +770,27 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
         edge_style,
     )));
 
+    // 選択セクションが可視範囲に入るようスクロール位置を計算
+    let total_lines = lines.len() as u16;
+    let visible = inner.height;
+    let max_scroll = total_lines.saturating_sub(visible);
+    let scroll = if focused && selected < section_line_offsets.len() {
+        let target = section_line_offsets[selected];
+        let section_end = if selected + 1 < section_line_offsets.len() {
+            section_line_offsets[selected + 1]
+        } else {
+            total_lines
+        };
+        // 選択セクション全体 (可能な限り) を可視化。
+        let desired_top = target.saturating_sub(1);
+        let desired_bottom = section_end.saturating_sub(visible);
+        desired_top.max(desired_bottom).min(max_scroll)
+    } else {
+        0
+    };
+
     frame.render_widget(block, area);
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
 }
 
 /// サイドバー編集モードのトグルリスト描画
@@ -1385,6 +1523,9 @@ mod tests {
             linked_prs: vec![],
             reactions: vec![],
             archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
         }
     }
 
@@ -1406,6 +1547,9 @@ mod tests {
             linked_prs: linked,
             reactions: vec![],
             archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
         }
     }
 

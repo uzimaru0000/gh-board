@@ -356,6 +356,26 @@ impl App {
                     ));
                 });
             }
+            Command::FetchSubIssues { item_id, content_id } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.fetch_sub_issues(&content_id).await;
+                    let _ = tx.send(AppEvent::SubIssuesLoaded(
+                        result.map(|subs| (item_id, subs)).map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::FetchIssueDetail { content_id } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.fetch_issue_as_card(&content_id).await;
+                    let _ = tx.send(AppEvent::IssueDetailLoaded(
+                        result.map(Box::new).map_err(|e| e.to_string()),
+                    ));
+                });
+            }
             Command::OpenEditorForComment {
                 content_id,
                 existing,

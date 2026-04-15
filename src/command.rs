@@ -89,6 +89,14 @@ pub enum Command {
     FetchComments {
         content_id: String,
     },
+    FetchSubIssues {
+        item_id: String,
+        content_id: String,
+    },
+    /// Parent / Sub-issue の Issue 詳細を取得 (detail_stack に積み上げて表示)
+    FetchIssueDetail {
+        content_id: String,
+    },
     OpenEditorForComment {
         content_id: String,
         existing: Option<(String, String)>,

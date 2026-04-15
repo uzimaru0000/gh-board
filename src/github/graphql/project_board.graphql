@@ -124,6 +124,16 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
                   state
                 }
               }
+              parent {
+                id
+                number
+                title
+                url
+              }
+              subIssuesSummary {
+                completed
+                total
+              }
             }
             ... on PullRequest {
               id

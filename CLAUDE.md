@@ -110,6 +110,18 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 - u: 復元 (unarchiveProjectV2Item mutation)。リストから楽観的に除去し、戻った先のボードはリフレッシュして復元カードを表示
 - 削除 (deleteProjectV2Item) 機能は archive を主操作にする方針で削除済み。物理削除が必要な場合は GitHub Web UI を使う
 
+### Sub-issue (親子関係) の表示
+- Issue.parent / Issue.subIssuesSummary はボード取得時 (ProjectBoard query) に一緒に取得
+- カード表示: 親 issue があれば `↳`、sub-issue 進捗があれば `[n/m]` (完了で green、進行中で blue)
+- 詳細ビュー サイドバー (Custom fields の後、Archive の前) に Parent / Sub-issues セクションを表示
+- sub-issue 一覧は詳細ビューを開いたときに別クエリ (`FetchSubIssues`, 最大 50 件) で遅延取得
+- サイドバーは `SidebarSection` enum (Status/Assignees/Labels/Milestone/CustomField/Parent/SubIssue/Archive) で動的レイアウト。`sidebar_sections()` が現在の card から列挙し、j/k で全セクションをナビゲート可能
+- サイドバー表示領域を超える場合は選択セクションが可視範囲に収まるよう自動スクロール (Paragraph::scroll で計算)
+- Parent / Sub-issue で Enter → `FetchIssueDetail` (node(id) ... on Issue) で Issue を取得し `detail_stack: Vec<Card>` に push してモーダル積み上げ表示
+- Esc / q で 1 段戻る (`pop_detail_stack`)。スタックが空なら従来どおり Board に戻る
+- detail_stack 上の Issue はボード外なので、サイドバーの編集系 (Status 変更/Label 編集/Archive/CustomField) は無効化 (Parent/SubIssue の移動のみ許可)
+- `current_detail_card()` が詳細描画の唯一の窓口 (detail_stack 先頭 → なければ selected_card_ref)
+
 ### コメント操作
 - c (詳細ビュー Content ペイン): 新規コメント投稿 ($EDITOR 起動、addComment mutation)
 - C (詳細ビュー Content ペイン): コメント一覧 (ViewMode::CommentList) を開く

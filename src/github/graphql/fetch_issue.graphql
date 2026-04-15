@@ -1,0 +1,44 @@
+query FetchIssue($id: ID!) {
+  node(id: $id) {
+    __typename
+    ... on Issue {
+      id
+      number
+      title
+      state
+      url
+      body
+      milestone { title }
+      assignees(first: 5) { nodes { login } }
+      labels(first: 10) { nodes { id name color } }
+      reactionGroups {
+        content
+        viewerHasReacted
+        reactors { totalCount }
+      }
+      comments(first: 20) {
+        nodes {
+          id
+          author { __typename login }
+          body
+          createdAt
+          reactionGroups {
+            content
+            viewerHasReacted
+            reactors { totalCount }
+          }
+        }
+      }
+      parent {
+        id
+        number
+        title
+        url
+      }
+      subIssuesSummary {
+        completed
+        total
+      }
+    }
+  }
+}
