@@ -82,6 +82,7 @@ pub struct Card {
     pub pr_status: Option<PrStatus>,
     pub linked_prs: Vec<LinkedPr>,
     pub reactions: Vec<ReactionSummary>,
+    pub archived: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

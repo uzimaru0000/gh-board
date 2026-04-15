@@ -21,9 +21,16 @@ pub enum Command {
         field_id: String,
         value: CustomFieldValueInput,
     },
-    DeleteCard {
+    ArchiveCard {
         project_id: String,
         item_id: String,
+    },
+    UnarchiveCard {
+        project_id: String,
+        item_id: String,
+    },
+    LoadArchivedItems {
+        project_id: String,
     },
     CreateCard {
         project_id: String,

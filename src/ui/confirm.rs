@@ -6,32 +6,40 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::state::ConfirmState;
+use crate::model::state::{ConfirmAction, ConfirmState};
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &ConfirmState) {
     let popup = centered_rect(50, 7, area);
     frame.render_widget(Clear, popup);
 
+    let accent = match state.action {
+        ConfirmAction::ArchiveCard { .. } => theme().yellow,
+    };
+
     let block = Block::default()
         .title(" Confirm ")
         .title_style(
             Style::default()
-                .fg(theme().red)
+                .fg(accent)
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme().red));
+        .border_style(Style::default().fg(accent));
 
     let key_style = Style::default()
         .fg(theme().yellow)
         .add_modifier(Modifier::BOLD);
 
+    let message = match state.action {
+        ConfirmAction::ArchiveCard { .. } => format!("  Archive \"{}\"?", state.title),
+    };
+
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            format!("  Delete \"{}\"?", state.title),
+            message,
             Style::default().fg(theme().text),
         )),
         Line::from(""),

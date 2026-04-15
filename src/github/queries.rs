@@ -64,10 +64,18 @@ pub struct ProjectBoard;
 #[derive(GraphQLQuery)]
 #[graphql(
     schema_path = "schema.graphql",
-    query_path = "src/github/graphql/delete_card.graphql",
+    query_path = "src/github/graphql/archive_card.graphql",
     response_derives = "Debug"
 )]
-pub struct DeleteCard;
+pub struct ArchiveCard;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/unarchive_card.graphql",
+    response_derives = "Debug"
+)]
+pub struct UnarchiveCard;
 
 #[derive(GraphQLQuery)]
 #[graphql(

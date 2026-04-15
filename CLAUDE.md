@@ -100,8 +100,15 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
   - h/l: カラム間移動 (元の高さを維持、Batch で MoveCard + ReorderCard)
   - 選択中は黄色太線ボーダー + 透過影で浮いた見た目
 - n: ドラフトIssue作成 (addProjectV2DraftIssue + ステータス設定の2段階)
-- d: カード削除 (確認ダイアログ付き、deleteProjectV2Item mutation)
+- a: カードアーカイブ (確認ダイアログ付き、archiveProjectV2Item mutation)。詳細ビューのサイドバー末尾「Archive」ボタンからも実行可能
+- v: アーカイブ済み一覧 (ViewMode::ArchivedList) を開く
 - 楽観的UI更新パターン: API呼び出し前にローカル状態を変更、エラー時はボードリフレッシュ
+
+### アーカイブ済み一覧 (ViewMode::ArchivedList)
+- v でフラットなリスト表示。`is:archived` クエリで別途取得 (ProjectBoard query を再利用)
+- j/k: カード間移動、Enter: ブラウザで開く、r: 再ロード、Esc/q: ボードに戻る
+- u: 復元 (unarchiveProjectV2Item mutation)。リストから楽観的に除去し、戻った先のボードはリフレッシュして復元カードを表示
+- 削除 (deleteProjectV2Item) 機能は archive を主操作にする方針で削除済み。物理削除が必要な場合は GitHub Web UI を使う
 
 ### コメント操作
 - c (詳細ビュー Content ペイン): 新規コメント投稿 ($EDITOR 起動、addComment mutation)

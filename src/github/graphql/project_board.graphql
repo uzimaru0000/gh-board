@@ -43,6 +43,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          isArchived
           fieldValues(first: 20) {
             nodes {
               __typename

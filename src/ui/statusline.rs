@@ -113,13 +113,43 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             grab_hints,
             Style::default().fg(theme().text_muted),
         ));
+    } else if app.state.mode == ViewMode::ArchivedList {
+        let mode = KeymapMode::ArchivedList;
+        let hints: Vec<String> = [
+            (Action::OpenDetail, "open"),
+            (Action::UnarchiveCard, "unarchive"),
+            (Action::Refresh, "refresh"),
+            (Action::Back, "back"),
+        ]
+        .iter()
+        .filter_map(|(action, desc)| {
+            let k = short_key(app, mode, *action);
+            if k.is_empty() {
+                None
+            } else {
+                Some(format!("{k}:{desc}"))
+            }
+        })
+        .collect();
+        spans.push(Span::styled(
+            " ARCHIVED ",
+            Style::default()
+                .fg(theme().text_inverted)
+                .bg(theme().yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!(" {} ", hints.join("  ")),
+            Style::default().fg(theme().text_muted),
+        ));
     } else {
         let mode = KeymapMode::Board;
         let hints: Vec<String> = [
             (Action::OpenDetail, "detail"),
             (Action::GrabCard, "grab"),
             (Action::NewCard, "new"),
-            (Action::DeleteCard, "delete"),
+            (Action::ArchiveCard, "archive"),
+            (Action::ShowArchivedList, "archived"),
             (Action::StartFilter, "filter"),
             (Action::ShowHelp, "help"),
             (Action::SwitchProject, "projects"),

@@ -1,0 +1,10 @@
+mutation UnarchiveCard($projectId: ID!, $itemId: ID!) {
+  unarchiveProjectV2Item(input: {
+    projectId: $projectId
+    itemId: $itemId
+  }) {
+    item {
+      id
+    }
+  }
+}

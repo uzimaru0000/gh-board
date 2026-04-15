@@ -276,13 +276,38 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub async fn delete_card(&self, project_id: &str, item_id: &str) -> anyhow::Result<()> {
-        let vars = delete_card::Variables {
+    pub async fn archive_card(&self, project_id: &str, item_id: &str) -> anyhow::Result<()> {
+        let vars = archive_card::Variables {
             project_id: project_id.to_string(),
             item_id: item_id.to_string(),
         };
-        self.query::<DeleteCard>(vars).await?;
+        self.query::<ArchiveCard>(vars).await?;
         Ok(())
+    }
+
+    pub async fn unarchive_card(&self, project_id: &str, item_id: &str) -> anyhow::Result<()> {
+        let vars = unarchive_card::Variables {
+            project_id: project_id.to_string(),
+            item_id: item_id.to_string(),
+        };
+        self.query::<UnarchiveCard>(vars).await?;
+        Ok(())
+    }
+
+    /// archived 済みアイテムだけを取得し、平坦な Vec<Card> を返す。
+    /// Projects V2 items() の `query` 引数は archive フラグを安定して解釈しないため、
+    /// 全件取得してクライアント側で `card.archived == true` のものだけを残す。
+    pub async fn get_archived_items(&self, project_id: &str) -> anyhow::Result<Vec<Card>> {
+        let board = self.get_board_raw(project_id, &[], None).await?;
+        let mut cards: Vec<Card> = Vec::new();
+        for col in board.columns {
+            for card in col.cards {
+                if card.archived {
+                    cards.push(card);
+                }
+            }
+        }
+        Ok(cards)
     }
 
     pub async fn update_custom_field(
@@ -581,7 +606,24 @@ impl GitHubClient {
         Ok(())
     }
 
+    /// 通常のボードロード。アーカイブ済みアイテムは除外する。
     pub async fn get_board(
+        &self,
+        project_id: &str,
+        queries: &[String],
+        preferred_group_by_field_name: Option<&str>,
+    ) -> anyhow::Result<Board> {
+        let mut board = self
+            .get_board_raw(project_id, queries, preferred_group_by_field_name)
+            .await?;
+        for col in &mut board.columns {
+            col.cards.retain(|c| !c.archived);
+        }
+        Ok(board)
+    }
+
+    /// アーカイブを含む全アイテムを返す内部 API。`get_archived_items` から再利用する。
+    async fn get_board_raw(
         &self,
         project_id: &str,
         queries: &[String],
@@ -1351,6 +1393,7 @@ fn convert_item(item: &ItemNode) -> Card {
             pr_status: None,
             linked_prs: build_linked_prs(issue),
             item_id: item.id.clone(),
+            archived: item.is_archived,
             content_id: Some(issue.id.clone()),
             title: issue.title.clone(),
             number: Some(issue.number as i32),
@@ -1440,6 +1483,7 @@ fn convert_item(item: &ItemNode) -> Card {
             pr_status: Some(build_pr_status(pr)),
             linked_prs: Vec::new(),
             item_id: item.id.clone(),
+            archived: item.is_archived,
             content_id: Some(pr.id.clone()),
             title: pr.title.clone(),
             number: Some(pr.number as i32),
@@ -1530,6 +1574,7 @@ fn convert_item(item: &ItemNode) -> Card {
             pr_status: None,
             linked_prs: Vec::new(),
             item_id: item.id.clone(),
+            archived: item.is_archived,
             content_id: Some(draft.id.clone()),
             title: draft.title.clone(),
             number: None,
@@ -1547,6 +1592,7 @@ fn convert_item(item: &ItemNode) -> Card {
             pr_status: None,
             linked_prs: Vec::new(),
             item_id: item.id.clone(),
+            archived: item.is_archived,
             content_id: None,
             title: "(no content)".to_string(),
             number: None,

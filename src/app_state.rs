@@ -98,6 +98,9 @@ pub struct AppState {
     // Reaction picker
     pub reaction_picker_state: Option<ReactionPickerState>,
 
+    // Archived list
+    pub archived_list: Option<crate::model::state::ArchivedListState>,
+
     // Loading
     pub loading: LoadingState,
 
@@ -154,6 +157,7 @@ impl AppState {
             comment_list_state: None,
             group_by_select_state: None,
             reaction_picker_state: None,
+            archived_list: None,
             loading: LoadingState::Idle,
             board_cache: BoardCache::new(8),
             pending_board_queries: None,
@@ -274,7 +278,8 @@ impl AppState {
     fn command_mutates_board(cmd: &Command) -> bool {
         match cmd {
             Command::MoveCard { .. }
-            | Command::DeleteCard { .. }
+            | Command::ArchiveCard { .. }
+            | Command::UnarchiveCard { .. }
             | Command::CreateCard { .. }
             | Command::CreateIssue { .. }
             | Command::ReorderCard { .. }
@@ -347,11 +352,11 @@ impl AppState {
                 self.loading = LoadingState::Error(e);
                 Command::None
             }
-            AppEvent::CardDeleted(Ok(())) => {
+            AppEvent::CardArchived(Ok(())) => {
                 // 楽観的更新済み
                 Command::None
             }
-            AppEvent::CardDeleted(Err(e)) => {
+            AppEvent::CardArchived(Err(e)) => {
                 self.loading = LoadingState::Error(e);
                 if let Some(project) = &self.current_project {
                     let id = project.id.clone();
@@ -359,6 +364,40 @@ impl AppState {
                 } else {
                     Command::None
                 }
+            }
+            AppEvent::CardUnarchived(Ok(_item_id)) => {
+                // archived リストからは楽観的に除去済み。ボードをリフレッシュして復元カードを反映。
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
+            AppEvent::CardUnarchived(Err(e)) => {
+                self.loading = LoadingState::Error(e.clone());
+                if let Some(state) = self.archived_list.as_mut() {
+                    state.error = Some(e);
+                }
+                Command::None
+            }
+            AppEvent::ArchivedItemsLoaded(Ok(cards)) => {
+                if let Some(state) = self.archived_list.as_mut() {
+                    state.cards = cards;
+                    state.loading = false;
+                    state.error = None;
+                    if state.selected >= state.cards.len() {
+                        state.selected = state.cards.len().saturating_sub(1);
+                    }
+                }
+                Command::None
+            }
+            AppEvent::ArchivedItemsLoaded(Err(e)) => {
+                if let Some(state) = self.archived_list.as_mut() {
+                    state.loading = false;
+                    state.error = Some(e);
+                }
+                Command::None
             }
             AppEvent::CardCreated(Ok(())) => {
                 // 作成成功: ボードをリフレッシュして新しいカードを表示
@@ -577,6 +616,7 @@ impl AppState {
             ViewMode::CommentList => self.handle_comment_list_key(key),
             ViewMode::GroupBySelect => self.handle_group_by_select_key(key),
             ViewMode::ReactionPicker => self.handle_reaction_picker_key(key),
+            ViewMode::ArchivedList => self.handle_archived_list_key(key),
         }
     }
 
@@ -704,10 +744,11 @@ impl AppState {
                     Command::None
                 }
             }
-            Action::DeleteCard => {
-                self.start_delete_card(ViewMode::Board);
+            Action::ArchiveCard => {
+                self.start_archive_card(ViewMode::Board);
                 Command::None
             }
+            Action::ShowArchivedList => self.show_archived_list(),
             Action::NewCard => {
                 self.create_card_state = CreateCardState::default();
                 self.mode = ViewMode::CreateCard;
@@ -974,12 +1015,11 @@ impl AppState {
                 if let Some(state) = self.confirm_state.take() {
                     let return_to = state.return_to;
                     let cmd = match state.action {
-                        ConfirmAction::DeleteCard { item_id } => self.delete_card(&item_id),
+                        ConfirmAction::ArchiveCard { item_id } => self.archive_card(&item_id),
                     };
-                    // 削除後: カードが消えるので Detail には留まれない → Board に戻る
-                    // それ以外の action は return_to に従う
+                    // カードが消える破壊的操作は Detail には留まれない → Board に戻る
                     self.mode = match &cmd {
-                        Command::DeleteCard { .. } => ViewMode::Board,
+                        Command::ArchiveCard { .. } => ViewMode::Board,
                         _ => return_to,
                     };
                     cmd
@@ -1112,7 +1152,7 @@ impl AppState {
         Command::None
     }
 
-    fn start_delete_card(&mut self, return_to: ViewMode) {
+    fn start_archive_card(&mut self, return_to: ViewMode) {
         let real_idx = match self.real_card_index() {
             Some(idx) => idx,
             None => return,
@@ -1125,7 +1165,7 @@ impl AppState {
 
         if let Some(card) = card {
             self.confirm_state = Some(ConfirmState {
-                action: ConfirmAction::DeleteCard {
+                action: ConfirmAction::ArchiveCard {
                     item_id: card.item_id.clone(),
                 },
                 title: card.title.clone(),
@@ -1135,38 +1175,124 @@ impl AppState {
         }
     }
 
-    fn delete_card(&mut self, item_id: &str) -> Command {
-        // 楽観的UI更新: ローカルモデルからカードを削除
+    fn archive_card(&mut self, item_id: &str) -> Command {
+        // 楽観的UI更新: ローカルモデルからカードを除去
         if let Some(board) = &mut self.board
             && let Some(col) = board.columns.get_mut(self.selected_column)
-                && let Some(pos) = col.cards.iter().position(|c| c.item_id == item_id) {
-                    col.cards.remove(pos);
-                    // フィルタ後の表示カード数で選択を調整
-                    let filtered_len = col
-                        .cards
-                        .iter()
-                        .filter(|c| {
-                            self.filter
-                                .active_filter
-                                .as_ref()
-                                .is_none_or(|f| f.matches(c))
-                        })
-                        .count();
-                    if filtered_len == 0 {
-                        self.selected_card = 0;
-                    } else {
-                        self.selected_card = self.selected_card.min(filtered_len - 1);
-                    }
-                }
+            && let Some(pos) = col.cards.iter().position(|c| c.item_id == item_id)
+        {
+            col.cards.remove(pos);
+            let filtered_len = col
+                .cards
+                .iter()
+                .filter(|c| {
+                    self.filter
+                        .active_filter
+                        .as_ref()
+                        .is_none_or(|f| f.matches(c))
+                })
+                .count();
+            if filtered_len == 0 {
+                self.selected_card = 0;
+            } else {
+                self.selected_card = self.selected_card.min(filtered_len - 1);
+            }
+        }
 
         let project_id = match &self.current_project {
             Some(p) => p.id.clone(),
             None => return Command::None,
         };
 
-        Command::DeleteCard {
+        Command::ArchiveCard {
             project_id,
             item_id: item_id.to_string(),
+        }
+    }
+
+    fn show_archived_list(&mut self) -> Command {
+        let project_id = match &self.current_project {
+            Some(p) => p.id.clone(),
+            None => return Command::None,
+        };
+        self.archived_list = Some(crate::model::state::ArchivedListState {
+            cards: Vec::new(),
+            selected: 0,
+            loading: true,
+            error: None,
+        });
+        self.mode = ViewMode::ArchivedList;
+        Command::LoadArchivedItems { project_id }
+    }
+
+    fn handle_archived_list_key(&mut self, key: KeyEvent) -> Command {
+        let action = match self.keymap.resolve(KeymapMode::ArchivedList, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+        match action {
+            Action::Back => {
+                self.mode = ViewMode::Board;
+                Command::None
+            }
+            Action::MoveDown => {
+                if let Some(state) = self.archived_list.as_mut()
+                    && !state.cards.is_empty()
+                {
+                    state.selected = (state.selected + 1).min(state.cards.len() - 1);
+                }
+                Command::None
+            }
+            Action::MoveUp => {
+                if let Some(state) = self.archived_list.as_mut() {
+                    state.selected = state.selected.saturating_sub(1);
+                }
+                Command::None
+            }
+            Action::UnarchiveCard => self.unarchive_selected_in_list(),
+            Action::OpenDetail => {
+                // 現状の Detail は board のカードを参照する設計のため、
+                // ここではブラウザで開く代替動作にとどめる。
+                if let Some(state) = self.archived_list.as_ref()
+                    && let Some(card) = state.cards.get(state.selected)
+                    && let Some(url) = card.url.clone()
+                {
+                    return Command::OpenUrl(url);
+                }
+                Command::None
+            }
+            Action::Refresh => self.show_archived_list(),
+            Action::ForceQuit => {
+                self.should_quit = true;
+                Command::None
+            }
+            _ => Command::None,
+        }
+    }
+
+    fn unarchive_selected_in_list(&mut self) -> Command {
+        let project_id = match &self.current_project {
+            Some(p) => p.id.clone(),
+            None => return Command::None,
+        };
+        let state = match self.archived_list.as_mut() {
+            Some(s) => s,
+            None => return Command::None,
+        };
+        if state.cards.is_empty() {
+            return Command::None;
+        }
+        let idx = state.selected.min(state.cards.len() - 1);
+        let item_id = state.cards[idx].item_id.clone();
+        state.cards.remove(idx);
+        if state.cards.is_empty() {
+            state.selected = 0;
+        } else if state.selected >= state.cards.len() {
+            state.selected = state.cards.len() - 1;
+        }
+        Command::UnarchiveCard {
+            project_id,
+            item_id,
         }
     }
 
@@ -2032,19 +2158,19 @@ impl AppState {
         }
     }
 
-    /// サイドバーの総セクション数 (Status/Assignees/Labels/Milestone + custom_fields + Delete)
+    /// サイドバーの総セクション数 (Status/Assignees/Labels/Milestone + custom_fields + Archive)
     pub fn sidebar_section_count(&self) -> usize {
         4 + self.field_definitions().len() + 1
     }
 
-    /// Delete セクションのインデックス (動的)
-    pub fn sidebar_delete_index(&self) -> usize {
+    /// Archive セクションのインデックス (動的)
+    pub fn sidebar_archive_index(&self) -> usize {
         4 + self.field_definitions().len()
     }
 
     /// サイドバーインデックスが カスタムフィールド行なら、対応する FieldDefinition の index を返す
     pub fn sidebar_field_index(&self, sidebar_index: usize) -> Option<usize> {
-        if sidebar_index >= 4 && sidebar_index < self.sidebar_delete_index() {
+        if sidebar_index >= 4 && sidebar_index < self.sidebar_archive_index() {
             Some(sidebar_index - 4)
         } else {
             None
@@ -2071,7 +2197,7 @@ impl AppState {
             }
             Action::Select => {
                 let idx = self.sidebar_selected;
-                let delete_idx = self.sidebar_delete_index();
+                let archive_idx = self.sidebar_archive_index();
                 match idx {
                     SIDEBAR_STATUS => {
                         self.status_select_open = true;
@@ -2080,8 +2206,8 @@ impl AppState {
                     }
                     SIDEBAR_LABELS => self.open_label_edit(),
                     SIDEBAR_ASSIGNEES => self.open_assignee_edit(),
-                    i if i == delete_idx => {
-                        self.start_delete_card(ViewMode::Detail);
+                    i if i == archive_idx => {
+                        self.start_archive_card(ViewMode::Detail);
                         Command::None
                     }
                     _ => {
@@ -2092,8 +2218,8 @@ impl AppState {
                     }
                 }
             }
-            Action::DeleteCard => {
-                self.start_delete_card(ViewMode::Detail);
+            Action::ArchiveCard => {
+                self.start_archive_card(ViewMode::Detail);
                 Command::None
             }
             _ => Command::None,
@@ -3195,6 +3321,7 @@ mod tests {
             pr_status: None,
             linked_prs: vec![],
             reactions: vec![],
+            archived: false,
         }
     }
 
@@ -3222,6 +3349,7 @@ mod tests {
             pr_status: None,
             linked_prs: vec![],
             reactions: vec![],
+            archived: false,
         }
     }
 
@@ -3242,6 +3370,7 @@ mod tests {
             pr_status: None,
             linked_prs: vec![],
             reactions: vec![],
+            archived: false,
         }
     }
 
@@ -3262,6 +3391,7 @@ mod tests {
             pr_status: None,
             linked_prs: vec![],
             reactions: vec![],
+            archived: false,
         }
     }
 
@@ -3286,6 +3416,7 @@ mod tests {
             pr_status: None,
             linked_prs: vec![],
             reactions: vec![],
+            archived: false,
         }
     }
 
@@ -3597,10 +3728,10 @@ mod tests {
         assert!(state.filter.active_filter.is_none());
     }
 
-    // ========== カード削除 ==========
+    // ========== カードアーカイブ ==========
 
     #[test]
-    fn test_delete_card() {
+    fn test_archive_card() {
         let board = make_board(vec![(
             "Todo",
             "opt_1",
@@ -3608,16 +3739,16 @@ mod tests {
         )]);
         let mut state = make_state_with_board(board);
 
-        // d で確認ダイアログ
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('d'))));
+        // a で確認ダイアログ
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
         assert_eq!(state.mode, ViewMode::Confirm);
         assert!(state.confirm_state.is_some());
 
-        // y で削除実行
+        // y でアーカイブ実行
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('y'))));
         assert_eq!(
             cmd,
-            Command::DeleteCard {
+            Command::ArchiveCard {
                 project_id: "proj_1".into(),
                 item_id: "1".into(),
             }
@@ -3627,7 +3758,7 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_card_clamp() {
+    fn test_archive_card_clamp() {
         let board = make_board(vec![(
             "Todo",
             "opt_1",
@@ -3636,8 +3767,8 @@ mod tests {
         let mut state = make_state_with_board(board);
         state.selected_card = 1; // 最後のカード
 
-        // d → y
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('d'))));
+        // a → y
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
         state.handle_event(AppEvent::Key(key(KeyCode::Char('y'))));
 
         // 削除後にクランプされる
@@ -3645,7 +3776,7 @@ mod tests {
     }
 
     #[test]
-    fn test_start_delete_sets_confirm() {
+    fn test_start_archive_sets_confirm() {
         let board = make_board(vec![(
             "Todo",
             "opt_1",
@@ -3653,14 +3784,101 @@ mod tests {
         )]);
         let mut state = make_state_with_board(board);
 
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('d'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
 
         assert_eq!(state.mode, ViewMode::Confirm);
         let confirm = state.confirm_state.as_ref().unwrap();
         assert_eq!(confirm.title, "My Card");
         match &confirm.action {
-            ConfirmAction::DeleteCard { item_id } => assert_eq!(item_id, "1"),
+            ConfirmAction::ArchiveCard { item_id } => assert_eq!(item_id, "1"),
         }
+    }
+
+    #[test]
+    fn test_archive_confirm_cancel_no_command() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "Card")],
+        )]);
+        let mut state = make_state_with_board(board);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('n'))));
+
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::Board);
+        assert_eq!(state.board.as_ref().unwrap().columns[0].cards.len(), 1);
+    }
+
+    // ========== ArchivedList ビュー ==========
+
+    #[test]
+    fn test_show_archived_list_starts_loading() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('v'))));
+
+        assert_eq!(state.mode, ViewMode::ArchivedList);
+        assert!(state.archived_list.as_ref().unwrap().loading);
+        assert_eq!(
+            cmd,
+            Command::LoadArchivedItems {
+                project_id: "proj_1".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_archived_items_loaded_populates_state() {
+        let board = make_board(vec![("Todo", "opt_1", vec![])]);
+        let mut state = make_state_with_board(board);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('v'))));
+
+        let archived = vec![make_card("a1", "Archived A"), make_card("a2", "Archived B")];
+        state.handle_event(AppEvent::ArchivedItemsLoaded(Ok(archived)));
+
+        let s = state.archived_list.as_ref().unwrap();
+        assert!(!s.loading);
+        assert_eq!(s.cards.len(), 2);
+        assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn test_archived_list_navigation_and_unarchive() {
+        let board = make_board(vec![("Todo", "opt_1", vec![])]);
+        let mut state = make_state_with_board(board);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('v'))));
+        state.handle_event(AppEvent::ArchivedItemsLoaded(Ok(vec![
+            make_card("a1", "A"),
+            make_card("a2", "B"),
+        ])));
+
+        // j で次のカード
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.archived_list.as_ref().unwrap().selected, 1);
+
+        // u で UnarchiveCard コマンド + リストから除去
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('u'))));
+        assert_eq!(
+            cmd,
+            Command::UnarchiveCard {
+                project_id: "proj_1".into(),
+                item_id: "a2".into()
+            }
+        );
+        assert_eq!(state.archived_list.as_ref().unwrap().cards.len(), 1);
+    }
+
+    #[test]
+    fn test_archived_list_back_returns_to_board() {
+        let board = make_board(vec![("Todo", "opt_1", vec![])]);
+        let mut state = make_state_with_board(board);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('v'))));
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert_eq!(state.mode, ViewMode::Board);
     }
 
     // ========== カード作成 ==========
@@ -5263,10 +5481,10 @@ mod tests {
         assert_eq!(state.detail_pane, DetailPane::Sidebar);
     }
 
-    // ========== 詳細ビュー: 削除 ==========
+    // ========== 詳細ビュー: アーカイブ ==========
 
     #[test]
-    fn test_detail_sidebar_delete_opens_confirm() {
+    fn test_detail_sidebar_archive_button_opens_confirm() {
         let board = make_board(vec![
             ("Todo", "opt_1", vec![make_card("1", "Card A")]),
         ]);
@@ -5275,19 +5493,19 @@ mod tests {
         state.selected_card = 0;
         state.mode = ViewMode::Detail;
         state.detail_pane = DetailPane::Sidebar;
-        state.sidebar_selected = state.sidebar_delete_index();
+        state.sidebar_selected = state.sidebar_archive_index();
 
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
         assert_eq!(state.mode, ViewMode::Confirm);
         assert!(state.confirm_state.is_some());
         let cs = state.confirm_state.as_ref().unwrap();
-        assert!(matches!(cs.action, ConfirmAction::DeleteCard { .. }));
+        assert!(matches!(cs.action, ConfirmAction::ArchiveCard { .. }));
         assert_eq!(cs.return_to, ViewMode::Detail);
         assert_eq!(cmd, Command::None);
     }
 
     #[test]
-    fn test_detail_sidebar_d_key_deletes() {
+    fn test_detail_sidebar_a_key_archives() {
         let board = make_board(vec![
             ("Todo", "opt_1", vec![make_card("1", "Card A")]),
         ]);
@@ -5296,16 +5514,16 @@ mod tests {
         state.selected_card = 0;
         state.mode = ViewMode::Detail;
         state.detail_pane = DetailPane::Sidebar;
-        state.sidebar_selected = 0; // Status (d はどのセクションでも動く)
+        state.sidebar_selected = 0; // Status (a はどのセクションでも動く)
 
-        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('d'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
         assert_eq!(state.mode, ViewMode::Confirm);
         assert!(state.confirm_state.is_some());
         assert_eq!(cmd, Command::None);
     }
 
     #[test]
-    fn test_detail_delete_confirm_yes_returns_to_board() {
+    fn test_detail_archive_confirm_yes_returns_to_board() {
         let board = make_board(vec![
             ("Todo", "opt_1", vec![make_card("1", "Card A")]),
         ]);
@@ -5315,17 +5533,17 @@ mod tests {
         state.mode = ViewMode::Detail;
         state.detail_pane = DetailPane::Sidebar;
 
-        // d → Confirm
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('d'))));
+        // a → Confirm
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
         assert_eq!(state.mode, ViewMode::Confirm);
 
-        // y → 削除実行、Board に戻る
+        // y → アーカイブ実行、Board に戻る
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('y'))));
         assert_eq!(state.mode, ViewMode::Board);
         assert_eq!(state.board.as_ref().unwrap().columns[0].cards.len(), 0);
         assert_eq!(
             cmd,
-            Command::DeleteCard {
+            Command::ArchiveCard {
                 project_id: "proj_1".into(),
                 item_id: "1".into(),
             }
@@ -5333,7 +5551,7 @@ mod tests {
     }
 
     #[test]
-    fn test_detail_delete_confirm_cancel_returns_to_detail() {
+    fn test_detail_archive_confirm_cancel_returns_to_detail() {
         let board = make_board(vec![
             ("Todo", "opt_1", vec![make_card("1", "Card A")]),
         ]);
@@ -5343,8 +5561,8 @@ mod tests {
         state.mode = ViewMode::Detail;
         state.detail_pane = DetailPane::Sidebar;
 
-        // d → Confirm
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('d'))));
+        // a → Confirm
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
         assert_eq!(state.mode, ViewMode::Confirm);
 
         // n → キャンセル、Detail に戻る
@@ -5379,6 +5597,7 @@ mod tests {
             pr_status: None,
             linked_prs: vec![],
             reactions: vec![],
+            archived: false,
         }
     }
 
@@ -5542,6 +5761,7 @@ mod tests {
             pr_status: None,
             linked_prs: vec![],
             reactions: vec![],
+            archived: false,
         }
     }
 
@@ -5826,6 +6046,7 @@ mod tests {
             pr_status: None,
             linked_prs: vec![],
             reactions: vec![],
+            archived: false,
         }
     }
 
