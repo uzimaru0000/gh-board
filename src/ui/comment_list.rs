@@ -7,6 +7,8 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::app_state::AppState;
+use crate::ui::scroll_fade::{draw_bottom_arrow, draw_top_arrow};
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -23,8 +25,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let popup = centered_rect(60, 70, area);
     frame.render_widget(Clear, popup);
 
+    let total_comments = card.comments.len();
+    let title = if total_comments > 0 {
+        format!(" Comments {}/{} ", cls.cursor + 1, total_comments)
+    } else {
+        " Comments ".to_string()
+    };
     let block = Block::default()
-        .title(" Comments ")
+        .title(title)
         .title_style(
             Style::default()
                 .fg(theme().accent)
@@ -133,8 +141,24 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     .split(inner);
 
     let scroll = cls.cursor.saturating_sub(content_height / 2);
-    let paragraph = Paragraph::new(lines).scroll((scroll as u16 * 3, 0));
+    let total_lines = lines.len();
+    let viewport = vert[0].height as usize;
+    let scroll_lines = (scroll * 3).min(total_lines.saturating_sub(viewport));
+    let paragraph = Paragraph::new(lines).scroll((scroll_lines as u16, 0));
     frame.render_widget(paragraph, vert[0]);
+
+    // 矢印: popup のボーダー中央に上下矢印を描画
+    if AppState::should_show_scrollbar(total_lines, viewport) {
+        let has_above = scroll_lines > 0;
+        let has_below = scroll_lines + viewport < total_lines;
+        let buf = frame.buffer_mut();
+        if has_above {
+            draw_top_arrow(buf, popup);
+        }
+        if has_below {
+            draw_bottom_arrow(buf, popup);
+        }
+    }
 
     let hint_style = Style::default()
         .fg(theme().text)

@@ -7,6 +7,8 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::app_state::AppState;
+use crate::ui::scroll_fade::{draw_bottom_arrow, draw_top_arrow};
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -14,8 +16,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(Clear, popup_area);
 
+    let total = app.state.projects.len();
+    let title = if total > 0 {
+        format!(
+            " Select Project {}/{} ",
+            app.state.selected_project_index + 1,
+            total
+        )
+    } else {
+        " Select Project ".to_string()
+    };
     let block = Block::default()
-        .title(" Select Project ")
+        .title(title)
         .title_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -70,6 +82,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut state = ListState::default().with_selected(Some(app.state.selected_project_index));
     frame.render_stateful_widget(list, popup_area, &mut state);
+
+    // 矢印: popup のボーダー中央に上下矢印を描画
+    let viewport_items = popup_area.height.saturating_sub(2) as usize / 2;
+    if AppState::should_show_scrollbar(total, viewport_items) {
+        let max_offset = total.saturating_sub(viewport_items);
+        let approx_offset = app
+            .state
+            .selected_project_index
+            .saturating_sub(viewport_items / 2)
+            .min(max_offset);
+        let has_above = approx_offset > 0;
+        let has_below = approx_offset + viewport_items < total;
+        let buf = frame.buffer_mut();
+        if has_above {
+            draw_top_arrow(buf, popup_area);
+        }
+        if has_below {
+            draw_bottom_arrow(buf, popup_area);
+        }
+    }
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {

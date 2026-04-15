@@ -1716,6 +1716,10 @@ impl AppState {
         self.scroll_offset = 0;
     }
 
+    pub fn should_show_scrollbar(total: usize, viewport: usize) -> bool {
+        viewport > 0 && total > viewport
+    }
+
     pub fn compute_board_scroll_x(
         selected_column: usize,
         current_scroll: usize,
@@ -6336,6 +6340,30 @@ mod tests {
         assert!(now);
         assert_eq!(reactions[0].count, 3);
         assert!(reactions[0].viewer_has_reacted);
+    }
+
+    // --- should_show_scrollbar tests ---
+
+    #[test]
+    fn test_should_show_scrollbar_fits() {
+        assert!(!AppState::should_show_scrollbar(5, 10));
+        assert!(!AppState::should_show_scrollbar(10, 10));
+    }
+
+    #[test]
+    fn test_should_show_scrollbar_overflow() {
+        assert!(AppState::should_show_scrollbar(11, 10));
+        assert!(AppState::should_show_scrollbar(1000, 3));
+    }
+
+    #[test]
+    fn test_should_show_scrollbar_zero_viewport() {
+        assert!(!AppState::should_show_scrollbar(100, 0));
+    }
+
+    #[test]
+    fn test_should_show_scrollbar_zero_total() {
+        assert!(!AppState::should_show_scrollbar(0, 10));
     }
 
     // --- compute_board_scroll_x tests ---
