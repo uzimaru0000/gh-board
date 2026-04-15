@@ -186,6 +186,19 @@ fn render_layout(frame: &mut Frame, area: Rect, app: &App) {
     match app.state.current_layout {
         LayoutMode::Board => ui::board::render(frame, area, app),
         LayoutMode::Table => ui::table::render(frame, area, app),
+        LayoutMode::Roadmap => {
+            // Iteration field が無い project では Board にフォールバックする
+            let has_iter = app
+                .state
+                .board
+                .as_ref()
+                .is_some_and(|b| b.has_iteration_field());
+            if has_iter {
+                ui::roadmap::render(frame, area, app);
+            } else {
+                ui::board::render(frame, area, app);
+            }
+        }
     }
 }
 

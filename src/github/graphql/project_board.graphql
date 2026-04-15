@@ -34,6 +34,13 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
                 id
                 title
                 startDate
+                duration
+              }
+              completedIterations {
+                id
+                title
+                startDate
+                duration
               }
             }
           }

@@ -23,14 +23,15 @@ pub enum ViewMode {
     ArchivedList,
 }
 
-/// Board の表示レイアウト。Kanban (Board) と Table の 2 種類をサポート。
+/// Board の表示レイアウト。Kanban (Board) / Table / Roadmap の 3 種類をサポート。
 /// `ViewMode::Board` のサブモードとして扱い、Detail/Filter/CardGrab 等の既存モーダルは
-/// どちらのレイアウトからも開ける。
+/// どのレイアウトからも開ける。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum LayoutMode {
     #[default]
     Board,
     Table,
+    Roadmap,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -57,13 +57,15 @@ pub struct AppState {
     pub scroll_offset: usize,
     pub board_scroll_x: std::cell::Cell<usize>,
 
-    // Layout (Board / Table)
+    // Layout (Board / Table / Roadmap)
     pub current_layout: LayoutMode,
     pub table_selected_row: usize,
     /// Table view 用の表示順。Board.columns を平坦化したものをデフォルトとし、
     /// Table での grab 並び替えはこのリストの順序を入れ替える (status は変えない)。
     /// 含まれない item_id は表示時にリスト末尾に付加される。
     pub table_item_order: Vec<String>,
+    /// Roadmap view 用の選択行。`roadmap_rows()` のインデックス。
+    pub roadmap_selected_row: usize,
 
     // Project selection
     pub projects: Vec<ProjectSummary>,
@@ -157,6 +159,7 @@ impl AppState {
             current_layout: LayoutMode::Board,
             table_selected_row: 0,
             table_item_order: Vec::new(),
+            roadmap_selected_row: 0,
             projects: Vec::new(),
             selected_project_index: 0,
             current_project: None,
@@ -200,17 +203,31 @@ impl AppState {
         self.views = views;
     }
 
-    /// Board ↔ Table の表示レイアウトをトグルする。
-    /// 切替時に既存の選択 (Board 側 selected_column/selected_card と Table 側
-    /// table_selected_row) を双方向に同期し、ユーザーが見ていたカードを保つ。
+    /// Board / Table / Roadmap の表示レイアウトを cycle でトグルする。
+    /// Board → Table → Roadmap → Board の順で循環。
+    /// Iteration field が無い project では Roadmap を skip する。
+    /// 切替時に選択状態を双方向に同期し、ユーザーが見ていたカードを保つ。
     pub fn toggle_layout(&mut self) {
+        let has_iter = self
+            .board
+            .as_ref()
+            .is_some_and(|b| b.has_iteration_field());
         match self.current_layout {
             LayoutMode::Board => {
                 self.table_selected_row = self.current_table_row();
                 self.current_layout = LayoutMode::Table;
             }
             LayoutMode::Table => {
-                self.set_selection_from_table_row(self.table_selected_row);
+                if has_iter {
+                    self.roadmap_selected_row = self.table_selected_row;
+                    self.current_layout = LayoutMode::Roadmap;
+                } else {
+                    self.set_selection_from_table_row(self.table_selected_row);
+                    self.current_layout = LayoutMode::Board;
+                }
+            }
+            LayoutMode::Roadmap => {
+                self.set_selection_from_roadmap_row(self.roadmap_selected_row);
                 self.current_layout = LayoutMode::Board;
             }
         }
@@ -244,9 +261,11 @@ impl AppState {
         self.scroll_offset = 0;
         self.current_layout = match self.views[idx].layout {
             Some(LayoutModeConfig::Table) => LayoutMode::Table,
+            Some(LayoutModeConfig::Roadmap) => LayoutMode::Roadmap,
             _ => LayoutMode::Board,
         };
         self.table_selected_row = 0;
+        self.roadmap_selected_row = 0;
         if let Some(project) = &self.current_project {
             let id = project.id.clone();
             self.start_loading_board(&id)
@@ -264,6 +283,7 @@ impl AppState {
         self.scroll_offset = 0;
         self.current_layout = LayoutMode::Board;
         self.table_selected_row = 0;
+        self.roadmap_selected_row = 0;
         if let Some(project) = &self.current_project {
             let id = project.id.clone();
             self.start_loading_board(&id)
@@ -781,6 +801,9 @@ impl AppState {
         if self.current_layout == LayoutMode::Table {
             return self.handle_table_key(key);
         }
+        if self.current_layout == LayoutMode::Roadmap {
+            return self.handle_roadmap_key(key);
+        }
 
         let board = match &self.board {
             Some(b) => b,
@@ -1065,6 +1088,128 @@ impl AppState {
                     });
                     self.mode = ViewMode::CardGrab;
                 }
+                Command::None
+            }
+            _ => Command::None,
+        }
+    }
+
+    /// Roadmap layout のキーハンドラ。
+    /// 行ベース (roadmap_selected_row) でナビゲーションし、Detail/Archive 等の遷移時は
+    /// `set_selection_from_roadmap_row` で Board 用の (selected_column, selected_card) を
+    /// 書き戻してから既存ロジックを再利用する。
+    /// Iteration / Date の期間編集は MVP スコープ外のため Space / h / l は no-op。
+    fn handle_roadmap_key(&mut self, key: KeyEvent) -> Command {
+        let board = match &self.board {
+            Some(b) => b,
+            None => return Command::None,
+        };
+
+        if board.columns.is_empty() {
+            match self.keymap.resolve(KeymapMode::Roadmap, &key) {
+                Some(Action::Quit) | Some(Action::ForceQuit) => self.should_quit = true,
+                Some(Action::SwitchProject) => return self.enter_project_select(),
+                Some(Action::ShowHelp) => self.mode = ViewMode::Help,
+                Some(Action::ToggleLayout) => self.toggle_layout(),
+                _ => {}
+            }
+            return Command::None;
+        }
+
+        // View switching (1-9, 0) は Board と同じ
+        if let KeyCode::Char(c @ '1'..='9') = key.code
+            && key.modifiers == KeyModifiers::NONE
+        {
+            return self.switch_to_view((c as usize) - ('1' as usize));
+        }
+        if key.code == KeyCode::Char('0') && key.modifiers == KeyModifiers::NONE {
+            return self.clear_view();
+        }
+
+        let action = match self.keymap.resolve(KeymapMode::Roadmap, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
+        let row_count = self.roadmap_rows().len();
+
+        match action {
+            Action::Quit | Action::ForceQuit => {
+                self.should_quit = true;
+                Command::None
+            }
+            Action::MoveDown => {
+                if row_count > 0 {
+                    self.roadmap_selected_row =
+                        (self.roadmap_selected_row + 1).min(row_count - 1);
+                }
+                Command::None
+            }
+            Action::MoveUp => {
+                self.roadmap_selected_row = self.roadmap_selected_row.saturating_sub(1);
+                Command::None
+            }
+            Action::FirstItem => {
+                self.roadmap_selected_row = 0;
+                Command::None
+            }
+            Action::LastItem => {
+                if row_count > 0 {
+                    self.roadmap_selected_row = row_count - 1;
+                }
+                Command::None
+            }
+            Action::OpenDetail => {
+                self.set_selection_from_roadmap_row(self.roadmap_selected_row);
+                self.open_detail_view()
+            }
+            Action::SwitchProject => self.enter_project_select(),
+            Action::Refresh => {
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
+            Action::ShowHelp => {
+                self.mode = ViewMode::Help;
+                Command::None
+            }
+            Action::ChangeGrouping => {
+                self.open_group_by_select();
+                Command::None
+            }
+            Action::ToggleLayout => {
+                self.toggle_layout();
+                Command::None
+            }
+            Action::StartFilter => {
+                self.filter.input.clear();
+                self.filter.cursor_pos = 0;
+                self.mode = ViewMode::Filter;
+                Command::None
+            }
+            Action::ClearFilter => {
+                self.active_view = None;
+                self.filter.active_filter = None;
+                self.roadmap_selected_row = 0;
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
+            Action::ArchiveCard => {
+                self.set_selection_from_roadmap_row(self.roadmap_selected_row);
+                self.start_archive_card(ViewMode::Board);
+                Command::None
+            }
+            Action::ShowArchivedList => self.show_archived_list(),
+            Action::NewCard => {
+                self.create_card_state = CreateCardState::default();
+                self.mode = ViewMode::CreateCard;
                 Command::None
             }
             _ => Command::None,
@@ -2327,6 +2472,44 @@ impl AppState {
     /// (selected_column, selected_card) に書き戻す。
     pub fn set_selection_from_table_row(&mut self, row: usize) {
         let rows = self.table_rows();
+        if let Some(&(col, real_idx)) = rows.get(row) {
+            self.selected_column = col;
+            let display_idx = self
+                .filtered_card_indices(col)
+                .iter()
+                .position(|&i| i == real_idx)
+                .unwrap_or(0);
+            self.selected_card = display_idx;
+        }
+    }
+
+    /// Roadmap view の表示順 `(col_idx, real_card_idx)` を返す。
+    /// MVP では `table_rows()` と同じ順序を利用する (column-major flatten + filter 適用)。
+    /// 各 row は 1 カードに対応し、iteration が未設定のカードも含まれる (render 側で bar を省略)。
+    pub fn roadmap_rows(&self) -> Vec<(usize, usize)> {
+        self.table_rows()
+    }
+
+    /// Board → Roadmap 切替時に、現在の (selected_column, selected_card) を
+    /// roadmap_selected_row に変換する。
+    /// 現状 `roadmap_rows()` は `table_rows()` と同一順序のため `current_table_row()`
+    /// と等価。将来 roadmap 独自の並び順を導入したときに差別化する。
+    #[allow(dead_code)]
+    pub fn current_roadmap_row(&self) -> usize {
+        let real = match self.real_card_index() {
+            Some(r) => r,
+            None => return 0,
+        };
+        self.roadmap_rows()
+            .iter()
+            .position(|&(col, idx)| col == self.selected_column && idx == real)
+            .unwrap_or(0)
+    }
+
+    /// Roadmap → Board 切替時に、roadmap_selected_row を
+    /// (selected_column, selected_card) に書き戻す。
+    pub fn set_selection_from_roadmap_row(&mut self, row: usize) {
+        let rows = self.roadmap_rows();
         if let Some(&(col, real_idx)) = rows.get(row) {
             self.selected_column = col;
             let display_idx = self
@@ -8191,11 +8374,15 @@ mod tests {
                     id: "it_1".into(),
                     title: "Sprint 1".into(),
                     start_date: "2026-04-01".into(),
+                    duration: 14,
+                    completed: false,
                 },
                 IterationOption {
                     id: "it_2".into(),
                     title: "Sprint 2".into(),
                     start_date: "2026-04-15".into(),
+                    duration: 14,
+                    completed: false,
                 },
             ],
         }
@@ -8590,11 +8777,15 @@ mod tests {
                             id: "it_1".into(),
                             title: "Sprint 1".into(),
                             start_date: "2026-04-01".into(),
+                            duration: 14,
+                            completed: false,
                         },
                         IterationOption {
                             id: "it_2".into(),
                             title: "Sprint 2".into(),
                             start_date: "2026-04-15".into(),
+                            duration: 14,
+                            completed: false,
                         },
                     ],
                 },
@@ -8926,8 +9117,79 @@ mod tests {
         assert_eq!(state.current_layout, LayoutMode::Board);
         state.handle_event(AppEvent::Key(key(KeyCode::Char('t'))));
         assert_eq!(state.current_layout, LayoutMode::Table);
+        // Iteration field が無いので Roadmap は skip し Board に戻る
         state.handle_event(AppEvent::Key(key(KeyCode::Char('t'))));
         assert_eq!(state.current_layout, LayoutMode::Board);
+    }
+
+    #[test]
+    fn test_toggle_layout_three_way_cycle_with_iteration_field() {
+        use crate::model::project::{FieldDefinition, IterationOption};
+        let board = make_board_with_fields(
+            vec![(
+                "Todo",
+                "opt_1",
+                vec![make_card("1", "A")],
+            )],
+            vec![FieldDefinition::Iteration {
+                id: "fld_it".into(),
+                name: "Iteration".into(),
+                iterations: vec![IterationOption {
+                    id: "it_1".into(),
+                    title: "Sprint 1".into(),
+                    start_date: "2026-04-01".into(),
+                    duration: 14,
+                    completed: false,
+                }],
+            }],
+        );
+        let mut state = make_state_with_board(board);
+
+        assert_eq!(state.current_layout, LayoutMode::Board);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('t'))));
+        assert_eq!(state.current_layout, LayoutMode::Table);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('t'))));
+        assert_eq!(state.current_layout, LayoutMode::Roadmap);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('t'))));
+        assert_eq!(state.current_layout, LayoutMode::Board);
+    }
+
+    #[test]
+    fn test_roadmap_move_down_and_back_to_board() {
+        use crate::model::project::{FieldDefinition, IterationOption};
+        let board = make_board_with_fields(
+            vec![(
+                "Todo",
+                "opt_1",
+                vec![make_card("1", "A"), make_card("2", "B")],
+            )],
+            vec![FieldDefinition::Iteration {
+                id: "fld_it".into(),
+                name: "Iteration".into(),
+                iterations: vec![IterationOption {
+                    id: "it_1".into(),
+                    title: "Sprint 1".into(),
+                    start_date: "2026-04-01".into(),
+                    duration: 14,
+                    completed: false,
+                }],
+            }],
+        );
+        let mut state = make_state_with_board(board);
+        state.current_layout = LayoutMode::Roadmap;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.roadmap_selected_row, 1);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.roadmap_selected_row, 1); // 末尾でクランプ
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
+        assert_eq!(state.roadmap_selected_row, 0);
+
+        // Roadmap → Board で選択が同期される
+        state.roadmap_selected_row = 1;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('t'))));
+        assert_eq!(state.current_layout, LayoutMode::Board);
+        assert_eq!(state.selected_card, 1);
     }
 
     #[test]

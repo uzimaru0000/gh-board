@@ -11,6 +11,7 @@ use serde::Deserialize;
 pub enum LayoutModeConfig {
     Board,
     Table,
+    Roadmap,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -423,6 +424,17 @@ layout = "board"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.view[0].layout, Some(LayoutModeConfig::Board));
+    }
+
+    #[test]
+    fn test_parse_view_with_layout_roadmap() {
+        let toml = r#"
+[[view]]
+name = "Sprint"
+layout = "roadmap"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.view[0].layout, Some(LayoutModeConfig::Roadmap));
     }
 
     #[test]

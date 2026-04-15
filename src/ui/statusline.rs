@@ -64,6 +64,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let layout_label = match app.state.current_layout {
         LayoutMode::Board => "Board",
         LayoutMode::Table => "Table",
+        LayoutMode::Roadmap => "Roadmap",
     };
     spans.push(Span::styled(
         format!("[{layout_label}]"),
@@ -158,6 +159,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let mode = match app.state.current_layout {
             LayoutMode::Board => KeymapMode::Board,
             LayoutMode::Table => KeymapMode::Table,
+            LayoutMode::Roadmap => KeymapMode::Roadmap,
         };
         let hints: Vec<String> = [
             (Action::OpenDetail, "detail"),

@@ -45,6 +45,24 @@ impl Grouping {
     }
 }
 
+impl Board {
+    /// Iteration field があれば (field_id, field_name, iterations) を返す。複数ある場合は最初の 1 つ。
+    pub fn iteration_field(&self) -> Option<(&str, &str, &[IterationOption])> {
+        self.field_definitions.iter().find_map(|d| match d {
+            FieldDefinition::Iteration {
+                id,
+                name,
+                iterations,
+            } => Some((id.as_str(), name.as_str(), iterations.as_slice())),
+            _ => None,
+        })
+    }
+
+    pub fn has_iteration_field(&self) -> bool {
+        self.iteration_field().is_some()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Column {
     pub option_id: String,
@@ -202,6 +220,8 @@ pub struct IterationOption {
     pub id: String,
     pub title: String,
     pub start_date: String,
+    pub duration: i32,
+    pub completed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
