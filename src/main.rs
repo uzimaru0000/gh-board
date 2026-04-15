@@ -259,6 +259,17 @@ fn render(frame: &mut Frame, app: &App) {
             ui::detail::render(frame, area, app);
             ui::comment_list::render(frame, area, app);
         }
+        ViewMode::ReactionPicker => {
+            render_board_with_tabs(frame, main_area, app);
+            ui::statusline::render(frame, area, app);
+            ui::detail::render(frame, area, app);
+            if let Some(ref picker) = app.state.reaction_picker_state {
+                if matches!(picker.return_to, ViewMode::CommentList) {
+                    ui::comment_list::render(frame, area, app);
+                }
+                ui::reaction_picker::render(frame, area, picker, app);
+            }
+        }
     }
 
     // Loading/error overlay

@@ -325,6 +325,32 @@ impl App {
             Command::OpenEditor { content } => {
                 self.pending_editor = Some(content);
             }
+            Command::AddReaction {
+                subject_id,
+                content,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.add_reaction(&subject_id, content).await;
+                    let _ = tx.send(AppEvent::ReactionToggled(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::RemoveReaction {
+                subject_id,
+                content,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.remove_reaction(&subject_id, content).await;
+                    let _ = tx.send(AppEvent::ReactionToggled(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
             Command::OpenUrl(url) => {
                 let _ = open::that(&url);
             }
