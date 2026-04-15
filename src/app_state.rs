@@ -962,35 +962,45 @@ impl AppState {
     }
 
     fn handle_create_card_key(&mut self, key: KeyEvent) -> Command {
-        // Global keys (ForceQuit, Submit, Back, Tab fields)
+        // Global keys (ForceQuit, Back, Tab fields)
         if let Some(action) = self.keymap.resolve(KeymapMode::CreateCardGlobal, &key) {
             match action {
                 Action::ForceQuit => {
                     self.should_quit = true;
                     return Command::None;
                 }
-                Action::Submit => {
-                    return self.submit_create_card();
-                }
                 Action::Back => {
                     self.mode = ViewMode::Board;
                     return Command::None;
                 }
                 Action::NextField => {
+                    let next = match self.create_card_state.focused_field {
+                        CreateCardField::Type => CreateCardField::Title,
+                        CreateCardField::Title => CreateCardField::Body,
+                        CreateCardField::Body => CreateCardField::Submit,
+                        CreateCardField::Submit => CreateCardField::Type,
+                    };
+                    // Submit が disable のときはスキップして次へ
                     self.create_card_state.focused_field =
-                        match self.create_card_state.focused_field {
-                            CreateCardField::Type => CreateCardField::Title,
-                            CreateCardField::Title => CreateCardField::Body,
-                            CreateCardField::Body => CreateCardField::Type,
+                        if next == CreateCardField::Submit && !self.can_submit_create_card() {
+                            CreateCardField::Type
+                        } else {
+                            next
                         };
                     return Command::None;
                 }
                 Action::PrevField => {
+                    let prev = match self.create_card_state.focused_field {
+                        CreateCardField::Type => CreateCardField::Submit,
+                        CreateCardField::Title => CreateCardField::Type,
+                        CreateCardField::Body => CreateCardField::Title,
+                        CreateCardField::Submit => CreateCardField::Body,
+                    };
                     self.create_card_state.focused_field =
-                        match self.create_card_state.focused_field {
-                            CreateCardField::Type => CreateCardField::Body,
-                            CreateCardField::Title => CreateCardField::Type,
-                            CreateCardField::Body => CreateCardField::Title,
+                        if prev == CreateCardField::Submit && !self.can_submit_create_card() {
+                            CreateCardField::Body
+                        } else {
+                            prev
                         };
                     return Command::None;
                 }
@@ -1013,6 +1023,14 @@ impl AppState {
                 if let Some(Action::OpenEditor) = self.keymap.resolve(KeymapMode::CreateCardBody, &key) {
                     let content = self.create_card_state.body_input.clone();
                     return Command::OpenEditor { content };
+                }
+            }
+            CreateCardField::Submit => {
+                if let Some(Action::Submit) = self.keymap.resolve(KeymapMode::CreateCardSubmit, &key) {
+                    if !self.can_submit_create_card() {
+                        return Command::None;
+                    }
+                    return self.submit_create_card();
                 }
             }
             CreateCardField::Title => {
@@ -1106,6 +1124,10 @@ impl AppState {
             project_id,
             item_id: item_id.to_string(),
         }
+    }
+
+    pub fn can_submit_create_card(&self) -> bool {
+        !self.create_card_state.title_input.trim().is_empty()
     }
 
     fn submit_create_card(&mut self) -> Command {
@@ -3528,11 +3550,9 @@ mod tests {
         state.mode = ViewMode::CreateCard;
         state.create_card_state.title_input = "New Card".into();
         state.create_card_state.body_input = "Description".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
 
-        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
-            KeyCode::Char('s'),
-            KeyModifiers::CONTROL,
-        )));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
 
         assert_eq!(
             cmd,
@@ -3545,26 +3565,6 @@ mod tests {
             }
         );
         assert_eq!(state.mode, ViewMode::Board);
-    }
-
-    #[test]
-    fn test_submit_empty_title_noop() {
-        let board = make_board(vec![(
-            "Todo",
-            "opt_1",
-            vec![make_card("1", "A")],
-        )]);
-        let mut state = make_state_with_board(board);
-        state.mode = ViewMode::CreateCard;
-        state.create_card_state.title_input = "  ".into(); // 空白のみ
-
-        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
-            KeyCode::Char('s'),
-            KeyModifiers::CONTROL,
-        )));
-
-        assert_eq!(cmd, Command::None);
-        assert_eq!(state.mode, ViewMode::CreateCard); // モードは変わらない
     }
 
     // ========== イベント処理 ==========
@@ -4137,6 +4137,8 @@ mod tests {
         let mut state = make_state_with_board(board);
         state.mode = ViewMode::CreateCard;
         state.create_card_state = CreateCardState::default();
+        // Submit を reachable にするためタイトルを埋める
+        state.create_card_state.title_input = "x".into();
 
         // デフォルトは Type
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
@@ -4149,6 +4151,10 @@ mod tests {
         state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Body);
 
+        // Tab → Submit
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Submit);
+
         // Tab → Type (ラップ)
         state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
@@ -4160,11 +4166,16 @@ mod tests {
         let mut state = make_state_with_board(board);
         state.mode = ViewMode::CreateCard;
         state.create_card_state = CreateCardState::default();
+        state.create_card_state.title_input = "x".into();
 
         // デフォルトは Type
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
 
-        // S-Tab → Body (逆方向ラップ)
+        // S-Tab → Submit (逆方向ラップ)
+        state.handle_event(AppEvent::Key(key(KeyCode::BackTab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Submit);
+
+        // S-Tab → Body
         state.handle_event(AppEvent::Key(key(KeyCode::BackTab)));
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Body);
 
@@ -4177,6 +4188,34 @@ mod tests {
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
     }
 
+    #[test]
+    fn test_create_card_tab_skips_submit_when_disabled() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        // タイトル空なので Submit は disable
+        state.create_card_state.focused_field = CreateCardField::Body;
+
+        // Body から Tab → Submit をスキップして Type へ
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
+    }
+
+    #[test]
+    fn test_create_card_backtab_skips_submit_when_disabled() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        // タイトル空なので Submit は disable
+        state.create_card_state.focused_field = CreateCardField::Type;
+
+        // Type から BackTab → 逆方向ラップは Submit だが disable なので Body にスキップ
+        state.handle_event(AppEvent::Key(key(KeyCode::BackTab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Body);
+    }
+
     // ========== カード作成: submit ==========
 
     #[test]
@@ -4187,11 +4226,9 @@ mod tests {
         state.create_card_state.card_type = NewCardType::Draft;
         state.create_card_state.title_input = "My Draft".into();
         state.create_card_state.body_input = "body".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
 
-        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
-            KeyCode::Char('s'),
-            KeyModifiers::CONTROL,
-        )));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
 
         assert_eq!(
             cmd,
@@ -4217,11 +4254,9 @@ mod tests {
         state.create_card_state.card_type = NewCardType::Issue;
         state.create_card_state.title_input = "My Issue".into();
         state.create_card_state.body_input = "body".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
 
-        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
-            KeyCode::Char('s'),
-            KeyModifiers::CONTROL,
-        )));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
 
         assert_eq!(
             cmd,
@@ -4248,11 +4283,9 @@ mod tests {
         state.create_card_state.card_type = NewCardType::Issue;
         state.create_card_state.title_input = "My Issue".into();
         state.create_card_state.body_input = "body".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
 
-        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
-            KeyCode::Char('s'),
-            KeyModifiers::CONTROL,
-        )));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
 
         assert_eq!(cmd, Command::None);
         assert_eq!(state.mode, ViewMode::RepoSelect);
@@ -4270,6 +4303,69 @@ mod tests {
         state.mode = ViewMode::CreateCard;
         state.create_card_state.card_type = NewCardType::Issue;
         state.create_card_state.title_input = "My Issue".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(cmd, Command::None);
+        assert!(matches!(state.loading, LoadingState::Error(_)));
+    }
+
+    #[test]
+    fn test_create_card_submit_button_empty_title_no_op() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        state.create_card_state.focused_field = CreateCardField::Submit;
+        // title_input は空のまま
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(cmd, Command::None);
+        // モーダルを閉じず維持する (disable されたボタンを押したのと同じ)
+        assert_eq!(state.mode, ViewMode::CreateCard);
+    }
+
+    #[test]
+    fn test_create_card_submit_button_whitespace_title_no_op() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        state.create_card_state.focused_field = CreateCardField::Submit;
+        state.create_card_state.title_input = "   ".into();
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::CreateCard);
+    }
+
+    #[test]
+    fn test_create_card_can_submit_reflects_title() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+
+        assert!(!state.can_submit_create_card());
+
+        state.create_card_state.title_input = "   ".into();
+        assert!(!state.can_submit_create_card());
+
+        state.create_card_state.title_input = "Valid".into();
+        assert!(state.can_submit_create_card());
+    }
+
+    #[test]
+    fn test_create_card_ctrl_s_no_longer_submits() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state.card_type = NewCardType::Draft;
+        state.create_card_state.title_input = "My Draft".into();
+        state.create_card_state.focused_field = CreateCardField::Type;
 
         let cmd = state.handle_event(AppEvent::Key(key_with_mod(
             KeyCode::Char('s'),
@@ -4277,7 +4373,7 @@ mod tests {
         )));
 
         assert_eq!(cmd, Command::None);
-        assert!(matches!(state.loading, LoadingState::Error(_)));
+        assert_eq!(state.mode, ViewMode::CreateCard);
     }
 
     // ========== RepoSelect ==========

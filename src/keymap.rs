@@ -155,6 +155,7 @@ pub enum KeymapMode {
     ReactionPicker,
     CreateCardType,
     CreateCardBody,
+    CreateCardSubmit,
     EditCardBody,
     // Structural keys for text-input modes (Esc, Enter, Ctrl+c, Ctrl+s, Tab, BackTab)
     FilterStructural,
@@ -248,9 +249,8 @@ impl Keymap {
         confirm.insert(KeyBind::key(KeyCode::Esc), Action::ConfirmNo);
         keymap.modes.insert(KeymapMode::Confirm, confirm);
 
-        // CreateCard global keys (Ctrl+c, Ctrl+s, Esc, Tab, BackTab)
+        // CreateCard global keys (Esc, Tab, BackTab)
         let mut create_card_global = HashMap::new();
-        create_card_global.insert(KeyBind::ctrl('s'), Action::Submit);
         create_card_global.insert(KeyBind::key(KeyCode::Esc), Action::Back);
         create_card_global.insert(KeyBind::key(KeyCode::Tab), Action::NextField);
         create_card_global.insert(KeyBind::key(KeyCode::BackTab), Action::PrevField);
@@ -268,6 +268,11 @@ impl Keymap {
         let mut create_card_body = HashMap::new();
         create_card_body.insert(KeyBind::key(KeyCode::Enter), Action::OpenEditor);
         keymap.modes.insert(KeymapMode::CreateCardBody, create_card_body);
+
+        // CreateCard submit button
+        let mut create_card_submit = HashMap::new();
+        create_card_submit.insert(KeyBind::key(KeyCode::Enter), Action::Submit);
+        keymap.modes.insert(KeymapMode::CreateCardSubmit, create_card_submit);
 
         // CardGrab mode
         let mut card_grab = HashMap::new();
