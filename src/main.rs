@@ -261,11 +261,11 @@ fn render(frame: &mut Frame, app: &App) {
         }
     }
 
-    // Loading/error overlay
+    // Loading/error overlay (Refreshing は statusline 側で控えめに表示)
     match &app.state.loading {
         LoadingState::Loading(msg) => render_loading(frame, area, msg),
         LoadingState::Error(msg) => render_error(frame, area, msg),
-        LoadingState::Idle => {}
+        LoadingState::Idle | LoadingState::Refreshing => {}
     }
 }
 

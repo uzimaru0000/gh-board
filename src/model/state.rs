@@ -142,6 +142,8 @@ pub struct PendingIssueCreate {
 pub enum LoadingState {
     Idle,
     Loading(String),
+    /// 既存ボードを表示したままバックグラウンドで再フェッチ中。オーバーレイは出さない。
+    Refreshing,
     Error(String),
 }
 
@@ -172,6 +174,20 @@ impl FilterCondition {
             FilterCondition::Milestone(rest.to_string())
         } else {
             FilterCondition::Text(token.to_string())
+        }
+    }
+
+    /// Projects V2 の query 構文に変換する。
+    /// 値に空白が含まれる場合はダブルクオートで囲む。
+    pub fn to_query_token(&self) -> String {
+        match self {
+            FilterCondition::Text(s) => quote_if_needed(s),
+            FilterCondition::Label(s) => format!("label:\"{s}\""),
+            FilterCondition::Assignee(s) => {
+                let stripped = s.strip_prefix('@').unwrap_or(s);
+                format!("assignee:{}", quote_if_needed(stripped))
+            }
+            FilterCondition::Milestone(s) => format!("milestone:\"{s}\""),
         }
     }
 
@@ -232,6 +248,30 @@ impl ActiveFilter {
         self.groups
             .iter()
             .any(|group| group.iter().all(|cond| cond.matches(card)))
+    }
+
+    /// Projects V2 の `items(query:)` 引数に渡す query 文字列を、
+    /// OR グループごとに 1 個ずつ生成する。
+    /// 空 vec の場合はサーバー側フィルタなし。
+    pub fn to_server_queries(&self) -> Vec<String> {
+        self.groups
+            .iter()
+            .map(|group| {
+                group
+                    .iter()
+                    .map(FilterCondition::to_query_token)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect()
+    }
+}
+
+fn quote_if_needed(s: &str) -> String {
+    if s.contains(char::is_whitespace) {
+        format!("\"{s}\"")
+    } else {
+        s.to_string()
     }
 }
 
@@ -338,5 +378,92 @@ mod tests {
     fn test_parse_only_pipe() {
         let f = ActiveFilter::parse("|");
         assert_eq!(f, ActiveFilter { groups: vec![] });
+    }
+
+    #[test]
+    fn test_to_query_token_text() {
+        assert_eq!(
+            FilterCondition::Text("fix".into()).to_query_token(),
+            "fix"
+        );
+    }
+
+    #[test]
+    fn test_to_query_token_text_with_space() {
+        assert_eq!(
+            FilterCondition::Text("hello world".into()).to_query_token(),
+            "\"hello world\""
+        );
+    }
+
+    #[test]
+    fn test_to_query_token_label() {
+        assert_eq!(
+            FilterCondition::Label("bug".into()).to_query_token(),
+            "label:\"bug\""
+        );
+    }
+
+    #[test]
+    fn test_to_query_token_assignee() {
+        assert_eq!(
+            FilterCondition::Assignee("alice".into()).to_query_token(),
+            "assignee:alice"
+        );
+    }
+
+    #[test]
+    fn test_to_query_token_assignee_strips_at_prefix() {
+        assert_eq!(
+            FilterCondition::Assignee("@alice".into()).to_query_token(),
+            "assignee:alice"
+        );
+    }
+
+    #[test]
+    fn test_to_query_token_milestone() {
+        assert_eq!(
+            FilterCondition::Milestone("v1.0".into()).to_query_token(),
+            "milestone:\"v1.0\""
+        );
+    }
+
+    #[test]
+    fn test_to_server_queries_empty() {
+        let f = ActiveFilter::parse("");
+        assert_eq!(f.to_server_queries(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_to_server_queries_single_group() {
+        let f = ActiveFilter::parse("label:bug assignee:alice");
+        assert_eq!(
+            f.to_server_queries(),
+            vec!["label:\"bug\" assignee:alice".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_to_server_queries_or_groups() {
+        let f = ActiveFilter::parse("label:bug | label:enhancement");
+        assert_eq!(
+            f.to_server_queries(),
+            vec![
+                "label:\"bug\"".to_string(),
+                "label:\"enhancement\"".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_to_server_queries_complex() {
+        let f = ActiveFilter::parse("label:bug assignee:alice | label:enhancement");
+        assert_eq!(
+            f.to_server_queries(),
+            vec![
+                "label:\"bug\" assignee:alice".to_string(),
+                "label:\"enhancement\"".to_string(),
+            ]
+        );
     }
 }
