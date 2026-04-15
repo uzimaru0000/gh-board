@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     Frame,
@@ -8,7 +8,7 @@ use ratatui::{
 use crate::action::Action;
 use crate::app::App;
 use crate::keymap::{KeyBind, KeymapMode};
-use crate::model::state::ViewMode;
+use crate::model::state::{LoadingState, ViewMode};
 use crate::ui::theme::theme;
 
 /// Format the first (shortest) keybind for an action
@@ -145,7 +145,39 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let line = Line::from(spans);
     frame.render_widget(line, status_area);
+
+    // 右端に loading status (アニメーション付き) を重ねて描画
+    if let Some(loading_line) = build_loading_line(&app.state.loading) {
+        let width = loading_line.width() as u16;
+        if status_area.width >= width {
+            let right_area = Rect {
+                x: status_area.x + status_area.width - width,
+                y: status_area.y,
+                width,
+                height: 1,
+            };
+            frame.render_widget(loading_line.alignment(Alignment::Right), right_area);
+        }
+    }
 }
+
+fn build_loading_line(loading: &LoadingState) -> Option<Line<'static>> {
+    use rattles::presets::prelude as presets;
+
+    let msg = match loading {
+        LoadingState::Loading(m) => m.clone(),
+        LoadingState::Refreshing => "Loading...".to_string(),
+        LoadingState::Idle | LoadingState::Error(_) => return None,
+    };
+
+    let style = Style::default().fg(theme().yellow).add_modifier(Modifier::BOLD);
+    let spinner = presets::dots_circle().current_frame();
+    Some(Line::from(vec![
+        Span::styled(format!("{spinner} "), style),
+        Span::styled(format!("{msg} "), style),
+    ]))
+}
+
 
 fn build_hint_pair(app: &App, mode: KeymapMode, pairs: &[(Action, &str)]) -> String {
     pairs

@@ -1,4 +1,4 @@
-query ProjectBoard($projectId: ID!, $itemsCursor: String) {
+query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
   node(id: $projectId) {
     __typename
     ... on ProjectV2 {
@@ -39,7 +39,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
           }
         }
       }
-      items(first: 50, after: $itemsCursor) {
+      items(first: 50, after: $itemsCursor, query: $query) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
@@ -97,7 +97,24 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
               milestone { title }
               assignees(first: 5) { nodes { login } }
               labels(first: 10) { nodes { id name color } }
-              comments(first: 20) { nodes { id author { __typename login } body createdAt } }
+              reactionGroups {
+                content
+                viewerHasReacted
+                reactors { totalCount }
+              }
+              comments(first: 20) {
+                nodes {
+                  id
+                  author { __typename login }
+                  body
+                  createdAt
+                  reactionGroups {
+                    content
+                    viewerHasReacted
+                    reactors { totalCount }
+                  }
+                }
+              }
               closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
                 nodes {
                   number
@@ -117,7 +134,24 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
               milestone { title }
               assignees(first: 5) { nodes { login } }
               labels(first: 10) { nodes { id name color } }
-              comments(first: 20) { nodes { id author { __typename login } body createdAt } }
+              reactionGroups {
+                content
+                viewerHasReacted
+                reactors { totalCount }
+              }
+              comments(first: 20) {
+                nodes {
+                  id
+                  author { __typename login }
+                  body
+                  createdAt
+                  reactionGroups {
+                    content
+                    viewerHasReacted
+                    reactors { totalCount }
+                  }
+                }
+              }
               reviewDecision
               reviewRequests(first: 10) {
                 nodes {

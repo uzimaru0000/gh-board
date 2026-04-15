@@ -7,8 +7,42 @@ use crate::command::CustomFieldValueInput;
 use crate::model::project::{
     Board, Card, CardType, CiStatus, Column, ColumnColor, Comment, CustomFieldValue,
     FieldDefinition, Grouping, IssueState, IterationOption, Label, LinkedPr, PrState, PrStatus,
-    ProjectSummary, Repository, ReviewDecision, SingleSelectOption,
+    ProjectSummary, ReactionContent, ReactionSummary, Repository, ReviewDecision,
+    SingleSelectOption,
 };
+
+// ReactionContent 変換: 各 GraphQL クエリごとに自動生成される enum を model 側の型に変換する。
+// 全クエリで同じ variant 名を共有しているため、macro で impl を展開する。
+macro_rules! impl_reaction_content_from {
+    ($module:path) => {
+        impl ReactionContentFromGraphQL for $module {
+            fn to_model(&self) -> Option<ReactionContent> {
+                #[allow(unreachable_patterns)]
+                match self {
+                    Self::THUMBS_UP => Some(ReactionContent::ThumbsUp),
+                    Self::THUMBS_DOWN => Some(ReactionContent::ThumbsDown),
+                    Self::LAUGH => Some(ReactionContent::Laugh),
+                    Self::HOORAY => Some(ReactionContent::Hooray),
+                    Self::CONFUSED => Some(ReactionContent::Confused),
+                    Self::HEART => Some(ReactionContent::Heart),
+                    Self::ROCKET => Some(ReactionContent::Rocket),
+                    Self::EYES => Some(ReactionContent::Eyes),
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+trait ReactionContentFromGraphQL {
+    fn to_model(&self) -> Option<ReactionContent>;
+}
+
+impl_reaction_content_from!(project_board::ReactionContent);
+impl_reaction_content_from!(fetch_comments::ReactionContent);
+impl_reaction_content_from!(add_comment::ReactionContent);
+impl_reaction_content_from!(add_reaction_mutation::ReactionContent);
+impl_reaction_content_from!(remove_reaction_mutation::ReactionContent);
 
 // Type aliases for readability
 use project_board::{
@@ -547,57 +581,75 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub async fn get_board_with_grouping(
+    pub async fn get_board(
         &self,
         project_id: &str,
+        queries: &[String],
         preferred_group_by_field_name: Option<&str>,
     ) -> anyhow::Result<Board> {
+        // queries が空ならフィルタなしで 1 回ロード。
+        // 複数 queries は OR として個別に fetch して item_id で dedup する。
+        let query_iter: Vec<Option<String>> = if queries.is_empty() {
+            vec![None]
+        } else {
+            queries.iter().cloned().map(Some).collect()
+        };
+
+        let mut seen_item_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         let mut all_items: Vec<ItemNode> = Vec::new();
-        let mut cursor: Option<String> = None;
         let mut title = String::new();
         let mut field_nodes = None;
         let mut repositories: Vec<Repository> = Vec::new();
 
-        loop {
-            let vars = project_board::Variables {
-                project_id: project_id.to_string(),
-                items_cursor: cursor,
-            };
-            let data = self.query::<ProjectBoard>(vars).await?;
-            let node = data.node.context("Project not found")?;
+        for query in query_iter {
+            let mut cursor: Option<String> = None;
+            loop {
+                let vars = project_board::Variables {
+                    project_id: project_id.to_string(),
+                    items_cursor: cursor,
+                    query: query.clone(),
+                };
+                let data = self.query::<ProjectBoard>(vars).await?;
+                let node = data.node.context("Project not found")?;
 
-            let pv2 = match node {
-                ProjectBoardNode::ProjectV2(pv2) => pv2,
-                _ => bail!("Node is not a ProjectV2"),
-            };
+                let pv2 = match node {
+                    ProjectBoardNode::ProjectV2(pv2) => pv2,
+                    _ => bail!("Node is not a ProjectV2"),
+                };
 
-            let has_next = pv2.items.page_info.has_next_page;
-            let next_cursor = pv2.items.page_info.end_cursor;
+                let has_next = pv2.items.page_info.has_next_page;
+                let next_cursor = pv2.items.page_info.end_cursor;
 
-            if let Some(nodes) = pv2.items.nodes {
-                all_items.extend(nodes.into_iter().flatten());
-            }
+                if let Some(nodes) = pv2.items.nodes {
+                    for item in nodes.into_iter().flatten() {
+                        if seen_item_ids.insert(item.id.clone()) {
+                            all_items.push(item);
+                        }
+                    }
+                }
 
-            if title.is_empty() {
-                title = pv2.title;
-                field_nodes = pv2.fields.nodes;
-                repositories = pv2
-                    .repositories
-                    .nodes
-                    .unwrap_or_default()
-                    .into_iter()
-                    .flatten()
-                    .map(|r| Repository {
-                        id: r.id,
-                        name_with_owner: r.name_with_owner,
-                    })
-                    .collect();
-            }
+                if title.is_empty() {
+                    title = pv2.title;
+                    field_nodes = pv2.fields.nodes;
+                    repositories = pv2
+                        .repositories
+                        .nodes
+                        .unwrap_or_default()
+                        .into_iter()
+                        .flatten()
+                        .map(|r| Repository {
+                            id: r.id,
+                            name_with_owner: r.name_with_owner,
+                        })
+                        .collect();
+                }
 
-            if has_next {
-                cursor = next_cursor;
-            } else {
-                break;
+                if has_next {
+                    cursor = next_cursor;
+                } else {
+                    break;
+                }
             }
         }
 
@@ -621,11 +673,27 @@ impl GitHubClient {
                 fetch_comments::FetchCommentsNode::Issue(issue) => {
                     if let Some(nodes) = issue.comments.nodes {
                         for c in nodes.into_iter().flatten() {
+                            let reactions = c
+                                .reaction_groups
+                                .as_ref()
+                                .map(|gs| {
+                                    gs.iter()
+                                        .filter_map(|g| {
+                                            Some(ReactionSummary {
+                                                content: g.content.to_model()?,
+                                                count: g.reactors.total_count as usize,
+                                                viewer_has_reacted: g.viewer_has_reacted,
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default();
                             all_comments.push(Comment {
                                 id: c.id,
                                 author: c.author.as_ref().map(|a| a.login.clone()).unwrap_or_else(|| "ghost".into()),
                                 body: c.body,
                                 created_at: c.created_at,
+                                reactions,
                             });
                         }
                     }
@@ -634,11 +702,27 @@ impl GitHubClient {
                 fetch_comments::FetchCommentsNode::PullRequest(pr) => {
                     if let Some(nodes) = pr.comments.nodes {
                         for c in nodes.into_iter().flatten() {
+                            let reactions = c
+                                .reaction_groups
+                                .as_ref()
+                                .map(|gs| {
+                                    gs.iter()
+                                        .filter_map(|g| {
+                                            Some(ReactionSummary {
+                                                content: g.content.to_model()?,
+                                                count: g.reactors.total_count as usize,
+                                                viewer_has_reacted: g.viewer_has_reacted,
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default();
                             all_comments.push(Comment {
                                 id: c.id,
                                 author: c.author.as_ref().map(|a| a.login.clone()).unwrap_or_else(|| "ghost".into()),
                                 body: c.body,
                                 created_at: c.created_at,
+                                reactions,
                             });
                         }
                     }
@@ -673,6 +757,21 @@ impl GitHubClient {
             .and_then(|e| e.node)
             .context("Failed to get added comment")?;
 
+        let reactions = node
+            .reaction_groups
+            .as_ref()
+            .map(|gs| {
+                gs.iter()
+                    .filter_map(|g| {
+                        Some(ReactionSummary {
+                            content: g.content.to_model()?,
+                            count: g.reactors.total_count as usize,
+                            viewer_has_reacted: g.viewer_has_reacted,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(Comment {
             id: node.id,
             author: node
@@ -682,6 +781,7 @@ impl GitHubClient {
                 .unwrap_or_else(|| "ghost".into()),
             body: node.body,
             created_at: node.created_at,
+            reactions,
         })
     }
 
@@ -705,7 +805,66 @@ impl GitHubClient {
             author: String::new(), // Will be filled by caller
             body: node.body,
             created_at: String::new(), // Will be filled by caller
+            reactions: Vec::new(),
         })
+    }
+
+    pub async fn add_reaction(
+        &self,
+        subject_id: &str,
+        content: ReactionContent,
+    ) -> anyhow::Result<()> {
+        let vars = add_reaction_mutation::Variables {
+            subject_id: subject_id.to_string(),
+            content: reaction_content_to_add_graphql(content),
+        };
+        let _ = self.query::<AddReactionMutation>(vars).await?;
+        Ok(())
+    }
+
+    pub async fn remove_reaction(
+        &self,
+        subject_id: &str,
+        content: ReactionContent,
+    ) -> anyhow::Result<()> {
+        let vars = remove_reaction_mutation::Variables {
+            subject_id: subject_id.to_string(),
+            content: reaction_content_to_remove_graphql(content),
+        };
+        let _ = self.query::<RemoveReactionMutation>(vars).await?;
+        Ok(())
+    }
+}
+
+fn reaction_content_to_add_graphql(
+    c: ReactionContent,
+) -> add_reaction_mutation::ReactionContent {
+    use add_reaction_mutation::ReactionContent as E;
+    match c {
+        ReactionContent::ThumbsUp => E::THUMBS_UP,
+        ReactionContent::ThumbsDown => E::THUMBS_DOWN,
+        ReactionContent::Laugh => E::LAUGH,
+        ReactionContent::Hooray => E::HOORAY,
+        ReactionContent::Confused => E::CONFUSED,
+        ReactionContent::Heart => E::HEART,
+        ReactionContent::Rocket => E::ROCKET,
+        ReactionContent::Eyes => E::EYES,
+    }
+}
+
+fn reaction_content_to_remove_graphql(
+    c: ReactionContent,
+) -> remove_reaction_mutation::ReactionContent {
+    use remove_reaction_mutation::ReactionContent as E;
+    match c {
+        ReactionContent::ThumbsUp => E::THUMBS_UP,
+        ReactionContent::ThumbsDown => E::THUMBS_DOWN,
+        ReactionContent::Laugh => E::LAUGH,
+        ReactionContent::Hooray => E::HOORAY,
+        ReactionContent::Confused => E::CONFUSED,
+        ReactionContent::Heart => E::HEART,
+        ReactionContent::Rocket => E::ROCKET,
+        ReactionContent::Eyes => E::EYES,
     }
 }
 
@@ -1241,11 +1400,41 @@ fn convert_item(item: &ItemNode) -> Card {
                                 .unwrap_or_else(|| "ghost".into()),
                             body: c.body.clone(),
                             created_at: c.created_at.clone(),
+                            reactions: c
+                                .reaction_groups
+                                .as_ref()
+                                .map(|gs| {
+                                    gs.iter()
+                                        .filter_map(|g| {
+                                            Some(ReactionSummary {
+                                                content: g.content.to_model()?,
+                                                count: g.reactors.total_count as usize,
+                                                viewer_has_reacted: g.viewer_has_reacted,
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
                         })
                         .collect()
                 })
                 .unwrap_or_default(),
             custom_fields: Vec::new(),
+            reactions: issue
+                .reaction_groups
+                .as_ref()
+                .map(|gs| {
+                    gs.iter()
+                        .filter_map(|g| {
+                            Some(ReactionSummary {
+                                content: g.content.to_model()?,
+                                count: g.reactors.total_count as usize,
+                                viewer_has_reacted: g.viewer_has_reacted,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         },
         Some(Content::PullRequest(pr)) => Card {
             pr_status: Some(build_pr_status(pr)),
@@ -1301,11 +1490,41 @@ fn convert_item(item: &ItemNode) -> Card {
                                 .unwrap_or_else(|| "ghost".into()),
                             body: c.body.clone(),
                             created_at: c.created_at.clone(),
+                            reactions: c
+                                .reaction_groups
+                                .as_ref()
+                                .map(|gs| {
+                                    gs.iter()
+                                        .filter_map(|g| {
+                                            Some(ReactionSummary {
+                                                content: g.content.to_model()?,
+                                                count: g.reactors.total_count as usize,
+                                                viewer_has_reacted: g.viewer_has_reacted,
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
                         })
                         .collect()
                 })
                 .unwrap_or_default(),
             custom_fields: Vec::new(),
+            reactions: pr
+                .reaction_groups
+                .as_ref()
+                .map(|gs| {
+                    gs.iter()
+                        .filter_map(|g| {
+                            Some(ReactionSummary {
+                                content: g.content.to_model()?,
+                                count: g.reactors.total_count as usize,
+                                viewer_has_reacted: g.viewer_has_reacted,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         },
         Some(Content::DraftIssue(draft)) => Card {
             pr_status: None,
@@ -1322,6 +1541,7 @@ fn convert_item(item: &ItemNode) -> Card {
             comments: Vec::new(),
             milestone: None,
             custom_fields: Vec::new(),
+            reactions: Vec::new(),
         },
         None => Card {
             pr_status: None,
@@ -1338,6 +1558,7 @@ fn convert_item(item: &ItemNode) -> Card {
             comments: Vec::new(),
             milestone: None,
             custom_fields: Vec::new(),
+            reactions: Vec::new(),
         },
     }
 }

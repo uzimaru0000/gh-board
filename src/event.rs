@@ -28,6 +28,7 @@ pub enum AppEvent {
     CommentUpdated(Result<Comment, String>),
     CommentsLoaded(Result<(String, Vec<Comment>), String>),
     CustomFieldUpdated(Result<(), String>),
+    ReactionToggled(Result<(), String>),
 }
 
 pub struct EventHandler {

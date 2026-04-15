@@ -6,6 +6,7 @@ use crate::config::ViewConfig;
 use crate::event::AppEvent;
 use crate::keymap::{Keymap, KeymapMode};
 use crate::command::CustomFieldValueInput;
+use crate::model::board_cache::BoardCache;
 use crate::model::project::{
     Board, Card, CardType, CustomFieldValue, FieldDefinition, ProjectSummary,
 };
@@ -38,8 +39,9 @@ fn is_valid_iso_date(s: &str) -> bool {
 use crate::model::state::{
     ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
     CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
-    GroupBySelectState, LoadingState, NewCardType, PendingIssueCreate, RepoSelectState,
-    SidebarEditMode, ViewMode, SIDEBAR_ASSIGNEES, SIDEBAR_LABELS, SIDEBAR_STATUS,
+    GroupBySelectState, LoadingState, NewCardType, PendingIssueCreate, ReactionPickerState,
+    ReactionTarget, RepoSelectState, SidebarEditMode, ViewMode, SIDEBAR_ASSIGNEES, SIDEBAR_LABELS,
+    SIDEBAR_STATUS,
 };
 
 pub struct AppState {
@@ -93,8 +95,16 @@ pub struct AppState {
     // Group-by selector
     pub group_by_select_state: Option<GroupBySelectState>,
 
+    // Reaction picker
+    pub reaction_picker_state: Option<ReactionPickerState>,
+
     // Loading
     pub loading: LoadingState,
+
+    // サーバーサイドフィルタ結果のキャッシュ。フィルタ行き来時の blank 期間を無くす。
+    pub board_cache: BoardCache,
+    /// 直近に発行した LoadBoard の queries (BoardLoaded 時にキャッシュ保存するため)
+    pub pending_board_queries: Option<Vec<String>>,
 
     // Views (saved filter presets)
     pub views: Vec<ViewConfig>,
@@ -143,7 +153,10 @@ impl AppState {
             grab_state: None,
             comment_list_state: None,
             group_by_select_state: None,
+            reaction_picker_state: None,
             loading: LoadingState::Idle,
+            board_cache: BoardCache::new(8),
+            pending_board_queries: None,
             views: Vec::new(),
             active_view: None,
             owner,
@@ -168,9 +181,9 @@ impl AppState {
         input.replace("@me", &format!("@{}", self.viewer_login))
     }
 
-    fn switch_to_view(&mut self, idx: usize) {
+    fn switch_to_view(&mut self, idx: usize) -> Command {
         if idx >= self.views.len() {
-            return;
+            return Command::None;
         }
         self.active_view = Some(idx);
         let filter_str = self.resolve_at_me(&self.views[idx].filter.clone());
@@ -183,15 +196,27 @@ impl AppState {
         }
         self.selected_card = 0;
         self.scroll_offset = 0;
+        if let Some(project) = &self.current_project {
+            let id = project.id.clone();
+            self.start_loading_board(&id)
+        } else {
+            Command::None
+        }
     }
 
-    fn clear_view(&mut self) {
+    fn clear_view(&mut self) -> Command {
         self.active_view = None;
         self.filter.active_filter = None;
         self.filter.input.clear();
         self.filter.cursor_pos = 0;
         self.selected_card = 0;
         self.scroll_offset = 0;
+        if let Some(project) = &self.current_project {
+            let id = project.id.clone();
+            self.start_loading_board(&id)
+        } else {
+            Command::None
+        }
     }
 
     pub fn start_loading_projects(&mut self) -> Command {
@@ -211,14 +236,65 @@ impl AppState {
     }
 
     pub fn start_loading_board(&mut self, project_id: &str) -> Command {
-        self.loading = LoadingState::Loading("Loading board...".into());
+        let queries = self
+            .filter
+            .active_filter
+            .as_ref()
+            .map(|f| f.to_server_queries())
+            .unwrap_or_default();
+
+        // キャッシュヒット時は board を即時差し替えて blank 期間を無くす
+        if let Some(cached) = self.board_cache.get(&queries) {
+            self.board = Some(cached);
+            self.selected_column = 0;
+            self.selected_card = 0;
+            self.scroll_offset = 0;
+            self.board_scroll_x.set(0);
+        }
+
+        self.loading = if self.board.is_some() {
+            LoadingState::Refreshing
+        } else {
+            LoadingState::Loading("Loading board...".into())
+        };
+        self.pending_board_queries = Some(queries.clone());
         Command::LoadBoard {
             project_id: project_id.to_string(),
             preferred_grouping_field_name: self.preferred_grouping_field_name.clone(),
+            queries,
+        }
+    }
+
+    /// mutation 後に呼び、server と乖離した可能性のあるキャッシュを全破棄する。
+    fn invalidate_board_cache(&mut self) {
+        self.board_cache.clear();
+    }
+
+    /// Command の中に board を書き換える mutation が含まれているか判定する。
+    fn command_mutates_board(cmd: &Command) -> bool {
+        match cmd {
+            Command::MoveCard { .. }
+            | Command::DeleteCard { .. }
+            | Command::CreateCard { .. }
+            | Command::CreateIssue { .. }
+            | Command::ReorderCard { .. }
+            | Command::ToggleLabel { .. }
+            | Command::ToggleAssignee { .. }
+            | Command::UpdateCard { .. } => true,
+            Command::Batch(cmds) => cmds.iter().any(Self::command_mutates_board),
+            _ => false,
         }
     }
 
     pub fn handle_event(&mut self, event: AppEvent) -> Command {
+        let cmd = self.handle_event_inner(event);
+        if Self::command_mutates_board(&cmd) {
+            self.invalidate_board_cache();
+        }
+        cmd
+    }
+
+    fn handle_event_inner(&mut self, event: AppEvent) -> Command {
         match event {
             AppEvent::Key(key) => self.handle_key(key),
             AppEvent::ProjectsLoaded(Ok(projects)) => {
@@ -244,6 +320,10 @@ impl AppState {
                 Command::None
             }
             AppEvent::BoardLoaded(Ok(board)) => {
+                // 対応する queries でキャッシュに保存 (次回以降の即時表示に使う)
+                if let Some(queries) = self.pending_board_queries.take() {
+                    self.board_cache.put(queries, board.clone());
+                }
                 self.board = Some(board);
                 self.selected_column = 0;
                 self.selected_card = 0;
@@ -421,6 +501,19 @@ impl AppState {
                 self.loading = LoadingState::Error(e);
                 Command::None
             }
+            AppEvent::ReactionToggled(Ok(())) => {
+                // 楽観的更新済み
+                Command::None
+            }
+            AppEvent::ReactionToggled(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
             AppEvent::CustomFieldUpdated(Ok(())) => {
                 // 楽観的更新済み
                 Command::None
@@ -459,7 +552,7 @@ impl AppState {
             return Command::None;
         }
 
-        // Ignore keys while loading
+        // Ignore keys while loading (Refreshing はバックグラウンド更新なので操作可能)
         if matches!(self.loading, LoadingState::Loading(_)) {
             if matches!(key.code, KeyCode::Char('q')) {
                 self.should_quit = true;
@@ -474,10 +567,7 @@ impl AppState {
                 self.handle_help_key(key);
                 Command::None
             }
-            ViewMode::Filter => {
-                self.handle_filter_key(key);
-                Command::None
-            }
+            ViewMode::Filter => self.handle_filter_key(key),
             ViewMode::Confirm => self.handle_confirm_key(key),
             ViewMode::CreateCard => self.handle_create_card_key(key),
             ViewMode::Detail => self.handle_detail_key(key),
@@ -486,6 +576,7 @@ impl AppState {
             ViewMode::EditCard => self.handle_edit_card_key(key),
             ViewMode::CommentList => self.handle_comment_list_key(key),
             ViewMode::GroupBySelect => self.handle_group_by_select_key(key),
+            ViewMode::ReactionPicker => self.handle_reaction_picker_key(key),
         }
     }
 
@@ -508,12 +599,10 @@ impl AppState {
         // View switching (1-9, 0) は特殊処理のまま
         if let KeyCode::Char(c @ '1'..='9') = key.code
             && key.modifiers == KeyModifiers::NONE {
-                self.switch_to_view((c as usize) - ('1' as usize));
-                return Command::None;
+                return self.switch_to_view((c as usize) - ('1' as usize));
             }
         if key.code == KeyCode::Char('0') && key.modifiers == KeyModifiers::NONE {
-            self.clear_view();
-            return Command::None;
+            return self.clear_view();
         }
 
         let action = match self.keymap.resolve(KeymapMode::Board, &key) {
@@ -608,7 +697,12 @@ impl AppState {
                 self.active_view = None;
                 self.filter.active_filter = None;
                 self.clamp_card_selection();
-                Command::None
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
             }
             Action::DeleteCard => {
                 self.start_delete_card(ViewMode::Board);
@@ -805,17 +899,17 @@ impl AppState {
         }
     }
 
-    fn handle_filter_key(&mut self, key: KeyEvent) {
+    fn handle_filter_key(&mut self, key: KeyEvent) -> Command {
         // Check structural keys first (ForceQuit, Back, Select)
         if let Some(action) = self.keymap.resolve(KeymapMode::FilterStructural, &key) {
             match action {
                 Action::ForceQuit => {
                     self.should_quit = true;
-                    return;
+                    return Command::None;
                 }
                 Action::Back => {
                     self.mode = ViewMode::Board;
-                    return;
+                    return Command::None;
                 }
                 Action::Select => {
                     self.active_view = None;
@@ -828,16 +922,15 @@ impl AppState {
                     self.selected_card = 0;
                     self.scroll_offset = 0;
                     self.mode = ViewMode::Board;
-                    return;
+                    return if let Some(project) = &self.current_project {
+                        let id = project.id.clone();
+                        self.start_loading_board(&id)
+                    } else {
+                        Command::None
+                    };
                 }
                 _ => {}
             }
-        }
-
-        // Global ForceQuit check
-        if let Some(Action::ForceQuit) = self.keymap.resolve(KeymapMode::FilterStructural, &key) {
-            self.should_quit = true;
-            return;
         }
 
         // Text input handling (not configurable)
@@ -867,6 +960,7 @@ impl AppState {
             }
             _ => {}
         }
+        Command::None
     }
 
     fn handle_confirm_key(&mut self, key: KeyEvent) -> Command {
@@ -912,35 +1006,45 @@ impl AppState {
     }
 
     fn handle_create_card_key(&mut self, key: KeyEvent) -> Command {
-        // Global keys (ForceQuit, Submit, Back, Tab fields)
+        // Global keys (ForceQuit, Back, Tab fields)
         if let Some(action) = self.keymap.resolve(KeymapMode::CreateCardGlobal, &key) {
             match action {
                 Action::ForceQuit => {
                     self.should_quit = true;
                     return Command::None;
                 }
-                Action::Submit => {
-                    return self.submit_create_card();
-                }
                 Action::Back => {
                     self.mode = ViewMode::Board;
                     return Command::None;
                 }
                 Action::NextField => {
+                    let next = match self.create_card_state.focused_field {
+                        CreateCardField::Type => CreateCardField::Title,
+                        CreateCardField::Title => CreateCardField::Body,
+                        CreateCardField::Body => CreateCardField::Submit,
+                        CreateCardField::Submit => CreateCardField::Type,
+                    };
+                    // Submit が disable のときはスキップして次へ
                     self.create_card_state.focused_field =
-                        match self.create_card_state.focused_field {
-                            CreateCardField::Type => CreateCardField::Title,
-                            CreateCardField::Title => CreateCardField::Body,
-                            CreateCardField::Body => CreateCardField::Type,
+                        if next == CreateCardField::Submit && !self.can_submit_create_card() {
+                            CreateCardField::Type
+                        } else {
+                            next
                         };
                     return Command::None;
                 }
                 Action::PrevField => {
+                    let prev = match self.create_card_state.focused_field {
+                        CreateCardField::Type => CreateCardField::Submit,
+                        CreateCardField::Title => CreateCardField::Type,
+                        CreateCardField::Body => CreateCardField::Title,
+                        CreateCardField::Submit => CreateCardField::Body,
+                    };
                     self.create_card_state.focused_field =
-                        match self.create_card_state.focused_field {
-                            CreateCardField::Type => CreateCardField::Body,
-                            CreateCardField::Title => CreateCardField::Type,
-                            CreateCardField::Body => CreateCardField::Title,
+                        if prev == CreateCardField::Submit && !self.can_submit_create_card() {
+                            CreateCardField::Body
+                        } else {
+                            prev
                         };
                     return Command::None;
                 }
@@ -963,6 +1067,14 @@ impl AppState {
                 if let Some(Action::OpenEditor) = self.keymap.resolve(KeymapMode::CreateCardBody, &key) {
                     let content = self.create_card_state.body_input.clone();
                     return Command::OpenEditor { content };
+                }
+            }
+            CreateCardField::Submit => {
+                if let Some(Action::Submit) = self.keymap.resolve(KeymapMode::CreateCardSubmit, &key) {
+                    if !self.can_submit_create_card() {
+                        return Command::None;
+                    }
+                    return self.submit_create_card();
                 }
             }
             CreateCardField::Title => {
@@ -1056,6 +1168,10 @@ impl AppState {
             project_id,
             item_id: item_id.to_string(),
         }
+    }
+
+    pub fn can_submit_create_card(&self) -> bool {
+        !self.create_card_state.title_input.trim().is_empty()
     }
 
     fn submit_create_card(&mut self) -> Command {
@@ -1725,6 +1841,7 @@ impl AppState {
             Action::EditCard => self.start_edit_card(),
             Action::NewComment => self.start_new_comment(),
             Action::OpenCommentList => self.open_comment_list(),
+            Action::OpenReactionPicker => self.open_reaction_picker_for_card(),
             _ => Command::None,
         }
     }
@@ -2149,6 +2266,7 @@ impl AppState {
                     existing: None,
                 }
             }
+            Action::OpenReactionPicker => self.open_reaction_picker_for_comment(),
             _ => Command::None,
         }
     }
@@ -2271,6 +2389,157 @@ impl AppState {
             self.selected_card = 0;
         }
         self.scroll_offset = 0;
+    }
+
+    fn open_reaction_picker_for_card(&mut self) -> Command {
+        let card = match self.selected_card_ref() {
+            Some(c) => c,
+            None => return Command::None,
+        };
+        // DraftIssue はリアクション不可
+        if matches!(card.card_type, CardType::DraftIssue) {
+            return Command::None;
+        }
+        let content_id = match &card.content_id {
+            Some(id) => id.clone(),
+            None => return Command::None,
+        };
+        let return_to = self.mode.clone();
+        self.reaction_picker_state = Some(ReactionPickerState {
+            target: ReactionTarget::CardBody { content_id },
+            cursor: 0,
+            return_to,
+        });
+        self.mode = ViewMode::ReactionPicker;
+        Command::None
+    }
+
+    fn open_reaction_picker_for_comment(&mut self) -> Command {
+        let cls = match &self.comment_list_state {
+            Some(s) => s,
+            None => return Command::None,
+        };
+        let card = match self.selected_card_ref() {
+            Some(c) => c,
+            None => return Command::None,
+        };
+        let comment = match card.comments.get(cls.cursor) {
+            Some(c) => c,
+            None => return Command::None,
+        };
+        let content_id = cls.content_id.clone();
+        let comment_id = comment.id.clone();
+        let return_to = self.mode.clone();
+        self.reaction_picker_state = Some(ReactionPickerState {
+            target: ReactionTarget::Comment {
+                comment_id,
+                content_id,
+            },
+            cursor: 0,
+            return_to,
+        });
+        self.mode = ViewMode::ReactionPicker;
+        Command::None
+    }
+
+    fn handle_reaction_picker_key(&mut self, key: KeyEvent) -> Command {
+        use crate::model::project::ReactionContent;
+        let action = match self.keymap.resolve(KeymapMode::ReactionPicker, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
+        match action {
+            Action::ForceQuit => {
+                self.should_quit = true;
+                Command::None
+            }
+            Action::Back | Action::Quit => {
+                let prev = self
+                    .reaction_picker_state
+                    .as_ref()
+                    .map(|s| s.return_to.clone())
+                    .unwrap_or(ViewMode::Detail);
+                self.reaction_picker_state = None;
+                self.mode = prev;
+                Command::None
+            }
+            Action::MoveLeft => {
+                if let Some(ref mut st) = self.reaction_picker_state {
+                    let len = ReactionContent::all().len();
+                    st.cursor = if st.cursor == 0 { len - 1 } else { st.cursor - 1 };
+                }
+                Command::None
+            }
+            Action::MoveRight => {
+                if let Some(ref mut st) = self.reaction_picker_state {
+                    let len = ReactionContent::all().len();
+                    st.cursor = (st.cursor + 1) % len;
+                }
+                Command::None
+            }
+            Action::ToggleReaction => self.toggle_selected_reaction(),
+            _ => Command::None,
+        }
+    }
+
+    /// リアクションを楽観的に toggle し、AddReaction/RemoveReaction コマンドを返す
+    fn toggle_selected_reaction(&mut self) -> Command {
+        use crate::model::project::{apply_reaction_toggle, ReactionContent};
+        let (target, cursor) = match &self.reaction_picker_state {
+            Some(s) => (s.target.clone(), s.cursor),
+            None => return Command::None,
+        };
+        let content = ReactionContent::all()[cursor];
+        let (subject_id, now_reacted) = match &target {
+            ReactionTarget::CardBody { content_id } => {
+                let card = match self.find_card_by_content_id_mut(content_id) {
+                    Some(c) => c,
+                    None => return Command::None,
+                };
+                let reacted = apply_reaction_toggle(&mut card.reactions, content);
+                (content_id.clone(), reacted)
+            }
+            ReactionTarget::Comment {
+                comment_id,
+                content_id,
+            } => {
+                let card = match self.find_card_by_content_id_mut(content_id) {
+                    Some(c) => c,
+                    None => return Command::None,
+                };
+                let comment = match card.comments.iter_mut().find(|c| &c.id == comment_id) {
+                    Some(c) => c,
+                    None => return Command::None,
+                };
+                let reacted = apply_reaction_toggle(&mut comment.reactions, content);
+                (comment_id.clone(), reacted)
+            }
+        };
+
+        if now_reacted {
+            Command::AddReaction {
+                subject_id,
+                content,
+            }
+        } else {
+            Command::RemoveReaction {
+                subject_id,
+                content,
+            }
+        }
+    }
+
+    fn find_card_by_content_id_mut(&mut self, content_id: &str) -> Option<&mut Card> {
+        let board = self.board.as_mut()?;
+        for col in &mut board.columns {
+            for card in &mut col.cards {
+                if card.content_id.as_deref() == Some(content_id) {
+                    return Some(card);
+                }
+            }
+        }
+        None
     }
 
     fn handle_status_select_key(&mut self, key: KeyEvent) -> Command {
@@ -2925,6 +3194,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -2951,6 +3221,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -2970,6 +3241,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -2989,6 +3261,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -3012,6 +3285,7 @@ mod tests {
             custom_fields,
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -3402,11 +3676,9 @@ mod tests {
         state.mode = ViewMode::CreateCard;
         state.create_card_state.title_input = "New Card".into();
         state.create_card_state.body_input = "Description".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
 
-        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
-            KeyCode::Char('s'),
-            KeyModifiers::CONTROL,
-        )));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
 
         assert_eq!(
             cmd,
@@ -3421,26 +3693,6 @@ mod tests {
             }
         );
         assert_eq!(state.mode, ViewMode::Board);
-    }
-
-    #[test]
-    fn test_submit_empty_title_noop() {
-        let board = make_board(vec![(
-            "Todo",
-            "opt_1",
-            vec![make_card("1", "A")],
-        )]);
-        let mut state = make_state_with_board(board);
-        state.mode = ViewMode::CreateCard;
-        state.create_card_state.title_input = "  ".into(); // 空白のみ
-
-        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
-            KeyCode::Char('s'),
-            KeyModifiers::CONTROL,
-        )));
-
-        assert_eq!(cmd, Command::None);
-        assert_eq!(state.mode, ViewMode::CreateCard); // モードは変わらない
     }
 
     // ========== イベント処理 ==========
@@ -3490,6 +3742,7 @@ mod tests {
             Command::LoadBoard {
                 project_id: "p1".into(),
                 preferred_grouping_field_name: None,
+                queries: vec![],
             }
         );
     }
@@ -3536,6 +3789,188 @@ mod tests {
     }
 
     // ========== モード遷移 ==========
+
+    #[test]
+    fn test_filter_enter_emits_load_board_with_queries() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "Card A"), make_card("2", "Card B")],
+        )]);
+        let mut state = make_state_with_board(board);
+
+        // / でフィルタモードに入り label:bug を入力
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        for c in "label:bug".chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+
+        // Enter で確定: LoadBoard が server-side query 付きで返ること
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
+                queries: vec!["label:\"bug\"".into()],
+            }
+        );
+        assert!(state.filter.active_filter.is_some());
+    }
+
+    #[test]
+    fn test_filter_enter_or_emits_multiple_queries() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "Card A")],
+        )]);
+        let mut state = make_state_with_board(board);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        for c in "label:bug | label:enh".chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
+                queries: vec!["label:\"bug\"".into(), "label:\"enh\"".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_filter_enter_empty_emits_load_board_no_query() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug"));
+
+        // / で空のまま Enter
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
+                queries: vec![],
+            }
+        );
+        assert!(state.filter.active_filter.is_none());
+    }
+
+    #[test]
+    fn test_clear_filter_emits_load_board_no_query() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug"));
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('u'),
+            KeyModifiers::CONTROL,
+        )));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
+                queries: vec![],
+            }
+        );
+        assert!(state.filter.active_filter.is_none());
+    }
+
+    #[test]
+    fn test_board_loaded_populates_cache() {
+        let mut state = make_state_with_board(make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "A")],
+        )]));
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug"));
+        // 先に start_loading_board を呼んで pending_board_queries を仕込む
+        let _ = state.start_loading_board("proj_1");
+
+        let new_board = make_board(vec![("Todo", "opt_1", vec![make_card("2", "B")])]);
+        state.handle_event(AppEvent::BoardLoaded(Ok(new_board)));
+
+        // cache に queries="label:bug" の board が保存されている
+        assert_eq!(
+            state.board_cache.keys(),
+            vec![vec!["label:\"bug\"".to_string()]]
+        );
+    }
+
+    #[test]
+    fn test_filter_change_uses_cache_immediately() {
+        let mut state = make_state_with_board(make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("old", "old board card")],
+        )]));
+
+        // あらかじめ label:bug のキャッシュを仕込む
+        let cached = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("cached_1", "cached bug")],
+        )]);
+        state
+            .board_cache
+            .put(vec!["label:\"bug\"".into()], cached);
+
+        // / label:bug Enter
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        for c in "label:bug".chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        // Enter 時点で board は cache の内容に差し替わっている
+        let b = state.board.as_ref().unwrap();
+        assert_eq!(b.columns[0].cards[0].item_id, "cached_1");
+    }
+
+    #[test]
+    fn test_mutation_invalidates_cache() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "A"), make_card("2", "B")]),
+            ("Done", "opt_2", vec![]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state
+            .board_cache
+            .put(vec!["label:\"bug\"".into()], make_board(vec![]));
+        assert_eq!(state.board_cache.len(), 1);
+
+        // grab モードで Done へ移動 → MoveCard が返り、cache は clear される
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        assert_eq!(state.board_cache.len(), 0);
+    }
+
+    #[test]
+    fn test_refresh_with_active_filter_includes_queries() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug"));
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
+                queries: vec!["label:\"bug\"".into()],
+            }
+        );
+    }
 
     #[test]
     fn test_slash_enters_filter() {
@@ -3832,6 +4267,8 @@ mod tests {
         let mut state = make_state_with_board(board);
         state.mode = ViewMode::CreateCard;
         state.create_card_state = CreateCardState::default();
+        // Submit を reachable にするためタイトルを埋める
+        state.create_card_state.title_input = "x".into();
 
         // デフォルトは Type
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
@@ -3844,6 +4281,10 @@ mod tests {
         state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Body);
 
+        // Tab → Submit
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Submit);
+
         // Tab → Type (ラップ)
         state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
@@ -3855,11 +4296,16 @@ mod tests {
         let mut state = make_state_with_board(board);
         state.mode = ViewMode::CreateCard;
         state.create_card_state = CreateCardState::default();
+        state.create_card_state.title_input = "x".into();
 
         // デフォルトは Type
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
 
-        // S-Tab → Body (逆方向ラップ)
+        // S-Tab → Submit (逆方向ラップ)
+        state.handle_event(AppEvent::Key(key(KeyCode::BackTab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Submit);
+
+        // S-Tab → Body
         state.handle_event(AppEvent::Key(key(KeyCode::BackTab)));
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Body);
 
@@ -3872,6 +4318,34 @@ mod tests {
         assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
     }
 
+    #[test]
+    fn test_create_card_tab_skips_submit_when_disabled() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        // タイトル空なので Submit は disable
+        state.create_card_state.focused_field = CreateCardField::Body;
+
+        // Body から Tab → Submit をスキップして Type へ
+        state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Type);
+    }
+
+    #[test]
+    fn test_create_card_backtab_skips_submit_when_disabled() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        // タイトル空なので Submit は disable
+        state.create_card_state.focused_field = CreateCardField::Type;
+
+        // Type から BackTab → 逆方向ラップは Submit だが disable なので Body にスキップ
+        state.handle_event(AppEvent::Key(key(KeyCode::BackTab)));
+        assert_eq!(state.create_card_state.focused_field, CreateCardField::Body);
+    }
+
     // ========== カード作成: submit ==========
 
     #[test]
@@ -3882,11 +4356,9 @@ mod tests {
         state.create_card_state.card_type = NewCardType::Draft;
         state.create_card_state.title_input = "My Draft".into();
         state.create_card_state.body_input = "body".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
 
-        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
-            KeyCode::Char('s'),
-            KeyModifiers::CONTROL,
-        )));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
 
         assert_eq!(
             cmd,
@@ -3914,11 +4386,9 @@ mod tests {
         state.create_card_state.card_type = NewCardType::Issue;
         state.create_card_state.title_input = "My Issue".into();
         state.create_card_state.body_input = "body".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
 
-        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
-            KeyCode::Char('s'),
-            KeyModifiers::CONTROL,
-        )));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
 
         assert_eq!(
             cmd,
@@ -3947,11 +4417,9 @@ mod tests {
         state.create_card_state.card_type = NewCardType::Issue;
         state.create_card_state.title_input = "My Issue".into();
         state.create_card_state.body_input = "body".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
 
-        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
-            KeyCode::Char('s'),
-            KeyModifiers::CONTROL,
-        )));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
 
         assert_eq!(cmd, Command::None);
         assert_eq!(state.mode, ViewMode::RepoSelect);
@@ -3969,6 +4437,69 @@ mod tests {
         state.mode = ViewMode::CreateCard;
         state.create_card_state.card_type = NewCardType::Issue;
         state.create_card_state.title_input = "My Issue".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(cmd, Command::None);
+        assert!(matches!(state.loading, LoadingState::Error(_)));
+    }
+
+    #[test]
+    fn test_create_card_submit_button_empty_title_no_op() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        state.create_card_state.focused_field = CreateCardField::Submit;
+        // title_input は空のまま
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(cmd, Command::None);
+        // モーダルを閉じず維持する (disable されたボタンを押したのと同じ)
+        assert_eq!(state.mode, ViewMode::CreateCard);
+    }
+
+    #[test]
+    fn test_create_card_submit_button_whitespace_title_no_op() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+        state.create_card_state.focused_field = CreateCardField::Submit;
+        state.create_card_state.title_input = "   ".into();
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::CreateCard);
+    }
+
+    #[test]
+    fn test_create_card_can_submit_reflects_title() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state = CreateCardState::default();
+
+        assert!(!state.can_submit_create_card());
+
+        state.create_card_state.title_input = "   ".into();
+        assert!(!state.can_submit_create_card());
+
+        state.create_card_state.title_input = "Valid".into();
+        assert!(state.can_submit_create_card());
+    }
+
+    #[test]
+    fn test_create_card_ctrl_s_no_longer_submits() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state.card_type = NewCardType::Draft;
+        state.create_card_state.title_input = "My Draft".into();
+        state.create_card_state.focused_field = CreateCardField::Type;
 
         let cmd = state.handle_event(AppEvent::Key(key_with_mod(
             KeyCode::Char('s'),
@@ -3976,7 +4507,7 @@ mod tests {
         )));
 
         assert_eq!(cmd, Command::None);
-        assert!(matches!(state.loading, LoadingState::Error(_)));
+        assert_eq!(state.mode, ViewMode::CreateCard);
     }
 
     // ========== RepoSelect ==========
@@ -4539,13 +5070,14 @@ mod tests {
 
         let cmd = state.handle_event(AppEvent::CardReordered(Err("API error".into())));
 
-        // エラー後にリロードが発動するので Loading 状態になる
-        assert!(matches!(state.loading, LoadingState::Loading(_)));
+        // エラー後にリロードが発動するので Refreshing 状態になる (既存ボードあり)
+        assert!(matches!(state.loading, LoadingState::Refreshing));
         assert_eq!(
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
                 preferred_grouping_field_name: None,
+                queries: vec![],
             }
         );
     }
@@ -4846,6 +5378,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -5008,6 +5541,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -5265,6 +5799,7 @@ mod tests {
             author: author.into(),
             body: body.into(),
             created_at: "2024-01-01T00:00:00Z".into(),
+            reactions: vec![],
         }
     }
 
@@ -5290,6 +5825,7 @@ mod tests {
             custom_fields: vec![],
             pr_status: None,
             linked_prs: vec![],
+            reactions: vec![],
         }
     }
 
@@ -5533,6 +6069,7 @@ mod tests {
             author: String::new(), // update_comment returns empty author
             body: "updated body".into(),
             created_at: String::new(),
+            reactions: vec![],
         };
         let _ = state.handle_event(AppEvent::CommentUpdated(Ok(updated)));
 
@@ -5557,6 +6094,248 @@ mod tests {
             "Expected FetchComments when 20 comments, got {:?}",
             cmd
         );
+    }
+
+    // ========== リアクションテスト ==========
+
+    fn make_draft_card_with_id(item_id: &str) -> Card {
+        let mut c = make_card(item_id, "Draft");
+        c.card_type = CardType::DraftIssue;
+        c
+    }
+
+    #[test]
+    fn test_detail_r_opens_reaction_picker_for_card_body() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        // Detail ビューを開く
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+
+        // r キー → ReactionPicker
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::ReactionPicker);
+        let picker = state.reaction_picker_state.as_ref().unwrap();
+        assert!(matches!(picker.target, ReactionTarget::CardBody { .. }));
+        assert_eq!(picker.return_to, ViewMode::Detail);
+        assert_eq!(picker.cursor, 0);
+    }
+
+    #[test]
+    fn test_detail_r_does_nothing_for_draft_issue() {
+        let card = make_draft_card_with_id("1");
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        // DraftIssue では Picker に遷移しない
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert!(state.reaction_picker_state.is_none());
+    }
+
+    #[test]
+    fn test_comment_list_r_opens_reaction_picker_for_comment() {
+        let comments = vec![
+            make_comment("c1", "alice", "hi"),
+            make_comment("c2", "bob", "hello"),
+        ];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+        )));
+        assert_eq!(state.mode, ViewMode::CommentList);
+
+        // j で 2 個目のコメントを選択
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+
+        // r キー → ReactionPicker (対象は c2)
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::ReactionPicker);
+        let picker = state.reaction_picker_state.as_ref().unwrap();
+        match &picker.target {
+            ReactionTarget::Comment { comment_id, .. } => {
+                assert_eq!(comment_id, "c2");
+            }
+            _ => panic!("Expected Comment target"),
+        }
+        assert_eq!(picker.return_to, ViewMode::CommentList);
+    }
+
+    #[test]
+    fn test_reaction_picker_navigation_wraps() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+
+        // cursor = 0 → h (MoveLeft) で 7 にラップ
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('h'))));
+        assert_eq!(state.reaction_picker_state.as_ref().unwrap().cursor, 7);
+
+        // l (MoveRight) で 0 に戻る
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+        assert_eq!(state.reaction_picker_state.as_ref().unwrap().cursor, 0);
+
+        // l で 1
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+        assert_eq!(state.reaction_picker_state.as_ref().unwrap().cursor, 1);
+    }
+
+    #[test]
+    fn test_reaction_picker_enter_adds_reaction_optimistic() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+
+        // cursor = 0 (ThumbsUp) で Enter → AddReaction + 楽観的更新
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        match cmd {
+            Command::AddReaction { subject_id, content } => {
+                assert_eq!(subject_id, "issue_1");
+                assert_eq!(content, ReactionContent::ThumbsUp);
+            }
+            other => panic!("Expected AddReaction, got {:?}", other),
+        }
+        // 楽観的更新
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.reactions.len(), 1);
+        assert_eq!(card.reactions[0].content, ReactionContent::ThumbsUp);
+        assert_eq!(card.reactions[0].count, 1);
+        assert!(card.reactions[0].viewer_has_reacted);
+    }
+
+    #[test]
+    fn test_reaction_picker_enter_removes_reaction_optimistic() {
+        // 既にリアクション済みのカード
+        let mut card = make_issue_card_with_comments("1", "Card A", vec![]);
+        card.reactions.push(ReactionSummary {
+            content: ReactionContent::ThumbsUp,
+            count: 3,
+            viewer_has_reacted: true,
+        });
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+
+        // cursor = 0 (ThumbsUp) で Enter → RemoveReaction + 楽観的更新
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        match cmd {
+            Command::RemoveReaction { subject_id, content } => {
+                assert_eq!(subject_id, "issue_1");
+                assert_eq!(content, ReactionContent::ThumbsUp);
+            }
+            other => panic!("Expected RemoveReaction, got {:?}", other),
+        }
+        // 楽観的更新: count=2, viewer_has_reacted=false
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.reactions.len(), 1);
+        assert_eq!(card.reactions[0].count, 2);
+        assert!(!card.reactions[0].viewer_has_reacted);
+    }
+
+    #[test]
+    fn test_reaction_picker_esc_returns_to_previous_viewmode() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        assert_eq!(state.mode, ViewMode::ReactionPicker);
+
+        // Esc → Detail に戻る
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert!(state.reaction_picker_state.is_none());
+    }
+
+    #[test]
+    fn test_reaction_picker_esc_returns_to_comment_list() {
+        let comments = vec![make_comment("c1", "alice", "hi")];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('C'),
+            KeyModifiers::SHIFT,
+        )));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        assert_eq!(state.mode, ViewMode::ReactionPicker);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        // CommentList に戻るべき
+        assert_eq!(state.mode, ViewMode::CommentList);
+    }
+
+    #[test]
+    fn test_reaction_toggled_error_triggers_refresh() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        // current_project を設定して refresh 可能にする
+        state.current_project = Some(ProjectSummary {
+            id: "pid".into(),
+            title: "Proj".into(),
+            number: 1,
+            description: None,
+        });
+
+        let cmd = state.handle_event(AppEvent::ReactionToggled(Err("API err".into())));
+        // エラー時はボードリロード (Loading で上書きされる)
+        assert!(matches!(cmd, Command::LoadBoard { .. }));
+    }
+
+    #[test]
+    fn test_apply_reaction_toggle_add_new() {
+        let mut reactions: Vec<ReactionSummary> = vec![];
+        let now = apply_reaction_toggle(&mut reactions, ReactionContent::Heart);
+        assert!(now);
+        assert_eq!(reactions.len(), 1);
+        assert_eq!(reactions[0].content, ReactionContent::Heart);
+        assert_eq!(reactions[0].count, 1);
+        assert!(reactions[0].viewer_has_reacted);
+    }
+
+    #[test]
+    fn test_apply_reaction_toggle_remove_last() {
+        let mut reactions = vec![ReactionSummary {
+            content: ReactionContent::Heart,
+            count: 1,
+            viewer_has_reacted: true,
+        }];
+        let now = apply_reaction_toggle(&mut reactions, ReactionContent::Heart);
+        assert!(!now);
+        assert!(reactions.is_empty());
+    }
+
+    #[test]
+    fn test_apply_reaction_toggle_increment_when_others_reacted() {
+        // 他人が 2 reacted しているが自分はまだ
+        let mut reactions = vec![ReactionSummary {
+            content: ReactionContent::Rocket,
+            count: 2,
+            viewer_has_reacted: false,
+        }];
+        let now = apply_reaction_toggle(&mut reactions, ReactionContent::Rocket);
+        assert!(now);
+        assert_eq!(reactions[0].count, 3);
+        assert!(reactions[0].viewer_has_reacted);
     }
 
     // --- compute_board_scroll_x tests ---
@@ -5774,6 +6553,7 @@ mod tests {
             Command::LoadBoard {
                 project_id: "proj_42".into(),
                 preferred_grouping_field_name: None,
+                queries: vec![],
             }
         );
     }
@@ -5816,7 +6596,15 @@ mod tests {
         let mut state = make_state_with_views(board, vec![("Bugs", "label:bug")]);
 
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
-        assert_eq!(cmd, Command::None);
+        // View 切替は server-side filter 付きで Board をリロードする
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
+                queries: vec!["label:\"bug\"".into()],
+            }
+        );
         assert_eq!(state.active_view, Some(0));
         assert!(state.filter.active_filter.is_some());
         assert_eq!(state.filter.input, "label:bug");
@@ -5838,7 +6626,15 @@ mod tests {
 
         // Press 0 to clear
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('0'))));
-        assert_eq!(cmd, Command::None);
+        // クリアでも全件再ロードを発火
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
+                queries: vec![],
+            }
+        );
         assert_eq!(state.active_view, None);
         assert!(state.filter.active_filter.is_none());
         assert!(state.filter.input.is_empty());

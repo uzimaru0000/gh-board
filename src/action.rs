@@ -46,4 +46,8 @@ pub enum Action {
     ToggleType,
     OpenEditor,
     ToggleItem,
+
+    // Reactions
+    OpenReactionPicker,
+    ToggleReaction,
 }

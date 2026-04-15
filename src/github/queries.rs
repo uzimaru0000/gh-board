@@ -212,3 +212,19 @@ pub struct ViewerLogin;
     response_derives = "Debug"
 )]
 pub struct ClearFieldValue;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/add_reaction.graphql",
+    response_derives = "Debug"
+)]
+pub struct AddReactionMutation;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/remove_reaction.graphql",
+    response_derives = "Debug"
+)]
+pub struct RemoveReactionMutation;

@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
     Frame,
 };
 
@@ -10,7 +10,7 @@ use crate::model::state::{CreateCardField, CreateCardState, NewCardType};
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &CreateCardState) {
-    let popup = centered_rect(60, 18, area);
+    let popup = centered_rect(60, 21, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -36,14 +36,16 @@ pub fn render(frame: &mut Frame, area: Rect, state: &CreateCardState) {
     let input_style = Style::default().fg(theme().text);
     let hint_style = Style::default().fg(theme().text_muted);
 
-    // Layout: Type (2 lines) + gap + Title box (3 lines) + gap + Body (2 lines) + gap + hints
+    // Layout: Type(2) + gap(1) + Title(3) + gap(1) + Body(2) + gap(1) + Submit(3) + hints
     let chunks = Layout::vertical([
         Constraint::Length(2), // Type
         Constraint::Length(1), // gap
         Constraint::Length(3), // Title (box)
         Constraint::Length(1), // gap
         Constraint::Length(2), // Body
-        Constraint::Min(0),   // gap + hints
+        Constraint::Length(1), // gap
+        Constraint::Length(3), // Submit button
+        Constraint::Min(0),    // hints
     ])
     .split(inner);
 
@@ -84,14 +86,19 @@ pub fn render(frame: &mut Frame, area: Rect, state: &CreateCardState) {
     };
     render_body_field(frame, chunks[4], &state.body_input, state.focused_field == CreateCardField::Body, body_label_style, hint_style);
 
+    // --- Submit button ---
+    let submit_focused = state.focused_field == CreateCardField::Submit;
+    let submit_enabled = !state.title_input.trim().is_empty();
+    render_submit_button(frame, chunks[6], submit_focused, submit_enabled);
+
     // --- Hints ---
-    let hint_area = chunks[5];
-    if hint_area.height >= 2 {
+    let hint_area = chunks[7];
+    if hint_area.height >= 1 {
         let hint_line = Line::from(vec![
             Span::raw("  "),
             Span::styled("Tab", hint_style),
             Span::styled(":switch  ", hint_style),
-            Span::styled("C-s", hint_style),
+            Span::styled("Enter", hint_style),
             Span::styled(":submit  ", hint_style),
             Span::styled("Esc", hint_style),
             Span::styled(":cancel", hint_style),
@@ -212,6 +219,51 @@ fn render_body_field(
     };
 
     frame.render_widget(Paragraph::new(vec![label_line, value_line]), area);
+}
+
+fn render_submit_button(frame: &mut Frame, area: Rect, is_focused: bool, is_enabled: bool) {
+    let outer = Block::default().padding(Padding::horizontal(1));
+    let btn_area = outer.inner(area);
+    frame.render_widget(outer, area);
+
+    if is_enabled && is_focused {
+        // active: 塗りつぶし
+        let bg = theme().green;
+        let fg = theme().text;
+        let edge = Style::default().fg(bg);
+        let fill = Style::default().fg(fg).bg(bg);
+        let width = btn_area.width as usize;
+        let label = "Submit";
+        let pad_total = width.saturating_sub(label.len());
+        let pad_left = pad_total / 2;
+        let pad_right = pad_total - pad_left;
+
+        let lines = vec![
+            Line::from(Span::styled("▄".repeat(width), edge)),
+            Line::from(Span::styled(
+                format!("{}{label}{}", " ".repeat(pad_left), " ".repeat(pad_right)),
+                fill,
+            )),
+            Line::from(Span::styled("▀".repeat(width), edge)),
+        ];
+        frame.render_widget(Paragraph::new(lines), btn_area);
+    } else {
+        // disable / unfocused: 枠のみ
+        let (border_fg, label_fg) = if is_enabled {
+            (theme().border_unfocused, theme().text)
+        } else {
+            (theme().border_unfocused, theme().text_muted)
+        };
+        let button = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_fg));
+        let inner = button.inner(btn_area);
+        frame.render_widget(button, btn_area);
+        let label_line = Line::from(Span::styled("Submit", Style::default().fg(label_fg)))
+            .alignment(ratatui::layout::Alignment::Center);
+        frame.render_widget(Paragraph::new(label_line), inner);
+    }
 }
 
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {

@@ -6,6 +6,11 @@ mutation AddComment($subjectId: ID!, $body: String!) {
         author { __typename login }
         body
         createdAt
+        reactionGroups {
+          content
+          viewerHasReacted
+          reactors { totalCount }
+        }
       }
     }
   }

@@ -100,8 +100,24 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         HelpEntry { action: Action::NextTab, description: "Switch to sidebar" },
         HelpEntry { action: Action::OpenInBrowser, description: "Open in browser" },
         HelpEntry { action: Action::EditCard, description: "Edit card" },
+        HelpEntry { action: Action::NewComment, description: "New comment" },
+        HelpEntry { action: Action::OpenCommentList, description: "Comment list" },
+        HelpEntry { action: Action::OpenReactionPicker, description: "Toggle reaction" },
     ];
     add_section_lines(&mut lines, keymap, KeymapMode::DetailContent, &detail_entries, key_style, desc_style);
+
+    // Comment List section
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(" Comment List", section_style)));
+    let comment_list_entries = vec![
+        HelpEntry { action: Action::MoveDown, description: "Next comment" },
+        HelpEntry { action: Action::MoveUp, description: "Previous comment" },
+        HelpEntry { action: Action::EditComment, description: "Edit own comment" },
+        HelpEntry { action: Action::NewComment, description: "New comment" },
+        HelpEntry { action: Action::OpenReactionPicker, description: "Toggle reaction on selected" },
+        HelpEntry { action: Action::Back, description: "Back to detail" },
+    ];
+    add_section_lines(&mut lines, keymap, KeymapMode::CommentList, &comment_list_entries, key_style, desc_style);
 
     // Detail View (Sidebar) section
     lines.push(Line::from(""));

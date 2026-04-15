@@ -153,8 +153,10 @@ pub enum KeymapMode {
     SidebarEdit,
     CommentList,
     GroupBySelect,
+    ReactionPicker,
     CreateCardType,
     CreateCardBody,
+    CreateCardSubmit,
     EditCardBody,
     // Structural keys for text-input modes (Esc, Enter, Ctrl+c, Ctrl+s, Tab, BackTab)
     FilterStructural,
@@ -247,9 +249,8 @@ impl Keymap {
         confirm.insert(KeyBind::key(KeyCode::Esc), Action::ConfirmNo);
         keymap.modes.insert(KeymapMode::Confirm, confirm);
 
-        // CreateCard global keys (Ctrl+c, Ctrl+s, Esc, Tab, BackTab)
+        // CreateCard global keys (Esc, Tab, BackTab)
         let mut create_card_global = HashMap::new();
-        create_card_global.insert(KeyBind::ctrl('s'), Action::Submit);
         create_card_global.insert(KeyBind::key(KeyCode::Esc), Action::Back);
         create_card_global.insert(KeyBind::key(KeyCode::Tab), Action::NextField);
         create_card_global.insert(KeyBind::key(KeyCode::BackTab), Action::PrevField);
@@ -267,6 +268,11 @@ impl Keymap {
         let mut create_card_body = HashMap::new();
         create_card_body.insert(KeyBind::key(KeyCode::Enter), Action::OpenEditor);
         keymap.modes.insert(KeymapMode::CreateCardBody, create_card_body);
+
+        // CreateCard submit button
+        let mut create_card_submit = HashMap::new();
+        create_card_submit.insert(KeyBind::key(KeyCode::Enter), Action::Submit);
+        keymap.modes.insert(KeymapMode::CreateCardSubmit, create_card_submit);
 
         // CardGrab mode
         let mut card_grab = HashMap::new();
@@ -312,6 +318,7 @@ impl Keymap {
         detail_content.insert(KeyBind::char('e'), Action::EditCard);
         detail_content.insert(KeyBind::char('c'), Action::NewComment);
         detail_content.insert(KeyBind::char('C'), Action::OpenCommentList);
+        detail_content.insert(KeyBind::char('r'), Action::OpenReactionPicker);
         keymap.modes.insert(KeymapMode::DetailContent, detail_content);
 
         // Detail sidebar
@@ -360,6 +367,7 @@ impl Keymap {
         comment_list.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
         comment_list.insert(KeyBind::char('e'), Action::EditComment);
         comment_list.insert(KeyBind::char('c'), Action::NewComment);
+        comment_list.insert(KeyBind::char('r'), Action::OpenReactionPicker);
         keymap.modes.insert(KeymapMode::CommentList, comment_list);
 
         // GroupBySelect mode
@@ -372,6 +380,18 @@ impl Keymap {
         group_by_select.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
         group_by_select.insert(KeyBind::key(KeyCode::Enter), Action::Select);
         keymap.modes.insert(KeymapMode::GroupBySelect, group_by_select);
+
+        // ReactionPicker mode
+        let mut reaction_picker = HashMap::new();
+        reaction_picker.insert(KeyBind::key(KeyCode::Esc), Action::Back);
+        reaction_picker.insert(KeyBind::char('q'), Action::Back);
+        reaction_picker.insert(KeyBind::char('h'), Action::MoveLeft);
+        reaction_picker.insert(KeyBind::key(KeyCode::Left), Action::MoveLeft);
+        reaction_picker.insert(KeyBind::char('l'), Action::MoveRight);
+        reaction_picker.insert(KeyBind::key(KeyCode::Right), Action::MoveRight);
+        reaction_picker.insert(KeyBind::key(KeyCode::Enter), Action::ToggleReaction);
+        reaction_picker.insert(KeyBind::char(' '), Action::ToggleReaction);
+        keymap.modes.insert(KeymapMode::ReactionPicker, reaction_picker);
 
         // EditCard global keys
         let mut edit_card_global = HashMap::new();
@@ -409,6 +429,7 @@ impl Keymap {
             ("sidebar_edit", KeymapMode::SidebarEdit),
             ("comment_list", KeymapMode::CommentList),
             ("group_by_select", KeymapMode::GroupBySelect),
+            ("reaction_picker", KeymapMode::ReactionPicker),
             ("create_card_type", KeymapMode::CreateCardType),
             ("create_card_body", KeymapMode::CreateCardBody),
             ("edit_card_body", KeymapMode::EditCardBody),
@@ -547,6 +568,8 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "toggle_type" => Some(Action::ToggleType),
         "open_editor" => Some(Action::OpenEditor),
         "toggle_item" => Some(Action::ToggleItem),
+        "open_reaction_picker" => Some(Action::OpenReactionPicker),
+        "toggle_reaction" => Some(Action::ToggleReaction),
         _ => None,
     }
 }
@@ -592,6 +615,8 @@ pub fn action_name(action: Action) -> &'static str {
         Action::ToggleType => "toggle_type",
         Action::OpenEditor => "open_editor",
         Action::ToggleItem => "toggle_item",
+        Action::OpenReactionPicker => "open_reaction_picker",
+        Action::ToggleReaction => "toggle_reaction",
     }
 }
 
