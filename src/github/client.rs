@@ -4,8 +4,8 @@ use tokio::process::Command;
 
 use super::queries::*;
 use crate::model::project::{
-    Board, Card, CardType, Column, ColumnColor, Comment, IssueState, Label, PrState,
-    ProjectSummary, Repository,
+    Board, Card, CardType, CiStatus, Column, ColumnColor, Comment, IssueState, Label, LinkedPr,
+    PrState, PrStatus, ProjectSummary, Repository, ReviewDecision,
 };
 
 // Type aliases for readability
@@ -750,9 +750,101 @@ fn convert_column_color(
     })
 }
 
+fn map_ci_status(state: &project_board::StatusState) -> CiStatus {
+    match state {
+        project_board::StatusState::SUCCESS => CiStatus::Success,
+        project_board::StatusState::FAILURE => CiStatus::Failure,
+        project_board::StatusState::PENDING => CiStatus::Pending,
+        project_board::StatusState::ERROR => CiStatus::Error,
+        project_board::StatusState::EXPECTED => CiStatus::Expected,
+        _ => CiStatus::Pending,
+    }
+}
+
+fn map_review_decision(d: &project_board::PullRequestReviewDecision) -> Option<ReviewDecision> {
+    match d {
+        project_board::PullRequestReviewDecision::APPROVED => Some(ReviewDecision::Approved),
+        project_board::PullRequestReviewDecision::CHANGES_REQUESTED => {
+            Some(ReviewDecision::ChangesRequested)
+        }
+        project_board::PullRequestReviewDecision::REVIEW_REQUIRED => {
+            Some(ReviewDecision::ReviewRequired)
+        }
+        _ => None,
+    }
+}
+
+fn build_linked_prs(
+    issue: &project_board::ProjectBoardNodeOnProjectV2ItemsNodesContentOnIssue,
+) -> Vec<LinkedPr> {
+    issue
+        .closed_by_pull_requests_references
+        .as_ref()
+        .and_then(|c| c.nodes.as_ref())
+        .map(|nodes| {
+            nodes
+                .iter()
+                .flatten()
+                .map(|pr| LinkedPr {
+                    number: pr.number as i32,
+                    title: pr.title.clone(),
+                    url: pr.url.clone(),
+                    state: match pr.state {
+                        project_board::PullRequestState::CLOSED => PrState::Closed,
+                        project_board::PullRequestState::MERGED => PrState::Merged,
+                        _ => PrState::Open,
+                    },
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn build_pr_status(
+    pr: &project_board::ProjectBoardNodeOnProjectV2ItemsNodesContentOnPullRequest,
+) -> PrStatus {
+    use project_board::ProjectBoardNodeOnProjectV2ItemsNodesContentOnPullRequestReviewRequestsNodesRequestedReviewer as Reviewer;
+
+    let ci = pr
+        .commits
+        .nodes
+        .as_ref()
+        .and_then(|nodes| nodes.iter().flatten().next())
+        .and_then(|c| c.commit.status_check_rollup.as_ref())
+        .map(|r| map_ci_status(&r.state));
+
+    let review_decision = pr.review_decision.as_ref().and_then(map_review_decision);
+
+    let review_requests = pr
+        .review_requests
+        .as_ref()
+        .and_then(|rr| rr.nodes.as_ref())
+        .map(|nodes| {
+            nodes
+                .iter()
+                .flatten()
+                .filter_map(|req| req.requested_reviewer.as_ref())
+                .filter_map(|r| match r {
+                    Reviewer::User(u) => Some(u.login.clone()),
+                    Reviewer::Team(t) => Some(format!("team/{}", t.name)),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    PrStatus {
+        ci,
+        review_decision,
+        review_requests,
+    }
+}
+
 fn convert_item(item: &ItemNode) -> Card {
     match &item.content {
         Some(Content::Issue(issue)) => Card {
+            pr_status: None,
+            linked_prs: build_linked_prs(issue),
             item_id: item.id.clone(),
             content_id: Some(issue.id.clone()),
             title: issue.title.clone(),
@@ -809,6 +901,8 @@ fn convert_item(item: &ItemNode) -> Card {
                 .unwrap_or_default(),
         },
         Some(Content::PullRequest(pr)) => Card {
+            pr_status: Some(build_pr_status(pr)),
+            linked_prs: Vec::new(),
             item_id: item.id.clone(),
             content_id: Some(pr.id.clone()),
             title: pr.title.clone(),
@@ -866,6 +960,8 @@ fn convert_item(item: &ItemNode) -> Card {
                 .unwrap_or_default(),
         },
         Some(Content::DraftIssue(draft)) => Card {
+            pr_status: None,
+            linked_prs: Vec::new(),
             item_id: item.id.clone(),
             content_id: Some(draft.id.clone()),
             title: draft.title.clone(),
@@ -879,6 +975,8 @@ fn convert_item(item: &ItemNode) -> Card {
             milestone: None,
         },
         None => Card {
+            pr_status: None,
+            linked_prs: Vec::new(),
             item_id: item.id.clone(),
             content_id: None,
             title: "(no content)".to_string(),

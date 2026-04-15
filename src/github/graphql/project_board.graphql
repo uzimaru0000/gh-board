@@ -68,6 +68,14 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
               assignees(first: 5) { nodes { login } }
               labels(first: 10) { nodes { id name color } }
               comments(first: 20) { nodes { id author { __typename login } body createdAt } }
+              closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
+                nodes {
+                  number
+                  title
+                  url
+                  state
+                }
+              }
             }
             ... on PullRequest {
               id
@@ -80,6 +88,23 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
               assignees(first: 5) { nodes { login } }
               labels(first: 10) { nodes { id name color } }
               comments(first: 20) { nodes { id author { __typename login } body createdAt } }
+              reviewDecision
+              reviewRequests(first: 10) {
+                nodes {
+                  requestedReviewer {
+                    __typename
+                    ... on User { login }
+                    ... on Team { name }
+                  }
+                }
+              }
+              commits(last: 1) {
+                nodes {
+                  commit {
+                    statusCheckRollup { state }
+                  }
+                }
+              }
             }
             ... on DraftIssue {
               id
