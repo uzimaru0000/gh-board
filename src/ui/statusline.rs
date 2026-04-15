@@ -8,7 +8,7 @@ use ratatui::{
 use crate::action::Action;
 use crate::app::App;
 use crate::keymap::{KeyBind, KeymapMode};
-use crate::model::state::{LoadingState, ViewMode};
+use crate::model::state::{LayoutMode, LoadingState, ViewMode};
 use crate::ui::theme::theme;
 
 /// Format the first (shortest) keybind for an action
@@ -60,6 +60,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     );
 
     let mut spans = vec![left, Span::raw(" ")];
+
+    let layout_label = match app.state.current_layout {
+        LayoutMode::Board => "Board",
+        LayoutMode::Table => "Table",
+    };
+    spans.push(Span::styled(
+        format!("[{layout_label}]"),
+        Style::default()
+            .fg(theme().green)
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::raw(" "));
 
     if let Some(grouping_name) = app
         .state
@@ -143,7 +155,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(theme().text_muted),
         ));
     } else {
-        let mode = KeymapMode::Board;
+        let mode = match app.state.current_layout {
+            LayoutMode::Board => KeymapMode::Board,
+            LayoutMode::Table => KeymapMode::Table,
+        };
         let hints: Vec<String> = [
             (Action::OpenDetail, "detail"),
             (Action::GrabCard, "grab"),
@@ -151,6 +166,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             (Action::ArchiveCard, "archive"),
             (Action::ShowArchivedList, "archived"),
             (Action::StartFilter, "filter"),
+            (Action::ToggleLayout, "layout"),
             (Action::ShowHelp, "help"),
             (Action::SwitchProject, "projects"),
             (Action::Refresh, "refresh"),

@@ -175,9 +175,17 @@ fn render_board_with_tabs(frame: &mut Frame, main_area: Rect, app: &App) {
             ..main_area
         };
         ui::tab_bar::render(frame, tab_area, app);
-        ui::board::render(frame, board_area, app);
+        render_layout(frame, board_area, app);
     } else {
-        ui::board::render(frame, main_area, app);
+        render_layout(frame, main_area, app);
+    }
+}
+
+fn render_layout(frame: &mut Frame, area: Rect, app: &App) {
+    use crate::model::state::LayoutMode;
+    match app.state.current_layout {
+        LayoutMode::Board => ui::board::render(frame, area, app),
+        LayoutMode::Table => ui::table::render(frame, area, app),
     }
 }
 

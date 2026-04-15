@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::action::Action;
 use crate::command::Command;
-use crate::config::ViewConfig;
+use crate::config::{LayoutModeConfig, ViewConfig};
 use crate::event::AppEvent;
 use crate::keymap::{Keymap, KeymapMode};
 use crate::command::CustomFieldValueInput;
@@ -39,8 +39,9 @@ fn is_valid_iso_date(s: &str) -> bool {
 use crate::model::state::{
     ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
     CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
-    GroupBySelectState, LoadingState, NewCardType, PendingIssueCreate, ReactionPickerState,
-    ReactionTarget, RepoSelectState, SidebarEditMode, SidebarSection, ViewMode,
+    GroupBySelectState, LayoutMode, LoadingState, NewCardType, PendingIssueCreate,
+    ReactionPickerState, ReactionTarget, RepoSelectState, SidebarEditMode, SidebarSection,
+    ViewMode,
 };
 #[cfg(test)]
 use crate::model::state::{SIDEBAR_ASSIGNEES, SIDEBAR_LABELS};
@@ -55,6 +56,14 @@ pub struct AppState {
     pub selected_card: usize,
     pub scroll_offset: usize,
     pub board_scroll_x: std::cell::Cell<usize>,
+
+    // Layout (Board / Table)
+    pub current_layout: LayoutMode,
+    pub table_selected_row: usize,
+    /// Table view 用の表示順。Board.columns を平坦化したものをデフォルトとし、
+    /// Table での grab 並び替えはこのリストの順序を入れ替える (status は変えない)。
+    /// 含まれない item_id は表示時にリスト末尾に付加される。
+    pub table_item_order: Vec<String>,
 
     // Project selection
     pub projects: Vec<ProjectSummary>,
@@ -145,6 +154,9 @@ impl AppState {
             selected_card: 0,
             scroll_offset: 0,
             board_scroll_x: std::cell::Cell::new(0),
+            current_layout: LayoutMode::Board,
+            table_selected_row: 0,
+            table_item_order: Vec::new(),
             projects: Vec::new(),
             selected_project_index: 0,
             current_project: None,
@@ -188,6 +200,22 @@ impl AppState {
         self.views = views;
     }
 
+    /// Board ↔ Table の表示レイアウトをトグルする。
+    /// 切替時に既存の選択 (Board 側 selected_column/selected_card と Table 側
+    /// table_selected_row) を双方向に同期し、ユーザーが見ていたカードを保つ。
+    pub fn toggle_layout(&mut self) {
+        match self.current_layout {
+            LayoutMode::Board => {
+                self.table_selected_row = self.current_table_row();
+                self.current_layout = LayoutMode::Table;
+            }
+            LayoutMode::Table => {
+                self.set_selection_from_table_row(self.table_selected_row);
+                self.current_layout = LayoutMode::Board;
+            }
+        }
+    }
+
     pub fn set_keymap(&mut self, keymap: Keymap) {
         self.keymap = keymap;
     }
@@ -214,6 +242,11 @@ impl AppState {
         }
         self.selected_card = 0;
         self.scroll_offset = 0;
+        self.current_layout = match self.views[idx].layout {
+            Some(LayoutModeConfig::Table) => LayoutMode::Table,
+            _ => LayoutMode::Board,
+        };
+        self.table_selected_row = 0;
         if let Some(project) = &self.current_project {
             let id = project.id.clone();
             self.start_loading_board(&id)
@@ -229,6 +262,8 @@ impl AppState {
         self.filter.cursor_pos = 0;
         self.selected_card = 0;
         self.scroll_offset = 0;
+        self.current_layout = LayoutMode::Board;
+        self.table_selected_row = 0;
         if let Some(project) = &self.current_project {
             let id = project.id.clone();
             self.start_loading_board(&id)
@@ -279,6 +314,7 @@ impl AppState {
             self.selected_card = 0;
             self.scroll_offset = 0;
             self.board_scroll_x.set(0);
+            self.rebuild_table_order();
         }
 
         self.loading = if self.board.is_some() {
@@ -360,6 +396,7 @@ impl AppState {
                 self.selected_card = 0;
                 self.scroll_offset = 0;
                 self.board_scroll_x.set(0);
+                self.rebuild_table_order();
                 self.loading = LoadingState::Idle;
                 self.mode = ViewMode::Board;
                 Command::None
@@ -741,6 +778,10 @@ impl AppState {
     }
 
     fn handle_board_key(&mut self, key: KeyEvent) -> Command {
+        if self.current_layout == LayoutMode::Table {
+            return self.handle_table_key(key);
+        }
+
         let board = match &self.board {
             Some(b) => b,
             None => return Command::None,
@@ -844,6 +885,10 @@ impl AppState {
                 self.open_group_by_select();
                 Command::None
             }
+            Action::ToggleLayout => {
+                self.toggle_layout();
+                Command::None
+            }
             Action::StartFilter => {
                 self.filter.input.clear();
                 self.filter.cursor_pos = 0;
@@ -872,6 +917,142 @@ impl AppState {
                 Command::None
             }
             Action::GrabCard => {
+                if let Some(real_idx) = self.real_card_index() {
+                    let item_id = self.board.as_ref().unwrap().columns[self.selected_column]
+                        .cards[real_idx]
+                        .item_id
+                        .clone();
+                    self.grab_state = Some(GrabState {
+                        origin_column: self.selected_column,
+                        origin_card_index: real_idx,
+                        item_id,
+                    });
+                    self.mode = ViewMode::CardGrab;
+                }
+                Command::None
+            }
+            _ => Command::None,
+        }
+    }
+
+    /// Table view 用キーハンドラ。LayoutMode::Table 中の handle_board_key から呼ばれる。
+    /// 行ベース (table_selected_row) でナビゲーションし、Detail/Archive/Grab 等の遷移時には
+    /// `set_selection_from_table_row` で Board 用の (selected_column, selected_card) を埋め直してから
+    /// 既存ロジックを再利用する。
+    fn handle_table_key(&mut self, key: KeyEvent) -> Command {
+        let board = match &self.board {
+            Some(b) => b,
+            None => return Command::None,
+        };
+
+        if board.columns.is_empty() {
+            match self.keymap.resolve(KeymapMode::Table, &key) {
+                Some(Action::Quit) | Some(Action::ForceQuit) => self.should_quit = true,
+                Some(Action::SwitchProject) => return self.enter_project_select(),
+                Some(Action::ShowHelp) => self.mode = ViewMode::Help,
+                Some(Action::ToggleLayout) => self.toggle_layout(),
+                _ => {}
+            }
+            return Command::None;
+        }
+
+        // View switching (1-9, 0) は Board と同じ
+        if let KeyCode::Char(c @ '1'..='9') = key.code
+            && key.modifiers == KeyModifiers::NONE
+        {
+            return self.switch_to_view((c as usize) - ('1' as usize));
+        }
+        if key.code == KeyCode::Char('0') && key.modifiers == KeyModifiers::NONE {
+            return self.clear_view();
+        }
+
+        let action = match self.keymap.resolve(KeymapMode::Table, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
+        let row_count = self.table_rows().len();
+
+        match action {
+            Action::Quit | Action::ForceQuit => {
+                self.should_quit = true;
+                Command::None
+            }
+            Action::MoveDown => {
+                if row_count > 0 {
+                    self.table_selected_row = (self.table_selected_row + 1).min(row_count - 1);
+                }
+                Command::None
+            }
+            Action::MoveUp => {
+                self.table_selected_row = self.table_selected_row.saturating_sub(1);
+                Command::None
+            }
+            Action::FirstItem => {
+                self.table_selected_row = 0;
+                Command::None
+            }
+            Action::LastItem => {
+                if row_count > 0 {
+                    self.table_selected_row = row_count - 1;
+                }
+                Command::None
+            }
+            Action::OpenDetail => {
+                self.set_selection_from_table_row(self.table_selected_row);
+                self.open_detail_view()
+            }
+            Action::SwitchProject => self.enter_project_select(),
+            Action::Refresh => {
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
+            Action::ShowHelp => {
+                self.mode = ViewMode::Help;
+                Command::None
+            }
+            Action::ChangeGrouping => {
+                self.open_group_by_select();
+                Command::None
+            }
+            Action::ToggleLayout => {
+                self.toggle_layout();
+                Command::None
+            }
+            Action::StartFilter => {
+                self.filter.input.clear();
+                self.filter.cursor_pos = 0;
+                self.mode = ViewMode::Filter;
+                Command::None
+            }
+            Action::ClearFilter => {
+                self.active_view = None;
+                self.filter.active_filter = None;
+                self.table_selected_row = 0;
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
+            Action::ArchiveCard => {
+                self.set_selection_from_table_row(self.table_selected_row);
+                self.start_archive_card(ViewMode::Board);
+                Command::None
+            }
+            Action::ShowArchivedList => self.show_archived_list(),
+            Action::NewCard => {
+                self.create_card_state = CreateCardState::default();
+                self.mode = ViewMode::CreateCard;
+                Command::None
+            }
+            Action::GrabCard => {
+                self.set_selection_from_table_row(self.table_selected_row);
                 if let Some(real_idx) = self.real_card_index() {
                     let item_id = self.board.as_ref().unwrap().columns[self.selected_column]
                         .cards[real_idx]
@@ -1546,28 +1727,112 @@ impl AppState {
 
         match action {
             Action::MoveDown => {
-                self.move_card_down();
+                if self.current_layout == LayoutMode::Table {
+                    self.grab_table_move_vertical(1);
+                    self.table_selected_row = self.current_table_row();
+                } else {
+                    self.move_card_down();
+                }
                 Command::None
             }
             Action::MoveUp => {
-                self.move_card_up();
+                if self.current_layout == LayoutMode::Table {
+                    self.grab_table_move_vertical(-1);
+                    self.table_selected_row = self.current_table_row();
+                } else {
+                    self.move_card_up();
+                }
                 Command::None
             }
             Action::MoveLeft => {
-                self.grab_move_card_horizontal(-1);
+                // Table モードではカラムが行内に展開されないので no-op
+                if self.current_layout != LayoutMode::Table {
+                    self.grab_move_card_horizontal(-1);
+                }
                 Command::None
             }
             Action::MoveRight => {
-                self.grab_move_card_horizontal(1);
+                if self.current_layout != LayoutMode::Table {
+                    self.grab_move_card_horizontal(1);
+                }
                 Command::None
             }
-            Action::ConfirmGrab => self.confirm_grab(),
-            Action::CancelGrab => self.cancel_grab(),
+            Action::ConfirmGrab => {
+                let cmd = self.confirm_grab();
+                if self.current_layout == LayoutMode::Table {
+                    self.table_selected_row = self.current_table_row();
+                }
+                cmd
+            }
+            Action::CancelGrab => {
+                let cmd = self.cancel_grab();
+                if self.current_layout == LayoutMode::Table {
+                    self.table_selected_row = self.current_table_row();
+                }
+                cmd
+            }
             Action::ForceQuit => {
                 self.should_quit = true;
                 Command::None
             }
             _ => Command::None,
+        }
+    }
+
+    /// Table view 中の grab で j/k を押した時の移動。
+    /// `table_item_order` 上で隣接する 2 つの item_id の位置を入れ替えるだけで、
+    /// status (column) は変更しない。Board の column 構造はそのまま。
+    fn grab_table_move_vertical(&mut self, direction: i32) {
+        let real_idx = match self.real_card_index() {
+            Some(idx) => idx,
+            None => return,
+        };
+        let cur_col = self.selected_column;
+        let cur_item_id = match self
+            .board
+            .as_ref()
+            .and_then(|b| b.columns.get(cur_col))
+            .and_then(|c| c.cards.get(real_idx))
+            .map(|c| c.item_id.clone())
+        {
+            Some(s) => s,
+            None => return,
+        };
+
+        let rows = self.table_rows();
+        let cur_pos = match rows
+            .iter()
+            .position(|&(c, r)| c == cur_col && r == real_idx)
+        {
+            Some(p) => p,
+            None => return,
+        };
+        let next_pos = (cur_pos as i32) + direction;
+        if next_pos < 0 || next_pos as usize >= rows.len() {
+            return;
+        }
+        let (target_col, target_real_idx) = rows[next_pos as usize];
+        let target_item_id = match self
+            .board
+            .as_ref()
+            .and_then(|b| b.columns.get(target_col))
+            .and_then(|c| c.cards.get(target_real_idx))
+            .map(|c| c.item_id.clone())
+        {
+            Some(s) => s,
+            None => return,
+        };
+
+        let cur_abs = self
+            .table_item_order
+            .iter()
+            .position(|i| i == &cur_item_id);
+        let tgt_abs = self
+            .table_item_order
+            .iter()
+            .position(|i| i == &target_item_id);
+        if let (Some(a), Some(b)) = (cur_abs, tgt_abs) {
+            self.table_item_order.swap(a, b);
         }
     }
 
@@ -1980,6 +2245,97 @@ impl AppState {
     pub fn real_card_index(&self) -> Option<usize> {
         let indices = self.filtered_card_indices(self.selected_column);
         indices.get(self.selected_card).copied()
+    }
+
+    /// 現在の board から column-major 順で table_item_order を再構築する。
+    /// Board のロード/リフレッシュ時に呼ぶ。
+    pub fn rebuild_table_order(&mut self) {
+        self.table_item_order = match &self.board {
+            Some(b) => b
+                .columns
+                .iter()
+                .flat_map(|c| c.cards.iter().map(|cd| cd.item_id.clone()))
+                .collect(),
+            None => Vec::new(),
+        };
+    }
+
+    fn find_card_position(&self, item_id: &str) -> Option<(usize, usize)> {
+        let board = self.board.as_ref()?;
+        for (ci, col) in board.columns.iter().enumerate() {
+            if let Some(ri) = col.cards.iter().position(|c| c.item_id == item_id) {
+                return Some((ci, ri));
+            }
+        }
+        None
+    }
+
+    /// Table view の表示順 (`table_item_order`) に基づいて `(col_idx, real_card_idx)` を返す。
+    /// `table_item_order` に含まれない (新規追加) カードは末尾に column-major 順で付加。
+    /// フィルタも適用する。
+    pub fn table_rows(&self) -> Vec<(usize, usize)> {
+        let board = match &self.board {
+            Some(b) => b,
+            None => return Vec::new(),
+        };
+        let mut out = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for item_id in &self.table_item_order {
+            if let Some((ci, ri)) = self.find_card_position(item_id) {
+                let card = &board.columns[ci].cards[ri];
+                if self
+                    .filter
+                    .active_filter
+                    .as_ref()
+                    .is_none_or(|f| f.matches(card))
+                {
+                    out.push((ci, ri));
+                }
+                seen.insert(item_id.clone());
+            }
+        }
+        for (ci, col) in board.columns.iter().enumerate() {
+            for (ri, card) in col.cards.iter().enumerate() {
+                if !seen.contains(&card.item_id)
+                    && self
+                        .filter
+                        .active_filter
+                        .as_ref()
+                        .is_none_or(|f| f.matches(card))
+                {
+                    out.push((ci, ri));
+                }
+            }
+        }
+        out
+    }
+
+    /// Board → Table 切替時に、現在の (selected_column, selected_card) を
+    /// table_selected_row に変換する。
+    pub fn current_table_row(&self) -> usize {
+        let real = match self.real_card_index() {
+            Some(r) => r,
+            None => return 0,
+        };
+        self.table_rows()
+            .iter()
+            .position(|&(col, idx)| col == self.selected_column && idx == real)
+            .unwrap_or(0)
+    }
+
+    /// Table → Board 切替時に、table_selected_row を
+    /// (selected_column, selected_card) に書き戻す。
+    pub fn set_selection_from_table_row(&mut self, row: usize) {
+        let rows = self.table_rows();
+        if let Some(&(col, real_idx)) = rows.get(row) {
+            self.selected_column = col;
+            let display_idx = self
+                .filtered_card_indices(col)
+                .iter()
+                .position(|&i| i == real_idx)
+                .unwrap_or(0);
+            self.selected_card = display_idx;
+        }
     }
 
     fn clamp_card_selection(&mut self) {
@@ -3766,6 +4122,7 @@ mod tests {
             number: 1,
             description: None,
         });
+        state.rebuild_table_order();
         state
     }
 
@@ -7545,6 +7902,7 @@ mod tests {
             .map(|(name, filter)| crate::config::ViewConfig {
                 name: name.to_string(),
                 filter: filter.to_string(),
+                layout: None,
             })
             .collect();
         state
@@ -8554,5 +8912,217 @@ mod tests {
         });
         assert_eq!(state.selected_card, 0);
         assert!(state.selected_column < state.board.as_ref().unwrap().columns.len());
+    }
+
+    // ========== LayoutMode (Table view) ==========
+
+    #[test]
+    fn test_toggle_layout_with_t_key() {
+        let mut state = make_state_with_board(make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "A")],
+        )]));
+        assert_eq!(state.current_layout, LayoutMode::Board);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('t'))));
+        assert_eq!(state.current_layout, LayoutMode::Table);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('t'))));
+        assert_eq!(state.current_layout, LayoutMode::Board);
+    }
+
+    #[test]
+    fn test_table_move_down() {
+        let mut state = make_state_with_board(make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "A"), make_card("2", "B")]),
+            ("Done", "opt_2", vec![make_card("3", "C")]),
+        ]));
+        state.current_layout = LayoutMode::Table;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.table_selected_row, 1);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.table_selected_row, 2);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.table_selected_row, 2); // 末尾でクランプ
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
+        assert_eq!(state.table_selected_row, 1);
+    }
+
+    #[test]
+    fn test_table_first_last_item() {
+        let mut state = make_state_with_board(make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "A"), make_card("2", "B")]),
+            ("Done", "opt_2", vec![make_card("3", "C")]),
+        ]));
+        state.current_layout = LayoutMode::Table;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('G'))));
+        assert_eq!(state.table_selected_row, 2);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('g'))));
+        assert_eq!(state.table_selected_row, 0);
+    }
+
+    #[test]
+    fn test_table_enter_opens_detail_with_correct_card() {
+        let mut state = make_state_with_board(make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "A"), make_card("2", "B")]),
+            ("Done", "opt_2", vec![make_card("3", "C")]),
+        ]));
+        state.current_layout = LayoutMode::Table;
+        state.table_selected_row = 2;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert_eq!(state.selected_column, 1);
+        assert_eq!(state.selected_card, 0);
+    }
+
+    #[test]
+    fn test_table_skips_filtered_rows() {
+        let mut state = make_state_with_board(make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![
+                make_card("1", "Fix bug"),
+                make_card("2", "Add feature"),
+                make_card("3", "Fix typo"),
+            ],
+        )]));
+        state.current_layout = LayoutMode::Table;
+        state.filter.active_filter = Some(ActiveFilter::parse("fix"));
+        let rows = state.table_rows();
+        assert_eq!(rows, vec![(0, 0), (0, 2)]);
+    }
+
+    #[test]
+    fn test_switch_view_restores_table_layout() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.set_views(vec![crate::config::ViewConfig {
+            name: "Bugs".into(),
+            filter: "label:bug".into(),
+            layout: Some(crate::config::LayoutModeConfig::Table),
+        }]);
+        assert_eq!(state.current_layout, LayoutMode::Board);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(state.active_view, Some(0));
+        assert_eq!(state.current_layout, LayoutMode::Table);
+    }
+
+    #[test]
+    fn test_switch_view_default_board_layout() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.set_views(vec![crate::config::ViewConfig {
+            name: "All".into(),
+            filter: String::new(),
+            layout: None,
+        }]);
+        // 事前に Table にしておく
+        state.current_layout = LayoutMode::Table;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(state.current_layout, LayoutMode::Board);
+    }
+
+    #[test]
+    fn test_table_grab_reorders_within_same_column() {
+        let mut state = make_state_with_board(make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "A"), make_card("2", "B")],
+        )]));
+        state.current_layout = LayoutMode::Table;
+        state.table_selected_row = 0;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+
+        // 物理的な column.cards は変わっていない (status 不変)
+        let cols = &state.board.as_ref().unwrap().columns;
+        assert_eq!(cols[0].cards[0].title, "A");
+        assert_eq!(cols[0].cards[1].title, "B");
+
+        // table_rows は B, A の順 (表示順だけ入れ替わる)
+        let rows = state.table_rows();
+        assert_eq!(rows, vec![(0, 1), (0, 0)]);
+        assert_eq!(state.table_selected_row, 1);
+    }
+
+    #[test]
+    fn test_table_grab_reorders_across_columns_without_status_change() {
+        let mut state = make_state_with_board(make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "A")]),
+            ("Done", "opt_2", vec![make_card("3", "C")]),
+        ]));
+        state.current_layout = LayoutMode::Table;
+        state.table_selected_row = 0; // A (Todo)
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+
+        // 物理的な配置は変わらず (A は Todo のまま、C は Done のまま)
+        let cols = &state.board.as_ref().unwrap().columns;
+        assert_eq!(cols[0].cards[0].title, "A");
+        assert_eq!(cols[1].cards[0].title, "C");
+
+        // table_rows の表示順は C, A
+        let rows = state.table_rows();
+        assert_eq!(rows, vec![(1, 0), (0, 0)]);
+    }
+
+    #[test]
+    fn test_table_grab_horizontal_is_noop() {
+        let mut state = make_state_with_board(make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "A")]),
+            ("Done", "opt_2", vec![make_card("3", "C")]),
+        ]));
+        state.current_layout = LayoutMode::Table;
+        state.table_selected_row = 0;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        assert_eq!(state.mode, ViewMode::CardGrab);
+
+        // l (右) は Table モードでは no-op (Todo のままで Done に行かない)
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+        assert_eq!(state.selected_column, 0);
+        let cols = &state.board.as_ref().unwrap().columns;
+        assert_eq!(cols[0].cards.len(), 1);
+        assert_eq!(cols[1].cards.len(), 1);
+    }
+
+    #[test]
+    fn test_clear_view_resets_to_board() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.set_views(vec![crate::config::ViewConfig {
+            name: "Bugs".into(),
+            filter: "label:bug".into(),
+            layout: Some(crate::config::LayoutModeConfig::Table),
+        }]);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert_eq!(state.current_layout, LayoutMode::Table);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('0'))));
+        assert_eq!(state.current_layout, LayoutMode::Board);
+        assert_eq!(state.active_view, None);
+    }
+
+    #[test]
+    fn test_toggle_layout_preserves_selected_card() {
+        let mut state = make_state_with_board(make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "A"), make_card("2", "B")]),
+            ("Done", "opt_2", vec![make_card("3", "C")]),
+        ]));
+        // Done カラムの最初のカードを選択
+        state.selected_column = 1;
+        state.selected_card = 0;
+        state.toggle_layout();
+        assert_eq!(state.current_layout, LayoutMode::Table);
+        assert_eq!(state.table_selected_row, 2);
+
+        // Table → Board でも復元
+        state.toggle_layout();
+        assert_eq!(state.current_layout, LayoutMode::Board);
+        assert_eq!(state.selected_column, 1);
+        assert_eq!(state.selected_card, 0);
     }
 }

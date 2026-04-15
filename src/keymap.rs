@@ -142,6 +142,7 @@ fn parse_key_name(name: &str) -> Result<KeyCode, String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeymapMode {
     Board,
+    Table,
     ProjectSelect,
     Help,
     Confirm,
@@ -216,9 +217,34 @@ impl Keymap {
         board.insert(KeyBind::char('n'), Action::NewCard);
         board.insert(KeyBind::char(' '), Action::GrabCard);
         board.insert(KeyBind::ctrl('g'), Action::ChangeGrouping);
+        board.insert(KeyBind::char('t'), Action::ToggleLayout);
         board.insert(KeyBind::char('q'), Action::Quit);
         board.insert(KeyBind::key(KeyCode::Esc), Action::Quit);
         keymap.modes.insert(KeymapMode::Board, board);
+
+        // Table mode (LayoutMode::Table 時の board ハンドラから利用)
+        let mut table = HashMap::new();
+        table.insert(KeyBind::char('j'), Action::MoveDown);
+        table.insert(KeyBind::key(KeyCode::Down), Action::MoveDown);
+        table.insert(KeyBind::char('k'), Action::MoveUp);
+        table.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
+        table.insert(KeyBind::char('g'), Action::FirstItem);
+        table.insert(KeyBind::char('G'), Action::LastItem);
+        table.insert(KeyBind::key(KeyCode::Enter), Action::OpenDetail);
+        table.insert(KeyBind::char('p'), Action::SwitchProject);
+        table.insert(KeyBind::char('r'), Action::Refresh);
+        table.insert(KeyBind::char('?'), Action::ShowHelp);
+        table.insert(KeyBind::char('/'), Action::StartFilter);
+        table.insert(KeyBind::ctrl('u'), Action::ClearFilter);
+        table.insert(KeyBind::char('a'), Action::ArchiveCard);
+        table.insert(KeyBind::char('v'), Action::ShowArchivedList);
+        table.insert(KeyBind::char('n'), Action::NewCard);
+        table.insert(KeyBind::char(' '), Action::GrabCard);
+        table.insert(KeyBind::ctrl('g'), Action::ChangeGrouping);
+        table.insert(KeyBind::char('t'), Action::ToggleLayout);
+        table.insert(KeyBind::char('q'), Action::Quit);
+        table.insert(KeyBind::key(KeyCode::Esc), Action::Quit);
+        keymap.modes.insert(KeymapMode::Table, table);
 
         // ProjectSelect mode (文字キーはフィルタ入力に使うため割り当てない)
         let mut project_select = HashMap::new();
@@ -567,6 +593,7 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "show_help" => Some(Action::ShowHelp),
         "switch_project" => Some(Action::SwitchProject),
         "change_grouping" => Some(Action::ChangeGrouping),
+        "toggle_layout" => Some(Action::ToggleLayout),
         "open_in_browser" => Some(Action::OpenInBrowser),
         "edit_card" => Some(Action::EditCard),
         "new_comment" => Some(Action::NewComment),
@@ -616,6 +643,7 @@ pub fn action_name(action: Action) -> &'static str {
         Action::ShowHelp => "show_help",
         Action::SwitchProject => "switch_project",
         Action::ChangeGrouping => "change_grouping",
+        Action::ToggleLayout => "toggle_layout",
         Action::OpenInBrowser => "open_in_browser",
         Action::EditCard => "edit_card",
         Action::NewComment => "new_comment",
