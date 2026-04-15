@@ -10,6 +10,9 @@ pub enum Command {
     },
     LoadBoard {
         project_id: String,
+        /// サーバーサイドフィルタ用の Projects V2 query 文字列。
+        /// 空 vec の場合はフィルタなし。複数の場合は OR として各クエリを実行しマージ。
+        queries: Vec<String>,
     },
     MoveCard {
         project_id: String,

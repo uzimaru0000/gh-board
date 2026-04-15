@@ -571,53 +571,74 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub async fn get_board(&self, project_id: &str) -> anyhow::Result<Board> {
+    pub async fn get_board(
+        &self,
+        project_id: &str,
+        queries: &[String],
+    ) -> anyhow::Result<Board> {
+        // queries が空ならフィルタなしで 1 回ロード。
+        // 複数 queries は OR として個別に fetch して item_id で dedup する。
+        let query_iter: Vec<Option<String>> = if queries.is_empty() {
+            vec![None]
+        } else {
+            queries.iter().cloned().map(Some).collect()
+        };
+
+        let mut seen_item_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         let mut all_items: Vec<ItemNode> = Vec::new();
-        let mut cursor: Option<String> = None;
         let mut title = String::new();
         let mut field_nodes = None;
         let mut repositories: Vec<Repository> = Vec::new();
 
-        loop {
-            let vars = project_board::Variables {
-                project_id: project_id.to_string(),
-                items_cursor: cursor,
-            };
-            let data = self.query::<ProjectBoard>(vars).await?;
-            let node = data.node.context("Project not found")?;
+        for query in query_iter {
+            let mut cursor: Option<String> = None;
+            loop {
+                let vars = project_board::Variables {
+                    project_id: project_id.to_string(),
+                    items_cursor: cursor,
+                    query: query.clone(),
+                };
+                let data = self.query::<ProjectBoard>(vars).await?;
+                let node = data.node.context("Project not found")?;
 
-            let pv2 = match node {
-                ProjectBoardNode::ProjectV2(pv2) => pv2,
-                _ => bail!("Node is not a ProjectV2"),
-            };
+                let pv2 = match node {
+                    ProjectBoardNode::ProjectV2(pv2) => pv2,
+                    _ => bail!("Node is not a ProjectV2"),
+                };
 
-            let has_next = pv2.items.page_info.has_next_page;
-            let next_cursor = pv2.items.page_info.end_cursor;
+                let has_next = pv2.items.page_info.has_next_page;
+                let next_cursor = pv2.items.page_info.end_cursor;
 
-            if let Some(nodes) = pv2.items.nodes {
-                all_items.extend(nodes.into_iter().flatten());
-            }
+                if let Some(nodes) = pv2.items.nodes {
+                    for item in nodes.into_iter().flatten() {
+                        if seen_item_ids.insert(item.id.clone()) {
+                            all_items.push(item);
+                        }
+                    }
+                }
 
-            if title.is_empty() {
-                title = pv2.title;
-                field_nodes = pv2.fields.nodes;
-                repositories = pv2
-                    .repositories
-                    .nodes
-                    .unwrap_or_default()
-                    .into_iter()
-                    .flatten()
-                    .map(|r| Repository {
-                        id: r.id,
-                        name_with_owner: r.name_with_owner,
-                    })
-                    .collect();
-            }
+                if title.is_empty() {
+                    title = pv2.title;
+                    field_nodes = pv2.fields.nodes;
+                    repositories = pv2
+                        .repositories
+                        .nodes
+                        .unwrap_or_default()
+                        .into_iter()
+                        .flatten()
+                        .map(|r| Repository {
+                            id: r.id,
+                            name_with_owner: r.name_with_owner,
+                        })
+                        .collect();
+                }
 
-            if has_next {
-                cursor = next_cursor;
-            } else {
-                break;
+                if has_next {
+                    cursor = next_cursor;
+                } else {
+                    break;
+                }
             }
         }
 

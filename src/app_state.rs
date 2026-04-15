@@ -6,6 +6,7 @@ use crate::config::ViewConfig;
 use crate::event::AppEvent;
 use crate::keymap::{Keymap, KeymapMode};
 use crate::command::CustomFieldValueInput;
+use crate::model::board_cache::BoardCache;
 use crate::model::project::{
     Board, Card, CardType, CustomFieldValue, FieldDefinition, ProjectSummary,
 };
@@ -96,6 +97,11 @@ pub struct AppState {
     // Loading
     pub loading: LoadingState,
 
+    // サーバーサイドフィルタ結果のキャッシュ。フィルタ行き来時の blank 期間を無くす。
+    pub board_cache: BoardCache,
+    /// 直近に発行した LoadBoard の queries (BoardLoaded 時にキャッシュ保存するため)
+    pub pending_board_queries: Option<Vec<String>>,
+
     // Views (saved filter presets)
     pub views: Vec<ViewConfig>,
     pub active_view: Option<usize>,
@@ -141,6 +147,8 @@ impl AppState {
             comment_list_state: None,
             reaction_picker_state: None,
             loading: LoadingState::Idle,
+            board_cache: BoardCache::new(8),
+            pending_board_queries: None,
             views: Vec::new(),
             active_view: None,
             owner,
@@ -164,9 +172,9 @@ impl AppState {
         input.replace("@me", &format!("@{}", self.viewer_login))
     }
 
-    fn switch_to_view(&mut self, idx: usize) {
+    fn switch_to_view(&mut self, idx: usize) -> Command {
         if idx >= self.views.len() {
-            return;
+            return Command::None;
         }
         self.active_view = Some(idx);
         let filter_str = self.resolve_at_me(&self.views[idx].filter.clone());
@@ -179,15 +187,27 @@ impl AppState {
         }
         self.selected_card = 0;
         self.scroll_offset = 0;
+        if let Some(project) = &self.current_project {
+            let id = project.id.clone();
+            self.start_loading_board(&id)
+        } else {
+            Command::None
+        }
     }
 
-    fn clear_view(&mut self) {
+    fn clear_view(&mut self) -> Command {
         self.active_view = None;
         self.filter.active_filter = None;
         self.filter.input.clear();
         self.filter.cursor_pos = 0;
         self.selected_card = 0;
         self.scroll_offset = 0;
+        if let Some(project) = &self.current_project {
+            let id = project.id.clone();
+            self.start_loading_board(&id)
+        } else {
+            Command::None
+        }
     }
 
     pub fn start_loading_projects(&mut self) -> Command {
@@ -207,13 +227,64 @@ impl AppState {
     }
 
     pub fn start_loading_board(&mut self, project_id: &str) -> Command {
-        self.loading = LoadingState::Loading("Loading board...".into());
+        let queries = self
+            .filter
+            .active_filter
+            .as_ref()
+            .map(|f| f.to_server_queries())
+            .unwrap_or_default();
+
+        // キャッシュヒット時は board を即時差し替えて blank 期間を無くす
+        if let Some(cached) = self.board_cache.get(&queries) {
+            self.board = Some(cached);
+            self.selected_column = 0;
+            self.selected_card = 0;
+            self.scroll_offset = 0;
+            self.board_scroll_x.set(0);
+        }
+
+        self.loading = if self.board.is_some() {
+            LoadingState::Refreshing
+        } else {
+            LoadingState::Loading("Loading board...".into())
+        };
+        self.pending_board_queries = Some(queries.clone());
         Command::LoadBoard {
             project_id: project_id.to_string(),
+            queries,
+        }
+    }
+
+    /// mutation 後に呼び、server と乖離した可能性のあるキャッシュを全破棄する。
+    fn invalidate_board_cache(&mut self) {
+        self.board_cache.clear();
+    }
+
+    /// Command の中に board を書き換える mutation が含まれているか判定する。
+    fn command_mutates_board(cmd: &Command) -> bool {
+        match cmd {
+            Command::MoveCard { .. }
+            | Command::DeleteCard { .. }
+            | Command::CreateCard { .. }
+            | Command::CreateIssue { .. }
+            | Command::ReorderCard { .. }
+            | Command::ToggleLabel { .. }
+            | Command::ToggleAssignee { .. }
+            | Command::UpdateCard { .. } => true,
+            Command::Batch(cmds) => cmds.iter().any(Self::command_mutates_board),
+            _ => false,
         }
     }
 
     pub fn handle_event(&mut self, event: AppEvent) -> Command {
+        let cmd = self.handle_event_inner(event);
+        if Self::command_mutates_board(&cmd) {
+            self.invalidate_board_cache();
+        }
+        cmd
+    }
+
+    fn handle_event_inner(&mut self, event: AppEvent) -> Command {
         match event {
             AppEvent::Key(key) => self.handle_key(key),
             AppEvent::ProjectsLoaded(Ok(projects)) => {
@@ -239,6 +310,10 @@ impl AppState {
                 Command::None
             }
             AppEvent::BoardLoaded(Ok(board)) => {
+                // 対応する queries でキャッシュに保存 (次回以降の即時表示に使う)
+                if let Some(queries) = self.pending_board_queries.take() {
+                    self.board_cache.put(queries, board.clone());
+                }
                 self.board = Some(board);
                 self.selected_column = 0;
                 self.selected_card = 0;
@@ -474,7 +549,7 @@ impl AppState {
             return Command::None;
         }
 
-        // Ignore keys while loading
+        // Ignore keys while loading (Refreshing はバックグラウンド更新なので操作可能)
         if matches!(self.loading, LoadingState::Loading(_)) {
             if matches!(key.code, KeyCode::Char('q')) {
                 self.should_quit = true;
@@ -489,10 +564,7 @@ impl AppState {
                 self.handle_help_key(key);
                 Command::None
             }
-            ViewMode::Filter => {
-                self.handle_filter_key(key);
-                Command::None
-            }
+            ViewMode::Filter => self.handle_filter_key(key),
             ViewMode::Confirm => self.handle_confirm_key(key),
             ViewMode::CreateCard => self.handle_create_card_key(key),
             ViewMode::Detail => self.handle_detail_key(key),
@@ -523,12 +595,10 @@ impl AppState {
         // View switching (1-9, 0) は特殊処理のまま
         if let KeyCode::Char(c @ '1'..='9') = key.code
             && key.modifiers == KeyModifiers::NONE {
-                self.switch_to_view((c as usize) - ('1' as usize));
-                return Command::None;
+                return self.switch_to_view((c as usize) - ('1' as usize));
             }
         if key.code == KeyCode::Char('0') && key.modifiers == KeyModifiers::NONE {
-            self.clear_view();
-            return Command::None;
+            return self.clear_view();
         }
 
         let action = match self.keymap.resolve(KeymapMode::Board, &key) {
@@ -619,7 +689,12 @@ impl AppState {
                 self.active_view = None;
                 self.filter.active_filter = None;
                 self.clamp_card_selection();
-                Command::None
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
             }
             Action::DeleteCard => {
                 self.start_delete_card(ViewMode::Board);
@@ -780,17 +855,17 @@ impl AppState {
         }
     }
 
-    fn handle_filter_key(&mut self, key: KeyEvent) {
+    fn handle_filter_key(&mut self, key: KeyEvent) -> Command {
         // Check structural keys first (ForceQuit, Back, Select)
         if let Some(action) = self.keymap.resolve(KeymapMode::FilterStructural, &key) {
             match action {
                 Action::ForceQuit => {
                     self.should_quit = true;
-                    return;
+                    return Command::None;
                 }
                 Action::Back => {
                     self.mode = ViewMode::Board;
-                    return;
+                    return Command::None;
                 }
                 Action::Select => {
                     self.active_view = None;
@@ -803,16 +878,15 @@ impl AppState {
                     self.selected_card = 0;
                     self.scroll_offset = 0;
                     self.mode = ViewMode::Board;
-                    return;
+                    return if let Some(project) = &self.current_project {
+                        let id = project.id.clone();
+                        self.start_loading_board(&id)
+                    } else {
+                        Command::None
+                    };
                 }
                 _ => {}
             }
-        }
-
-        // Global ForceQuit check
-        if let Some(Action::ForceQuit) = self.keymap.resolve(KeymapMode::FilterStructural, &key) {
-            self.should_quit = true;
-            return;
         }
 
         // Text input handling (not configurable)
@@ -842,6 +916,7 @@ impl AppState {
             }
             _ => {}
         }
+        Command::None
     }
 
     fn handle_confirm_key(&mut self, key: KeyEvent) -> Command {
@@ -3538,6 +3613,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "p1".into(),
+                queries: vec![],
             }
         );
     }
@@ -3567,12 +3643,13 @@ mod tests {
 
         let cmd = state.handle_event(AppEvent::CardMoved(Err("API error".into())));
 
-        // エラー後にリロードが発動するので Loading 状態になる
-        assert!(matches!(state.loading, LoadingState::Loading(_)));
+        // エラー後にリロードが発動するので Refreshing 状態になる (既存ボードあり)
+        assert!(matches!(state.loading, LoadingState::Refreshing));
         assert_eq!(
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
+                queries: vec![],
             }
         );
     }
@@ -3589,6 +3666,181 @@ mod tests {
     }
 
     // ========== モード遷移 ==========
+
+    #[test]
+    fn test_filter_enter_emits_load_board_with_queries() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "Card A"), make_card("2", "Card B")],
+        )]);
+        let mut state = make_state_with_board(board);
+
+        // / でフィルタモードに入り label:bug を入力
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        for c in "label:bug".chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+
+        // Enter で確定: LoadBoard が server-side query 付きで返ること
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                queries: vec!["label:\"bug\"".into()],
+            }
+        );
+        assert!(state.filter.active_filter.is_some());
+    }
+
+    #[test]
+    fn test_filter_enter_or_emits_multiple_queries() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "Card A")],
+        )]);
+        let mut state = make_state_with_board(board);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        for c in "label:bug | label:enh".chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                queries: vec!["label:\"bug\"".into(), "label:\"enh\"".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_filter_enter_empty_emits_load_board_no_query() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug"));
+
+        // / で空のまま Enter
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                queries: vec![],
+            }
+        );
+        assert!(state.filter.active_filter.is_none());
+    }
+
+    #[test]
+    fn test_clear_filter_emits_load_board_no_query() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug"));
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('u'),
+            KeyModifiers::CONTROL,
+        )));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                queries: vec![],
+            }
+        );
+        assert!(state.filter.active_filter.is_none());
+    }
+
+    #[test]
+    fn test_board_loaded_populates_cache() {
+        let mut state = make_state_with_board(make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "A")],
+        )]));
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug"));
+        // 先に start_loading_board を呼んで pending_board_queries を仕込む
+        let _ = state.start_loading_board("proj_1");
+
+        let new_board = make_board(vec![("Todo", "opt_1", vec![make_card("2", "B")])]);
+        state.handle_event(AppEvent::BoardLoaded(Ok(new_board)));
+
+        // cache に queries="label:bug" の board が保存されている
+        assert_eq!(
+            state.board_cache.keys(),
+            vec![vec!["label:\"bug\"".to_string()]]
+        );
+    }
+
+    #[test]
+    fn test_filter_change_uses_cache_immediately() {
+        let mut state = make_state_with_board(make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("old", "old board card")],
+        )]));
+
+        // あらかじめ label:bug のキャッシュを仕込む
+        let cached = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("cached_1", "cached bug")],
+        )]);
+        state
+            .board_cache
+            .put(vec!["label:\"bug\"".into()], cached);
+
+        // / label:bug Enter
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        for c in "label:bug".chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        // Enter 時点で board は cache の内容に差し替わっている
+        let b = state.board.as_ref().unwrap();
+        assert_eq!(b.columns[0].cards[0].item_id, "cached_1");
+    }
+
+    #[test]
+    fn test_mutation_invalidates_cache() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "A"), make_card("2", "B")]),
+            ("Done", "opt_2", vec![]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state
+            .board_cache
+            .put(vec!["label:\"bug\"".into()], make_board(vec![]));
+        assert_eq!(state.board_cache.len(), 1);
+
+        // H/L でカード移動 → MoveCard が返り、cache は clear される
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('L'))));
+        assert_eq!(state.board_cache.len(), 0);
+    }
+
+    #[test]
+    fn test_refresh_with_active_filter_includes_queries() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("label:bug"));
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('r'))));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                queries: vec!["label:\"bug\"".into()],
+            }
+        );
+    }
 
     #[test]
     fn test_slash_enters_filter() {
@@ -4584,12 +4836,13 @@ mod tests {
 
         let cmd = state.handle_event(AppEvent::CardReordered(Err("API error".into())));
 
-        // エラー後にリロードが発動するので Loading 状態になる
-        assert!(matches!(state.loading, LoadingState::Loading(_)));
+        // エラー後にリロードが発動するので Refreshing 状態になる (既存ボードあり)
+        assert!(matches!(state.loading, LoadingState::Refreshing));
         assert_eq!(
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
+                queries: vec![],
             }
         );
     }
@@ -6064,6 +6317,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "proj_42".into(),
+                queries: vec![],
             }
         );
     }
@@ -6106,7 +6360,14 @@ mod tests {
         let mut state = make_state_with_views(board, vec![("Bugs", "label:bug")]);
 
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
-        assert_eq!(cmd, Command::None);
+        // View 切替は server-side filter 付きで Board をリロードする
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                queries: vec!["label:\"bug\"".into()],
+            }
+        );
         assert_eq!(state.active_view, Some(0));
         assert!(state.filter.active_filter.is_some());
         assert_eq!(state.filter.input, "label:bug");
@@ -6128,7 +6389,14 @@ mod tests {
 
         // Press 0 to clear
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('0'))));
-        assert_eq!(cmd, Command::None);
+        // クリアでも全件再ロードを発火
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                queries: vec![],
+            }
+        );
         assert_eq!(state.active_view, None);
         assert!(state.filter.active_filter.is_none());
         assert!(state.filter.input.is_empty());

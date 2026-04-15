@@ -1,4 +1,4 @@
-query ProjectBoard($projectId: ID!, $itemsCursor: String) {
+query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
   node(id: $projectId) {
     __typename
     ... on ProjectV2 {
@@ -39,7 +39,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
           }
         }
       }
-      items(first: 50, after: $itemsCursor) {
+      items(first: 50, after: $itemsCursor, query: $query) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id

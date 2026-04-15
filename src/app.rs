@@ -86,11 +86,11 @@ impl App {
                     ));
                 });
             }
-            Command::LoadBoard { project_id } => {
+            Command::LoadBoard { project_id, queries } => {
                 let client = self.github.clone();
                 let tx = self.event_tx.clone();
                 tokio::spawn(async move {
-                    let result = client.get_board(&project_id).await;
+                    let result = client.get_board(&project_id, &queries).await;
                     let _ = tx.send(AppEvent::BoardLoaded(
                         result.map_err(|e| e.to_string()),
                     ));
