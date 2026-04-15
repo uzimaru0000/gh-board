@@ -14,9 +14,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-apple-darwin
-            os: macos-13
-            name: darwin_amd64
           - target: aarch64-apple-darwin
             os: macos-latest
             name: darwin_arm64
