@@ -9,7 +9,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
           nameWithOwner
         }
       }
-      fields(first: 30) {
+      fields(first: 50) {
         nodes {
           __typename
           ... on ProjectV2SingleSelectField {
@@ -24,10 +24,18 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
           ... on ProjectV2Field {
             id
             name
+            dataType
           }
           ... on ProjectV2IterationField {
             id
             name
+            configuration {
+              iterations {
+                id
+                title
+                startDate
+              }
+            }
           }
         }
       }
@@ -35,7 +43,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
-          fieldValues(first: 10) {
+          fieldValues(first: 20) {
             nodes {
               __typename
               ... on ProjectV2ItemFieldSingleSelectValue {
@@ -51,6 +59,28 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String) {
                 field {
                   __typename
                   ... on ProjectV2Field { id name }
+                }
+              }
+              ... on ProjectV2ItemFieldNumberValue {
+                number
+                field {
+                  __typename
+                  ... on ProjectV2Field { id name }
+                }
+              }
+              ... on ProjectV2ItemFieldDateValue {
+                date
+                field {
+                  __typename
+                  ... on ProjectV2Field { id name }
+                }
+              }
+              ... on ProjectV2ItemFieldIterationValue {
+                title
+                iterationId
+                field {
+                  __typename
+                  ... on ProjectV2IterationField { id name }
                 }
               }
             }

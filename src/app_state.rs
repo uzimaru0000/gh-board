@@ -5,12 +5,41 @@ use crate::command::Command;
 use crate::config::ViewConfig;
 use crate::event::AppEvent;
 use crate::keymap::{Keymap, KeymapMode};
-use crate::model::project::{Board, Card, CardType, ProjectSummary};
+use crate::command::CustomFieldValueInput;
+use crate::model::project::{
+    Board, Card, CardType, CustomFieldValue, FieldDefinition, ProjectSummary,
+};
+
+fn format_number(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e16 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
+}
+
+fn is_valid_iso_date(s: &str) -> bool {
+    // YYYY-MM-DD 形式のみ許容 (簡易バリデーション)
+    let bytes = s.as_bytes();
+    if bytes.len() != 10 {
+        return false;
+    }
+    if bytes[4] != b'-' || bytes[7] != b'-' {
+        return false;
+    }
+    let all_digits = |slice: &[u8]| slice.iter().all(|b| b.is_ascii_digit());
+    if !all_digits(&bytes[0..4]) || !all_digits(&bytes[5..7]) || !all_digits(&bytes[8..10]) {
+        return false;
+    }
+    let month: u32 = s[5..7].parse().unwrap_or(0);
+    let day: u32 = s[8..10].parse().unwrap_or(0);
+    (1..=12).contains(&month) && (1..=31).contains(&day)
+}
 use crate::model::state::{
     ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
     CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
     LoadingState, NewCardType, PendingIssueCreate, RepoSelectState, SidebarEditMode, ViewMode,
-    SIDEBAR_ASSIGNEES, SIDEBAR_DELETE, SIDEBAR_LABELS, SIDEBAR_SECTION_COUNT, SIDEBAR_STATUS,
+    SIDEBAR_ASSIGNEES, SIDEBAR_LABELS, SIDEBAR_STATUS,
 };
 
 pub struct AppState {
@@ -385,6 +414,19 @@ impl AppState {
             AppEvent::CommentsLoaded(Err(e)) => {
                 self.loading = LoadingState::Error(e);
                 Command::None
+            }
+            AppEvent::CustomFieldUpdated(Ok(())) => {
+                // 楽観的更新済み
+                Command::None
+            }
+            AppEvent::CustomFieldUpdated(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
             }
             AppEvent::Tick | AppEvent::Resize(_, _) => Command::None,
         }
@@ -1747,37 +1789,169 @@ impl AppState {
         }
     }
 
+    /// サイドバーの総セクション数 (Status/Assignees/Labels/Milestone + custom_fields + Delete)
+    pub fn sidebar_section_count(&self) -> usize {
+        4 + self.field_definitions().len() + 1
+    }
+
+    /// Delete セクションのインデックス (動的)
+    pub fn sidebar_delete_index(&self) -> usize {
+        4 + self.field_definitions().len()
+    }
+
+    /// サイドバーインデックスが カスタムフィールド行なら、対応する FieldDefinition の index を返す
+    pub fn sidebar_field_index(&self, sidebar_index: usize) -> Option<usize> {
+        if sidebar_index >= 4 && sidebar_index < self.sidebar_delete_index() {
+            Some(sidebar_index - 4)
+        } else {
+            None
+        }
+    }
+
+    fn field_definitions(&self) -> &[FieldDefinition] {
+        self.board
+            .as_ref()
+            .map(|b| b.field_definitions.as_slice())
+            .unwrap_or(&[])
+    }
+
     fn handle_detail_sidebar_action(&mut self, action: Action) -> Command {
         match action {
             Action::MoveDown => {
-                self.sidebar_selected =
-                    (self.sidebar_selected + 1).min(SIDEBAR_SECTION_COUNT - 1);
+                let max = self.sidebar_section_count().saturating_sub(1);
+                self.sidebar_selected = (self.sidebar_selected + 1).min(max);
                 Command::None
             }
             Action::MoveUp => {
                 self.sidebar_selected = self.sidebar_selected.saturating_sub(1);
                 Command::None
             }
-            Action::Select => match self.sidebar_selected {
-                SIDEBAR_STATUS => {
-                    self.status_select_open = true;
-                    self.status_select_cursor = self.selected_column;
-                    Command::None
+            Action::Select => {
+                let idx = self.sidebar_selected;
+                let delete_idx = self.sidebar_delete_index();
+                match idx {
+                    SIDEBAR_STATUS => {
+                        self.status_select_open = true;
+                        self.status_select_cursor = self.selected_column;
+                        Command::None
+                    }
+                    SIDEBAR_LABELS => self.open_label_edit(),
+                    SIDEBAR_ASSIGNEES => self.open_assignee_edit(),
+                    i if i == delete_idx => {
+                        self.start_delete_card(ViewMode::Detail);
+                        Command::None
+                    }
+                    _ => {
+                        if let Some(field_idx) = self.sidebar_field_index(idx) {
+                            self.open_custom_field_edit(field_idx);
+                        }
+                        Command::None
+                    }
                 }
-                SIDEBAR_LABELS => self.open_label_edit(),
-                SIDEBAR_ASSIGNEES => self.open_assignee_edit(),
-                SIDEBAR_DELETE => {
-                    self.start_delete_card(ViewMode::Detail);
-                    Command::None
-                }
-                _ => Command::None,
-            },
+            }
             Action::DeleteCard => {
                 self.start_delete_card(ViewMode::Detail);
                 Command::None
             }
             _ => Command::None,
         }
+    }
+
+    fn open_custom_field_edit(&mut self, field_idx: usize) {
+        let (field, current_value) = {
+            let Some(board) = self.board.as_ref() else {
+                return;
+            };
+            let Some(field) = board.field_definitions.get(field_idx).cloned() else {
+                return;
+            };
+            let current = self
+                .selected_card_ref()
+                .and_then(|c| {
+                    c.custom_fields
+                        .iter()
+                        .find(|v| v.field_id() == field.id())
+                        .cloned()
+                });
+            (field, current)
+        };
+
+        let edit = match &field {
+            FieldDefinition::SingleSelect { id, name, options } => {
+                let current_option_id = match &current_value {
+                    Some(CustomFieldValue::SingleSelect { option_id, .. }) => Some(option_id),
+                    _ => None,
+                };
+                let cursor = current_option_id
+                    .and_then(|oid| options.iter().position(|o| &o.id == oid))
+                    .unwrap_or(0);
+                SidebarEditMode::CustomFieldSingleSelect {
+                    field_id: id.clone(),
+                    field_name: name.clone(),
+                    options: options.clone(),
+                    cursor,
+                }
+            }
+            FieldDefinition::Iteration {
+                id,
+                name,
+                iterations,
+            } => {
+                let current_iteration_id = match &current_value {
+                    Some(CustomFieldValue::Iteration { iteration_id, .. }) => Some(iteration_id),
+                    _ => None,
+                };
+                let cursor = current_iteration_id
+                    .and_then(|iid| iterations.iter().position(|it| &it.id == iid))
+                    .unwrap_or(0);
+                SidebarEditMode::CustomFieldIteration {
+                    field_id: id.clone(),
+                    field_name: name.clone(),
+                    iterations: iterations.clone(),
+                    cursor,
+                }
+            }
+            FieldDefinition::Text { id, name } => {
+                let input = match &current_value {
+                    Some(CustomFieldValue::Text { text, .. }) => text.clone(),
+                    _ => String::new(),
+                };
+                let cursor_pos = input.chars().count();
+                SidebarEditMode::CustomFieldText {
+                    field_id: id.clone(),
+                    field_name: name.clone(),
+                    input,
+                    cursor_pos,
+                }
+            }
+            FieldDefinition::Number { id, name } => {
+                let input = match &current_value {
+                    Some(CustomFieldValue::Number { number, .. }) => format_number(*number),
+                    _ => String::new(),
+                };
+                let cursor_pos = input.chars().count();
+                SidebarEditMode::CustomFieldNumber {
+                    field_id: id.clone(),
+                    field_name: name.clone(),
+                    input,
+                    cursor_pos,
+                }
+            }
+            FieldDefinition::Date { id, name } => {
+                let input = match &current_value {
+                    Some(CustomFieldValue::Date { date, .. }) => date.clone(),
+                    _ => String::new(),
+                };
+                let cursor_pos = input.chars().count();
+                SidebarEditMode::CustomFieldDate {
+                    field_id: id.clone(),
+                    field_name: name.clone(),
+                    input,
+                    cursor_pos,
+                }
+            }
+        };
+        self.sidebar_edit = Some(edit);
     }
 
     fn handle_comment_list_key(&mut self, key: KeyEvent) -> Command {
@@ -1957,6 +2131,16 @@ impl AppState {
     }
 
     fn handle_sidebar_edit_key(&mut self, key: KeyEvent) -> Command {
+        // テキスト入力系は SidebarEdit のキーマップを通さず直接処理
+        if matches!(
+            self.sidebar_edit,
+            Some(SidebarEditMode::CustomFieldText { .. })
+                | Some(SidebarEditMode::CustomFieldNumber { .. })
+                | Some(SidebarEditMode::CustomFieldDate { .. })
+        ) {
+            return self.handle_custom_field_text_key(key);
+        }
+
         let action = match self.keymap.resolve(KeymapMode::SidebarEdit, &key) {
             Some(a) => a,
             None => return Command::None,
@@ -1970,6 +2154,15 @@ impl AppState {
         let (items_len, cursor) = match edit {
             SidebarEditMode::Labels { items, cursor } => (items.len(), cursor),
             SidebarEditMode::Assignees { items, cursor } => (items.len(), cursor),
+            SidebarEditMode::CustomFieldSingleSelect { options, cursor, .. } => {
+                (options.len() + 1, cursor) // +1 は "None" (クリア)
+            }
+            SidebarEditMode::CustomFieldIteration { iterations, cursor, .. } => {
+                (iterations.len() + 1, cursor)
+            }
+            SidebarEditMode::CustomFieldText { .. }
+            | SidebarEditMode::CustomFieldNumber { .. }
+            | SidebarEditMode::CustomFieldDate { .. } => unreachable!("dispatched above"),
         };
 
         match action {
@@ -2072,6 +2265,321 @@ impl AppState {
                 }
                 Command::None
             }
+            SidebarEditMode::CustomFieldSingleSelect { .. }
+            | SidebarEditMode::CustomFieldIteration { .. } => {
+                self.commit_custom_field_selection()
+            }
+            SidebarEditMode::CustomFieldText { .. }
+            | SidebarEditMode::CustomFieldNumber { .. }
+            | SidebarEditMode::CustomFieldDate { .. } => Command::None,
+        }
+    }
+
+    fn commit_custom_field_selection(&mut self) -> Command {
+        let project_id = match self.current_project.as_ref() {
+            Some(p) => p.id.clone(),
+            None => return Command::None,
+        };
+        let item_id = match self.selected_card_ref() {
+            Some(c) => c.item_id.clone(),
+            None => return Command::None,
+        };
+
+        // 編集モードを取り出してクローズ
+        let edit = self.sidebar_edit.take();
+        let (field_id, cmd, updated_value): (String, Command, Option<CustomFieldValue>) = match edit
+        {
+            Some(SidebarEditMode::CustomFieldSingleSelect {
+                field_id,
+                options,
+                cursor,
+                ..
+            }) => {
+                if cursor >= options.len() {
+                    // None (クリア)
+                    (
+                        field_id.clone(),
+                        Command::ClearCustomField {
+                            project_id,
+                            item_id,
+                            field_id,
+                        },
+                        None,
+                    )
+                } else {
+                    let opt = &options[cursor];
+                    let new_val = CustomFieldValue::SingleSelect {
+                        field_id: field_id.clone(),
+                        option_id: opt.id.clone(),
+                        name: opt.name.clone(),
+                        color: opt.color.clone(),
+                    };
+                    (
+                        field_id.clone(),
+                        Command::UpdateCustomField {
+                            project_id,
+                            item_id,
+                            field_id,
+                            value: CustomFieldValueInput::SingleSelect {
+                                option_id: opt.id.clone(),
+                            },
+                        },
+                        Some(new_val),
+                    )
+                }
+            }
+            Some(SidebarEditMode::CustomFieldIteration {
+                field_id,
+                iterations,
+                cursor,
+                ..
+            }) => {
+                if cursor >= iterations.len() {
+                    (
+                        field_id.clone(),
+                        Command::ClearCustomField {
+                            project_id,
+                            item_id,
+                            field_id,
+                        },
+                        None,
+                    )
+                } else {
+                    let it = &iterations[cursor];
+                    let new_val = CustomFieldValue::Iteration {
+                        field_id: field_id.clone(),
+                        iteration_id: it.id.clone(),
+                        title: it.title.clone(),
+                    };
+                    (
+                        field_id.clone(),
+                        Command::UpdateCustomField {
+                            project_id,
+                            item_id,
+                            field_id,
+                            value: CustomFieldValueInput::Iteration {
+                                iteration_id: it.id.clone(),
+                            },
+                        },
+                        Some(new_val),
+                    )
+                }
+            }
+            other => {
+                // 想定外: 復元
+                self.sidebar_edit = other;
+                return Command::None;
+            }
+        };
+
+        self.apply_custom_field_optimistic(&field_id, updated_value);
+        cmd
+    }
+
+    fn apply_custom_field_optimistic(
+        &mut self,
+        field_id: &str,
+        new_value: Option<CustomFieldValue>,
+    ) {
+        let Some(real_idx) = self.real_card_index() else {
+            return;
+        };
+        let Some(board) = self.board.as_mut() else {
+            return;
+        };
+        let Some(col) = board.columns.get_mut(self.selected_column) else {
+            return;
+        };
+        let Some(card) = col.cards.get_mut(real_idx) else {
+            return;
+        };
+        card.custom_fields.retain(|v| v.field_id() != field_id);
+        if let Some(v) = new_value {
+            card.custom_fields.push(v);
+        }
+    }
+
+    fn handle_custom_field_text_key(&mut self, key: KeyEvent) -> Command {
+        // キーマップは使わず直接 KeyCode を解釈 (Space が ToggleItem に奪われないため)
+        match key.code {
+            KeyCode::Esc => {
+                self.sidebar_edit = None;
+                return Command::None;
+            }
+            KeyCode::Enter => return self.commit_custom_field_text(),
+            _ => {}
+        }
+
+        let edit = match &mut self.sidebar_edit {
+            Some(e) => e,
+            None => return Command::None,
+        };
+        let (input, cursor_pos): (&mut String, &mut usize) = match edit {
+            SidebarEditMode::CustomFieldText {
+                input, cursor_pos, ..
+            }
+            | SidebarEditMode::CustomFieldNumber {
+                input, cursor_pos, ..
+            }
+            | SidebarEditMode::CustomFieldDate {
+                input, cursor_pos, ..
+            } => (input, cursor_pos),
+            _ => return Command::None,
+        };
+
+        match key.code {
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let byte = input
+                    .char_indices()
+                    .nth(*cursor_pos)
+                    .map(|(i, _)| i)
+                    .unwrap_or(input.len());
+                input.insert(byte, c);
+                *cursor_pos += 1;
+            }
+            KeyCode::Backspace => {
+                if *cursor_pos > 0 {
+                    let prev_byte = input
+                        .char_indices()
+                        .nth(*cursor_pos - 1)
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    let cur_byte = input
+                        .char_indices()
+                        .nth(*cursor_pos)
+                        .map(|(i, _)| i)
+                        .unwrap_or(input.len());
+                    input.drain(prev_byte..cur_byte);
+                    *cursor_pos -= 1;
+                }
+            }
+            KeyCode::Left => {
+                *cursor_pos = cursor_pos.saturating_sub(1);
+            }
+            KeyCode::Right => {
+                let max = input.chars().count();
+                *cursor_pos = (*cursor_pos + 1).min(max);
+            }
+            _ => {}
+        }
+        Command::None
+    }
+
+    fn commit_custom_field_text(&mut self) -> Command {
+        let project_id = match self.current_project.as_ref() {
+            Some(p) => p.id.clone(),
+            None => return Command::None,
+        };
+        let item_id = match self.selected_card_ref() {
+            Some(c) => c.item_id.clone(),
+            None => return Command::None,
+        };
+        let edit = self.sidebar_edit.take();
+        match edit {
+            Some(SidebarEditMode::CustomFieldText {
+                field_id, input, ..
+            }) => {
+                if input.is_empty() {
+                    self.apply_custom_field_optimistic(&field_id, None);
+                    Command::ClearCustomField {
+                        project_id,
+                        item_id,
+                        field_id,
+                    }
+                } else {
+                    let new_val = CustomFieldValue::Text {
+                        field_id: field_id.clone(),
+                        text: input.clone(),
+                    };
+                    self.apply_custom_field_optimistic(&field_id, Some(new_val));
+                    Command::UpdateCustomField {
+                        project_id,
+                        item_id,
+                        field_id,
+                        value: CustomFieldValueInput::Text { text: input },
+                    }
+                }
+            }
+            Some(SidebarEditMode::CustomFieldNumber {
+                field_id,
+                field_name,
+                input,
+                cursor_pos,
+            }) => {
+                if input.is_empty() {
+                    self.apply_custom_field_optimistic(&field_id, None);
+                    return Command::ClearCustomField {
+                        project_id,
+                        item_id,
+                        field_id,
+                    };
+                }
+                match input.trim().parse::<f64>() {
+                    Ok(n) if n.is_finite() => {
+                        let new_val = CustomFieldValue::Number {
+                            field_id: field_id.clone(),
+                            number: n,
+                        };
+                        self.apply_custom_field_optimistic(&field_id, Some(new_val));
+                        Command::UpdateCustomField {
+                            project_id,
+                            item_id,
+                            field_id,
+                            value: CustomFieldValueInput::Number { number: n },
+                        }
+                    }
+                    _ => {
+                        // バリデーション失敗: 復元
+                        self.sidebar_edit = Some(SidebarEditMode::CustomFieldNumber {
+                            field_id,
+                            field_name,
+                            input,
+                            cursor_pos,
+                        });
+                        Command::None
+                    }
+                }
+            }
+            Some(SidebarEditMode::CustomFieldDate {
+                field_id,
+                field_name,
+                input,
+                cursor_pos,
+            }) => {
+                if input.is_empty() {
+                    self.apply_custom_field_optimistic(&field_id, None);
+                    return Command::ClearCustomField {
+                        project_id,
+                        item_id,
+                        field_id,
+                    };
+                }
+                if is_valid_iso_date(&input) {
+                    let new_val = CustomFieldValue::Date {
+                        field_id: field_id.clone(),
+                        date: input.clone(),
+                    };
+                    self.apply_custom_field_optimistic(&field_id, Some(new_val));
+                    Command::UpdateCustomField {
+                        project_id,
+                        item_id,
+                        field_id,
+                        value: CustomFieldValueInput::Date { date: input },
+                    }
+                } else {
+                    self.sidebar_edit = Some(SidebarEditMode::CustomFieldDate {
+                        field_id,
+                        field_name,
+                        input,
+                        cursor_pos,
+                    });
+                    Command::None
+                }
+            }
+            other => {
+                self.sidebar_edit = other;
+                Command::None
+            }
         }
     }
 
@@ -2133,6 +2641,7 @@ pub fn next_char_pos(s: &str, pos: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::CustomFieldValueInput;
     use crate::model::project::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
@@ -2167,6 +2676,7 @@ mod tests {
             body: None,
             comments: vec![],
             milestone: None,
+            custom_fields: vec![],
         }
     }
 
@@ -2190,6 +2700,7 @@ mod tests {
             body: None,
             comments: vec![],
             milestone: None,
+            custom_fields: vec![],
         }
     }
 
@@ -2206,6 +2717,7 @@ mod tests {
             body: None,
             comments: vec![],
             milestone: None,
+            custom_fields: vec![],
         }
     }
 
@@ -2222,6 +2734,28 @@ mod tests {
             body: None,
             comments: vec![],
             milestone: Some(milestone.into()),
+            custom_fields: vec![],
+        }
+    }
+
+    fn make_card_with_custom_fields(
+        item_id: &str,
+        title: &str,
+        custom_fields: Vec<CustomFieldValue>,
+    ) -> Card {
+        Card {
+            item_id: item_id.into(),
+            content_id: Some(format!("content_{item_id}")),
+            title: title.into(),
+            number: None,
+            card_type: CardType::DraftIssue,
+            assignees: vec![],
+            labels: vec![],
+            url: None,
+            body: None,
+            comments: vec![],
+            milestone: None,
+            custom_fields,
         }
     }
 
@@ -2239,7 +2773,17 @@ mod tests {
                 })
                 .collect(),
             repositories: vec![],
+            field_definitions: vec![],
         }
+    }
+
+    fn make_board_with_fields(
+        columns: Vec<(&str, &str, Vec<Card>)>,
+        field_definitions: Vec<FieldDefinition>,
+    ) -> Board {
+        let mut board = make_board(columns);
+        board.field_definitions = field_definitions;
+        board
     }
 
     fn make_board_with_repos(
@@ -4057,7 +4601,7 @@ mod tests {
         state.selected_card = 0;
         state.mode = ViewMode::Detail;
         state.detail_pane = DetailPane::Sidebar;
-        state.sidebar_selected = SIDEBAR_DELETE;
+        state.sidebar_selected = state.sidebar_delete_index();
 
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
         assert_eq!(state.mode, ViewMode::Confirm);
@@ -4157,6 +4701,7 @@ mod tests {
             body: None,
             comments: vec![],
             milestone: None,
+            custom_fields: vec![],
         }
     }
 
@@ -4316,6 +4861,7 @@ mod tests {
             body: Some(body.into()),
             comments: vec![],
             milestone: None,
+            custom_fields: vec![],
         }
     }
 
@@ -4595,6 +5141,7 @@ mod tests {
             body: Some("body".into()),
             comments,
             milestone: None,
+            custom_fields: vec![],
         }
     }
 
@@ -5318,5 +5865,394 @@ mod tests {
         state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
 
         assert_eq!(state.filtered_card_indices(0), vec![0]);
+    }
+
+    // ========== カスタムフィールド (Issue #8) ==========
+
+    fn priority_field() -> FieldDefinition {
+        FieldDefinition::SingleSelect {
+            id: "fld_priority".into(),
+            name: "Priority".into(),
+            options: vec![
+                SingleSelectOption {
+                    id: "opt_p0".into(),
+                    name: "P0".into(),
+                    color: Some(ColumnColor::Red),
+                },
+                SingleSelectOption {
+                    id: "opt_p1".into(),
+                    name: "P1".into(),
+                    color: Some(ColumnColor::Orange),
+                },
+                SingleSelectOption {
+                    id: "opt_p2".into(),
+                    name: "P2".into(),
+                    color: Some(ColumnColor::Gray),
+                },
+            ],
+        }
+    }
+
+    fn estimate_field() -> FieldDefinition {
+        FieldDefinition::Number {
+            id: "fld_estimate".into(),
+            name: "Estimate".into(),
+        }
+    }
+
+    fn notes_field() -> FieldDefinition {
+        FieldDefinition::Text {
+            id: "fld_notes".into(),
+            name: "Notes".into(),
+        }
+    }
+
+    fn due_field() -> FieldDefinition {
+        FieldDefinition::Date {
+            id: "fld_due".into(),
+            name: "Due".into(),
+        }
+    }
+
+    fn sprint_field() -> FieldDefinition {
+        FieldDefinition::Iteration {
+            id: "fld_sprint".into(),
+            name: "Sprint".into(),
+            iterations: vec![
+                IterationOption {
+                    id: "it_1".into(),
+                    title: "Sprint 1".into(),
+                    start_date: "2026-04-01".into(),
+                },
+                IterationOption {
+                    id: "it_2".into(),
+                    title: "Sprint 2".into(),
+                    start_date: "2026-04-15".into(),
+                },
+            ],
+        }
+    }
+
+    fn setup_detail_with_fields(
+        card: Card,
+        fields: Vec<FieldDefinition>,
+    ) -> AppState {
+        let board = make_board_with_fields(
+            vec![("Todo", "opt_1", vec![card])],
+            fields,
+        );
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state
+    }
+
+    #[test]
+    fn test_sidebar_navigation_extends_with_custom_fields() {
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(
+            card,
+            vec![priority_field(), estimate_field()],
+        );
+
+        // Status (0) → Assignees (1) → Labels (2) → Milestone (3) → Priority (4) → Estimate (5) → Delete (6)
+        state.sidebar_selected = 3; // Milestone
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 4); // Priority
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 5); // Estimate
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 6); // Delete
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 6); // clamp
+    }
+
+    #[test]
+    fn test_enter_on_single_select_opens_edit_mode() {
+        let card = make_card_with_custom_fields(
+            "1",
+            "Card A",
+            vec![CustomFieldValue::SingleSelect {
+                field_id: "fld_priority".into(),
+                option_id: "opt_p1".into(),
+                name: "P1".into(),
+                color: Some(ColumnColor::Orange),
+            }],
+        );
+        let mut state = setup_detail_with_fields(card, vec![priority_field()]);
+        state.sidebar_selected = 4; // Priority
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(cmd, Command::None);
+        match &state.sidebar_edit {
+            Some(SidebarEditMode::CustomFieldSingleSelect {
+                field_id,
+                options,
+                cursor,
+                ..
+            }) => {
+                assert_eq!(field_id, "fld_priority");
+                assert_eq!(options.len(), 3);
+                // 現在の値 (P1) の行にカーソルがある
+                assert_eq!(*cursor, 1);
+            }
+            _ => panic!("expected CustomFieldSingleSelect, got {:?}", state.sidebar_edit),
+        }
+    }
+
+    #[test]
+    fn test_single_select_toggle_sets_value_and_returns_update_command() {
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(card, vec![priority_field()]);
+        state.sidebar_selected = 4;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter))); // open
+
+        // P0 を選択 (cursor 0 → Enter)
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        match cmd {
+            Command::UpdateCustomField {
+                field_id,
+                value: CustomFieldValueInput::SingleSelect { option_id },
+                ..
+            } => {
+                assert_eq!(field_id, "fld_priority");
+                assert_eq!(option_id, "opt_p0");
+            }
+            other => panic!("expected UpdateCustomField, got {other:?}"),
+        }
+
+        // 楽観的更新: card.custom_fields に SingleSelect { option_id: opt_p0 } が入っている
+        let card = state.selected_card_ref().unwrap();
+        let v = card.custom_fields.iter().find(|v| v.field_id() == "fld_priority");
+        match v {
+            Some(CustomFieldValue::SingleSelect { option_id, name, .. }) => {
+                assert_eq!(option_id, "opt_p0");
+                assert_eq!(name, "P0");
+            }
+            other => panic!("expected SingleSelect P0 set, got {other:?}"),
+        }
+
+        // 編集モードは閉じている
+        assert!(state.sidebar_edit.is_none());
+    }
+
+    #[test]
+    fn test_single_select_clear_returns_clear_command() {
+        let card = make_card_with_custom_fields(
+            "1",
+            "Card A",
+            vec![CustomFieldValue::SingleSelect {
+                field_id: "fld_priority".into(),
+                option_id: "opt_p1".into(),
+                name: "P1".into(),
+                color: Some(ColumnColor::Orange),
+            }],
+        );
+        let mut state = setup_detail_with_fields(card, vec![priority_field()]);
+        state.sidebar_selected = 4;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter))); // open
+
+        // "None" 行は末尾 (options.len() = 3)
+        for _ in 0..5 {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        }
+        // カーソルは末尾の None にクランプ
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        match cmd {
+            Command::ClearCustomField { field_id, .. } => {
+                assert_eq!(field_id, "fld_priority");
+            }
+            other => panic!("expected ClearCustomField, got {other:?}"),
+        }
+
+        // 楽観更新: custom_fields からこの field が消えている
+        let card = state.selected_card_ref().unwrap();
+        assert!(
+            card.custom_fields
+                .iter()
+                .all(|v| v.field_id() != "fld_priority")
+        );
+    }
+
+    #[test]
+    fn test_number_field_opens_text_input() {
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(card, vec![estimate_field()]);
+        state.sidebar_selected = 4; // Estimate
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        match &state.sidebar_edit {
+            Some(SidebarEditMode::CustomFieldNumber { field_id, input, .. }) => {
+                assert_eq!(field_id, "fld_estimate");
+                assert!(input.is_empty());
+            }
+            other => panic!("expected CustomFieldNumber, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_number_field_accepts_digits_and_commits_on_enter() {
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(card, vec![estimate_field()]);
+        state.sidebar_selected = 4;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter))); // open
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('3'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('.'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('5'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        match cmd {
+            Command::UpdateCustomField {
+                field_id,
+                value: CustomFieldValueInput::Number { number },
+                ..
+            } => {
+                assert_eq!(field_id, "fld_estimate");
+                assert!((number - 3.5).abs() < 1e-9);
+            }
+            other => panic!("expected UpdateCustomField Number, got {other:?}"),
+        }
+        // 楽観更新
+        let card = state.selected_card_ref().unwrap();
+        match card
+            .custom_fields
+            .iter()
+            .find(|v| v.field_id() == "fld_estimate")
+        {
+            Some(CustomFieldValue::Number { number, .. }) => {
+                assert!((*number - 3.5).abs() < 1e-9);
+            }
+            other => panic!("expected Number set, got {other:?}"),
+        }
+        assert!(state.sidebar_edit.is_none());
+    }
+
+    #[test]
+    fn test_number_field_invalid_input_keeps_edit_open() {
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(card, vec![estimate_field()]);
+        state.sidebar_selected = 4;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(cmd, Command::None);
+        // 編集は閉じないまま
+        assert!(matches!(
+            state.sidebar_edit,
+            Some(SidebarEditMode::CustomFieldNumber { .. })
+        ));
+    }
+
+    #[test]
+    fn test_text_field_commits_value() {
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(card, vec![notes_field()]);
+        state.sidebar_selected = 4;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter))); // open
+
+        for c in "hi".chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        match cmd {
+            Command::UpdateCustomField {
+                value: CustomFieldValueInput::Text { text },
+                ..
+            } => {
+                assert_eq!(text, "hi");
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_date_field_validates_yyyy_mm_dd() {
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(card, vec![due_field()]);
+        state.sidebar_selected = 4;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        for c in "2026-04-30".chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        match cmd {
+            Command::UpdateCustomField {
+                value: CustomFieldValueInput::Date { date },
+                ..
+            } => assert_eq!(date, "2026-04-30"),
+            other => panic!("expected Date, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_date_field_invalid_keeps_open() {
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(card, vec![due_field()]);
+        state.sidebar_selected = 4;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        for c in "2026/04/30".chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(cmd, Command::None);
+        assert!(matches!(
+            state.sidebar_edit,
+            Some(SidebarEditMode::CustomFieldDate { .. })
+        ));
+    }
+
+    #[test]
+    fn test_iteration_field_selects_iteration() {
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(card, vec![sprint_field()]);
+        state.sidebar_selected = 4;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter))); // open
+        match &state.sidebar_edit {
+            Some(SidebarEditMode::CustomFieldIteration { iterations, .. }) => {
+                assert_eq!(iterations.len(), 2);
+            }
+            other => panic!("expected CustomFieldIteration, got {other:?}"),
+        }
+
+        // Sprint 2 を選択 (cursor=1 → j)
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        match cmd {
+            Command::UpdateCustomField {
+                value: CustomFieldValueInput::Iteration { iteration_id },
+                ..
+            } => assert_eq!(iteration_id, "it_2"),
+            other => panic!("expected Iteration, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_esc_cancels_custom_field_edit() {
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(card, vec![estimate_field()]);
+        state.sidebar_selected = 4;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert!(state.sidebar_edit.is_some());
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert!(state.sidebar_edit.is_none());
+    }
+
+    #[test]
+    fn test_custom_field_edit_disabled_in_empty_fields() {
+        // field_definitions が空なら Delete は 4 のまま
+        let card = make_card_with_custom_fields("1", "Card A", vec![]);
+        let mut state = setup_detail_with_fields(card, vec![]);
+        state.sidebar_selected = 3;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 4); // Delete
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.sidebar_selected, 4);
     }
 }

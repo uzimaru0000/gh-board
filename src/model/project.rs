@@ -12,6 +12,7 @@ pub struct Board {
     pub status_field_id: String,
     pub columns: Vec<Column>,
     pub repositories: Vec<Repository>,
+    pub field_definitions: Vec<FieldDefinition>,
 }
 
 #[derive(Clone, Debug)]
@@ -47,6 +48,108 @@ pub struct Card {
     pub body: Option<String>,
     pub comments: Vec<Comment>,
     pub milestone: Option<String>,
+    pub custom_fields: Vec<CustomFieldValue>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum FieldDefinition {
+    SingleSelect {
+        id: String,
+        name: String,
+        options: Vec<SingleSelectOption>,
+    },
+    Text {
+        id: String,
+        name: String,
+    },
+    Number {
+        id: String,
+        name: String,
+    },
+    Date {
+        id: String,
+        name: String,
+    },
+    Iteration {
+        id: String,
+        name: String,
+        iterations: Vec<IterationOption>,
+    },
+}
+
+impl FieldDefinition {
+    pub fn id(&self) -> &str {
+        match self {
+            FieldDefinition::SingleSelect { id, .. }
+            | FieldDefinition::Text { id, .. }
+            | FieldDefinition::Number { id, .. }
+            | FieldDefinition::Date { id, .. }
+            | FieldDefinition::Iteration { id, .. } => id,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            FieldDefinition::SingleSelect { name, .. }
+            | FieldDefinition::Text { name, .. }
+            | FieldDefinition::Number { name, .. }
+            | FieldDefinition::Date { name, .. }
+            | FieldDefinition::Iteration { name, .. } => name,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SingleSelectOption {
+    pub id: String,
+    pub name: String,
+    pub color: Option<ColumnColor>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IterationOption {
+    pub id: String,
+    pub title: String,
+    pub start_date: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CustomFieldValue {
+    SingleSelect {
+        field_id: String,
+        option_id: String,
+        name: String,
+        color: Option<ColumnColor>,
+    },
+    Text {
+        field_id: String,
+        text: String,
+    },
+    Number {
+        field_id: String,
+        number: f64,
+    },
+    Date {
+        field_id: String,
+        date: String,
+    },
+    Iteration {
+        field_id: String,
+        iteration_id: String,
+        title: String,
+    },
+}
+
+impl CustomFieldValue {
+    pub fn field_id(&self) -> &str {
+        match self {
+            CustomFieldValue::SingleSelect { field_id, .. }
+            | CustomFieldValue::Text { field_id, .. }
+            | CustomFieldValue::Number { field_id, .. }
+            | CustomFieldValue::Date { field_id, .. }
+            | CustomFieldValue::Iteration { field_id, .. } => field_id,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

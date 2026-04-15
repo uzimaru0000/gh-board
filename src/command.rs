@@ -84,5 +84,25 @@ pub enum Command {
         existing: Option<(String, String)>,
     },
     OpenUrl(String),
+    UpdateCustomField {
+        project_id: String,
+        item_id: String,
+        field_id: String,
+        value: CustomFieldValueInput,
+    },
+    ClearCustomField {
+        project_id: String,
+        item_id: String,
+        field_id: String,
+    },
     Batch(Vec<Command>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum CustomFieldValueInput {
+    SingleSelect { option_id: String },
+    Iteration { iteration_id: String },
+    Text { text: String },
+    Number { number: f64 },
+    Date { date: String },
 }

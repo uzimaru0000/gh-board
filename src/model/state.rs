@@ -26,14 +26,11 @@ pub enum DetailPane {
     Sidebar,
 }
 
-/// サイドバーのセクション数
-pub const SIDEBAR_SECTION_COUNT: usize = 5;
-/// サイドバーセクションのインデックス
+/// サイドバーの固定セクションインデックス (0..4)。4 以降はカスタムフィールド、末尾は Delete。
 pub const SIDEBAR_STATUS: usize = 0;
 pub const SIDEBAR_ASSIGNEES: usize = 1;
 pub const SIDEBAR_LABELS: usize = 2;
 pub const SIDEBAR_MILESTONE: usize = 3;
-pub const SIDEBAR_DELETE: usize = 4;
 
 #[derive(Clone, Debug)]
 pub enum SidebarEditMode {
@@ -44,6 +41,36 @@ pub enum SidebarEditMode {
     Assignees {
         items: Vec<EditItem>,
         cursor: usize,
+    },
+    CustomFieldSingleSelect {
+        field_id: String,
+        field_name: String,
+        options: Vec<super::project::SingleSelectOption>,
+        cursor: usize,
+    },
+    CustomFieldIteration {
+        field_id: String,
+        field_name: String,
+        iterations: Vec<super::project::IterationOption>,
+        cursor: usize,
+    },
+    CustomFieldText {
+        field_id: String,
+        field_name: String,
+        input: String,
+        cursor_pos: usize,
+    },
+    CustomFieldNumber {
+        field_id: String,
+        field_name: String,
+        input: String,
+        cursor_pos: usize,
+    },
+    CustomFieldDate {
+        field_id: String,
+        field_name: String,
+        input: String,
+        cursor_pos: usize,
     },
 }
 

@@ -108,13 +108,17 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(" Detail View (Sidebar)", section_style)));
     let sidebar_entries = vec![
-        HelpEntry { action: Action::MoveDown, description: "Navigate sections" },
+        HelpEntry { action: Action::MoveDown, description: "Navigate sections (incl. custom fields)" },
         HelpEntry { action: Action::Select, description: "Edit / Select" },
         HelpEntry { action: Action::DeleteCard, description: "Delete card" },
         HelpEntry { action: Action::NextTab, description: "Switch to content" },
         HelpEntry { action: Action::Back, description: "Back to content" },
     ];
     add_section_lines(&mut lines, keymap, KeymapMode::DetailSidebar, &sidebar_entries, key_style, desc_style);
+    lines.push(Line::from(vec![
+        Span::styled("  ──       ", key_style),
+        Span::styled("Custom fields: Enter opens picker / text input (Enter saves, Esc cancels)", desc_style),
+    ]));
 
     // View switching (hardcoded, always shown)
     lines.push(Line::from(""));

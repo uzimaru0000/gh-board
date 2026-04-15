@@ -6,10 +6,10 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget},
 };
 
-use crate::model::project::{Card, CardType, IssueState, PrState};
+use crate::model::project::{Card, CardType, ColumnColor, CustomFieldValue, IssueState, PrState};
 use crate::ui::theme::theme;
 
-pub const CARD_HEIGHT: u16 = 5;
+pub const CARD_HEIGHT: u16 = 6;
 
 pub struct CardWidget<'a> {
     pub card: &'a Card,
@@ -120,9 +120,72 @@ impl Widget for CardWidget<'_> {
             Line::from(spans)
         };
 
-        let lines = vec![title_line, assignee_line, label_line];
+        let custom_field_line = if self.card.custom_fields.is_empty() {
+            Line::from("")
+        } else {
+            let mut spans: Vec<Span> = Vec::new();
+            for (i, v) in self.card.custom_fields.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::raw("  "));
+                }
+                match v {
+                    CustomFieldValue::SingleSelect { name, color, .. } => {
+                        let bg = color
+                            .as_ref()
+                            .map(column_color_to_tui)
+                            .unwrap_or(theme().border_unfocused);
+                        spans.push(Span::styled(
+                            name.clone(),
+                            Style::default().fg(theme().text_inverted).bg(bg),
+                        ));
+                    }
+                    CustomFieldValue::Number { number, .. } => {
+                        let text = if number.fract() == 0.0 && number.abs() < 1e16 {
+                            format!("#{}", *number as i64)
+                        } else {
+                            format!("#{number}")
+                        };
+                        spans.push(Span::styled(text, Style::default().fg(theme().text_dim)));
+                    }
+                    CustomFieldValue::Text { text, .. } => {
+                        spans.push(Span::styled(
+                            text.clone(),
+                            Style::default().fg(theme().text_dim),
+                        ));
+                    }
+                    CustomFieldValue::Date { date, .. } => {
+                        spans.push(Span::styled(
+                            date.clone(),
+                            Style::default().fg(theme().text_dim),
+                        ));
+                    }
+                    CustomFieldValue::Iteration { title, .. } => {
+                        spans.push(Span::styled(
+                            format!("⟳ {title}"),
+                            Style::default().fg(theme().text_dim),
+                        ));
+                    }
+                }
+            }
+            Line::from(spans)
+        };
+
+        let lines = vec![title_line, assignee_line, label_line, custom_field_line];
         let paragraph = Paragraph::new(lines);
         paragraph.render(inner, buf);
+    }
+}
+
+pub fn column_color_to_tui(color: &ColumnColor) -> Color {
+    match color {
+        ColumnColor::Blue => Color::Blue,
+        ColumnColor::Gray => Color::DarkGray,
+        ColumnColor::Green => Color::Green,
+        ColumnColor::Orange => Color::Rgb(255, 165, 0),
+        ColumnColor::Pink => Color::Rgb(255, 105, 180),
+        ColumnColor::Purple => Color::Magenta,
+        ColumnColor::Red => Color::Red,
+        ColumnColor::Yellow => Color::Yellow,
     }
 }
 
