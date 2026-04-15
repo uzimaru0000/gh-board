@@ -46,15 +46,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let (type_icon, type_color) = match &card.card_type {
         CardType::Issue { state } => match state {
-            IssueState::Open => ("● ", theme().green),
-            IssueState::Closed => ("● ", theme().purple),
+            // nf-oct-issue_opened / nf-oct-issue_closed
+            IssueState::Open => ("\u{f41b} ", theme().green),
+            IssueState::Closed => ("\u{f41d} ", theme().purple),
         },
         CardType::PullRequest { state } => match state {
-            PrState::Open => ("⑂ ", theme().green),
-            PrState::Closed => ("⑂ ", theme().red),
-            PrState::Merged => ("⑂ ", theme().purple),
+            // nf-oct-git_pull_request
+            PrState::Open => ("\u{f407} ", theme().green),
+            PrState::Closed => ("\u{f407} ", theme().red),
+            PrState::Merged => ("\u{f407} ", theme().purple),
         },
-        CardType::DraftIssue => ("○ ", theme().text_dim),
+        // nf-oct-note
+        CardType::DraftIssue => ("\u{f404} ", theme().text_dim),
     };
 
     let number_str = card
