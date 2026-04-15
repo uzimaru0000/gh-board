@@ -24,6 +24,7 @@ pulldown-cmark = "0.13"
 unicode-width = "0.2"
 rattles = "0.3.0"
 toml = "0.8"
+fuzzy-matcher = "0.3"
 
 [build-dependencies]
 toml = "0.8"

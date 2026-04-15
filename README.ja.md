@@ -13,7 +13,7 @@ gh extension install uzimaru0000/gh-board
 ## 使い方
 
 ```
-gh board --owner <org-or-user> --project <number>
+gh board --owner <org-or-user> <number>
 ```
 
 引数なしで実行すると、自分がアクセス可能なプロジェクト一覧から選択できます。
