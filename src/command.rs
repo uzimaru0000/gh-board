@@ -86,6 +86,34 @@ pub enum Command {
         content_id: String,
         existing: Option<(String, String)>,
     },
+    AddReaction {
+        subject_id: String,
+        content: crate::model::project::ReactionContent,
+    },
+    RemoveReaction {
+        subject_id: String,
+        content: crate::model::project::ReactionContent,
+    },
     OpenUrl(String),
+    UpdateCustomField {
+        project_id: String,
+        item_id: String,
+        field_id: String,
+        value: CustomFieldValueInput,
+    },
+    ClearCustomField {
+        project_id: String,
+        item_id: String,
+        field_id: String,
+    },
     Batch(Vec<Command>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum CustomFieldValueInput {
+    SingleSelect { option_id: String },
+    Iteration { iteration_id: String },
+    Text { text: String },
+    Number { number: f64 },
+    Date { date: String },
 }

@@ -9,7 +9,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
           nameWithOwner
         }
       }
-      fields(first: 30) {
+      fields(first: 50) {
         nodes {
           __typename
           ... on ProjectV2SingleSelectField {
@@ -24,10 +24,18 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
           ... on ProjectV2Field {
             id
             name
+            dataType
           }
           ... on ProjectV2IterationField {
             id
             name
+            configuration {
+              iterations {
+                id
+                title
+                startDate
+              }
+            }
           }
         }
       }
@@ -35,7 +43,7 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
-          fieldValues(first: 10) {
+          fieldValues(first: 20) {
             nodes {
               __typename
               ... on ProjectV2ItemFieldSingleSelectValue {
@@ -53,6 +61,28 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
                   ... on ProjectV2Field { id name }
                 }
               }
+              ... on ProjectV2ItemFieldNumberValue {
+                number
+                field {
+                  __typename
+                  ... on ProjectV2Field { id name }
+                }
+              }
+              ... on ProjectV2ItemFieldDateValue {
+                date
+                field {
+                  __typename
+                  ... on ProjectV2Field { id name }
+                }
+              }
+              ... on ProjectV2ItemFieldIterationValue {
+                title
+                iterationId
+                field {
+                  __typename
+                  ... on ProjectV2IterationField { id name }
+                }
+              }
             }
           }
           content {
@@ -67,7 +97,24 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
               milestone { title }
               assignees(first: 5) { nodes { login } }
               labels(first: 10) { nodes { id name color } }
-              comments(first: 20) { nodes { id author { __typename login } body createdAt } }
+              reactionGroups {
+                content
+                viewerHasReacted
+                reactors { totalCount }
+              }
+              comments(first: 20) {
+                nodes {
+                  id
+                  author { __typename login }
+                  body
+                  createdAt
+                  reactionGroups {
+                    content
+                    viewerHasReacted
+                    reactors { totalCount }
+                  }
+                }
+              }
               closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
                 nodes {
                   number
@@ -87,7 +134,24 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
               milestone { title }
               assignees(first: 5) { nodes { login } }
               labels(first: 10) { nodes { id name color } }
-              comments(first: 20) { nodes { id author { __typename login } body createdAt } }
+              reactionGroups {
+                content
+                viewerHasReacted
+                reactors { totalCount }
+              }
+              comments(first: 20) {
+                nodes {
+                  id
+                  author { __typename login }
+                  body
+                  createdAt
+                  reactionGroups {
+                    content
+                    viewerHasReacted
+                    reactors { totalCount }
+                  }
+                }
+              }
               reviewDecision
               reviewRequests(first: 10) {
                 nodes {

@@ -101,20 +101,40 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         HelpEntry { action: Action::NextTab, description: "Switch to sidebar" },
         HelpEntry { action: Action::OpenInBrowser, description: "Open in browser" },
         HelpEntry { action: Action::EditCard, description: "Edit card" },
+        HelpEntry { action: Action::NewComment, description: "New comment" },
+        HelpEntry { action: Action::OpenCommentList, description: "Comment list" },
+        HelpEntry { action: Action::OpenReactionPicker, description: "Toggle reaction" },
     ];
     add_section_lines(&mut lines, keymap, KeymapMode::DetailContent, &detail_entries, key_style, desc_style);
+
+    // Comment List section
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(" Comment List", section_style)));
+    let comment_list_entries = vec![
+        HelpEntry { action: Action::MoveDown, description: "Next comment" },
+        HelpEntry { action: Action::MoveUp, description: "Previous comment" },
+        HelpEntry { action: Action::EditComment, description: "Edit own comment" },
+        HelpEntry { action: Action::NewComment, description: "New comment" },
+        HelpEntry { action: Action::OpenReactionPicker, description: "Toggle reaction on selected" },
+        HelpEntry { action: Action::Back, description: "Back to detail" },
+    ];
+    add_section_lines(&mut lines, keymap, KeymapMode::CommentList, &comment_list_entries, key_style, desc_style);
 
     // Detail View (Sidebar) section
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(" Detail View (Sidebar)", section_style)));
     let sidebar_entries = vec![
-        HelpEntry { action: Action::MoveDown, description: "Navigate sections" },
+        HelpEntry { action: Action::MoveDown, description: "Navigate sections (incl. custom fields)" },
         HelpEntry { action: Action::Select, description: "Edit / Select" },
         HelpEntry { action: Action::DeleteCard, description: "Delete card" },
         HelpEntry { action: Action::NextTab, description: "Switch to content" },
         HelpEntry { action: Action::Back, description: "Back to content" },
     ];
     add_section_lines(&mut lines, keymap, KeymapMode::DetailSidebar, &sidebar_entries, key_style, desc_style);
+    lines.push(Line::from(vec![
+        Span::styled("  ──       ", key_style),
+        Span::styled("Custom fields: Enter opens picker / text input (Enter saves, Esc cancels)", desc_style),
+    ]));
 
     // View switching (hardcoded, always shown)
     lines.push(Line::from(""));

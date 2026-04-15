@@ -325,8 +325,67 @@ impl App {
             Command::OpenEditor { content } => {
                 self.pending_editor = Some(content);
             }
+            Command::AddReaction {
+                subject_id,
+                content,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.add_reaction(&subject_id, content).await;
+                    let _ = tx.send(AppEvent::ReactionToggled(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::RemoveReaction {
+                subject_id,
+                content,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.remove_reaction(&subject_id, content).await;
+                    let _ = tx.send(AppEvent::ReactionToggled(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
             Command::OpenUrl(url) => {
                 let _ = open::that(&url);
+            }
+            Command::UpdateCustomField {
+                project_id,
+                item_id,
+                field_id,
+                value,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client
+                        .update_custom_field(&project_id, &item_id, &field_id, &value)
+                        .await;
+                    let _ = tx.send(AppEvent::CustomFieldUpdated(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::ClearCustomField {
+                project_id,
+                item_id,
+                field_id,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client
+                        .clear_custom_field(&project_id, &item_id, &field_id)
+                        .await;
+                    let _ = tx.send(AppEvent::CustomFieldUpdated(
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
             }
             Command::Batch(cmds) => {
                 for cmd in cmds {

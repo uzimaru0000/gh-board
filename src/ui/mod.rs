@@ -8,6 +8,7 @@ pub mod edit_card;
 pub mod filter_bar;
 pub mod help;
 pub mod project_list;
+pub mod reaction_picker;
 pub mod repo_select;
 pub mod statusline;
 pub mod tab_bar;

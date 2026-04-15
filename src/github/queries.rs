@@ -3,6 +3,7 @@ use graphql_client::GraphQLQuery;
 #[allow(clippy::upper_case_acronyms)]
 type URI = String;
 type DateTime = String;
+type Date = String;
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -56,7 +57,7 @@ pub struct UserProjectByNumber;
 #[graphql(
     schema_path = "schema.graphql",
     query_path = "src/github/graphql/project_board.graphql",
-    response_derives = "Debug"
+    response_derives = "Debug, Clone"
 )]
 pub struct ProjectBoard;
 
@@ -211,3 +212,35 @@ pub struct UpdateIssueComment;
     response_derives = "Debug"
 )]
 pub struct ViewerLogin;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/update_field_value.graphql",
+    response_derives = "Debug"
+)]
+pub struct UpdateFieldValue;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/clear_field_value.graphql",
+    response_derives = "Debug"
+)]
+pub struct ClearFieldValue;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/add_reaction.graphql",
+    response_derives = "Debug"
+)]
+pub struct AddReactionMutation;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/remove_reaction.graphql",
+    response_derives = "Debug"
+)]
+pub struct RemoveReactionMutation;

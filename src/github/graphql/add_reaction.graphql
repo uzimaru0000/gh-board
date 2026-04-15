@@ -1,0 +1,5 @@
+mutation AddReactionMutation($subjectId: ID!, $content: ReactionContent!) {
+  addReaction(input: { subjectId: $subjectId, content: $content }) {
+    clientMutationId
+  }
+}

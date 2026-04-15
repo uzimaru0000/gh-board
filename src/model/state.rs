@@ -18,6 +18,7 @@ pub enum ViewMode {
     CardGrab,
     EditCard,
     CommentList,
+    ReactionPicker,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,14 +27,11 @@ pub enum DetailPane {
     Sidebar,
 }
 
-/// サイドバーのセクション数
-pub const SIDEBAR_SECTION_COUNT: usize = 5;
-/// サイドバーセクションのインデックス
+/// サイドバーの固定セクションインデックス (0..4)。4 以降はカスタムフィールド、末尾は Delete。
 pub const SIDEBAR_STATUS: usize = 0;
 pub const SIDEBAR_ASSIGNEES: usize = 1;
 pub const SIDEBAR_LABELS: usize = 2;
 pub const SIDEBAR_MILESTONE: usize = 3;
-pub const SIDEBAR_DELETE: usize = 4;
 
 #[derive(Clone, Debug)]
 pub enum SidebarEditMode {
@@ -44,6 +42,36 @@ pub enum SidebarEditMode {
     Assignees {
         items: Vec<EditItem>,
         cursor: usize,
+    },
+    CustomFieldSingleSelect {
+        field_id: String,
+        field_name: String,
+        options: Vec<super::project::SingleSelectOption>,
+        cursor: usize,
+    },
+    CustomFieldIteration {
+        field_id: String,
+        field_name: String,
+        iterations: Vec<super::project::IterationOption>,
+        cursor: usize,
+    },
+    CustomFieldText {
+        field_id: String,
+        field_name: String,
+        input: String,
+        cursor_pos: usize,
+    },
+    CustomFieldNumber {
+        field_id: String,
+        field_name: String,
+        input: String,
+        cursor_pos: usize,
+    },
+    CustomFieldDate {
+        field_id: String,
+        field_name: String,
+        input: String,
+        cursor_pos: usize,
     },
 }
 
@@ -122,6 +150,24 @@ impl Default for CreateCardState {
 pub struct CommentListState {
     pub cursor: usize,
     pub content_id: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReactionPickerState {
+    pub target: ReactionTarget,
+    pub cursor: usize,
+    pub return_to: ViewMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReactionTarget {
+    /// Issue/PR 本体のリアクション (subject_id = content_id)
+    CardBody { content_id: String },
+    /// コメントのリアクション (subject_id = comment_id)
+    Comment {
+        comment_id: String,
+        content_id: String,
+    },
 }
 
 #[derive(Clone, Debug)]

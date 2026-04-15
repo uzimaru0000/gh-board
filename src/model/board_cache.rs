@@ -60,6 +60,7 @@ mod tests {
             status_field_id: String::new(),
             columns: vec![],
             repositories: vec![],
+            field_definitions: vec![],
         }
     }
 
