@@ -84,6 +84,7 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         HelpEntry { action: Action::OpenDetail, description: "View card detail" },
         HelpEntry { action: Action::SwitchProject, description: "Switch project" },
         HelpEntry { action: Action::ChangeGrouping, description: "Change grouping field" },
+        HelpEntry { action: Action::ToggleLayout, description: "Toggle layout (Board/Table)" },
         HelpEntry { action: Action::StartFilter, description: "Filter (label: assignee: milestone: |:OR)" },
         HelpEntry { action: Action::ClearFilter, description: "Clear filter / view" },
         HelpEntry { action: Action::Refresh, description: "Refresh" },

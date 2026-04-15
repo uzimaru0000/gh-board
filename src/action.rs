@@ -28,6 +28,7 @@ pub enum Action {
     ShowHelp,
     SwitchProject,
     ChangeGrouping,
+    ToggleLayout,
 
     // Detail content
     OpenInBrowser,

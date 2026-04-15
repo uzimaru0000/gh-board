@@ -6,11 +6,20 @@ use ratatui::style::Color;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::Deserialize;
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LayoutModeConfig {
+    Board,
+    Table,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ViewConfig {
     pub name: String,
     #[serde(default)]
     pub filter: String,
+    #[serde(default)]
+    pub layout: Option<LayoutModeConfig>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -391,6 +400,39 @@ name = "All Items"
         assert_eq!(config.view.len(), 1);
         assert_eq!(config.view[0].name, "All Items");
         assert_eq!(config.view[0].filter, "");
+    }
+
+    #[test]
+    fn test_parse_view_with_layout_table() {
+        let toml = r#"
+[[view]]
+name = "Bugs"
+filter = "label:bug"
+layout = "table"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.view[0].layout, Some(LayoutModeConfig::Table));
+    }
+
+    #[test]
+    fn test_parse_view_with_layout_board() {
+        let toml = r#"
+[[view]]
+name = "Bugs"
+layout = "board"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.view[0].layout, Some(LayoutModeConfig::Board));
+    }
+
+    #[test]
+    fn test_parse_view_layout_default_none() {
+        let toml = r#"
+[[view]]
+name = "Bugs"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.view[0].layout, None);
     }
 
     #[test]

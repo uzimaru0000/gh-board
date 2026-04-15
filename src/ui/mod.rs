@@ -15,4 +15,5 @@ pub mod repo_select;
 pub mod scroll_fade;
 pub mod statusline;
 pub mod tab_bar;
+pub mod table;
 pub mod theme;
