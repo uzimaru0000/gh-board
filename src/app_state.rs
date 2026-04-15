@@ -2677,6 +2677,8 @@ mod tests {
             comments: vec![],
             milestone: None,
             custom_fields: vec![],
+            pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -2701,6 +2703,8 @@ mod tests {
             comments: vec![],
             milestone: None,
             custom_fields: vec![],
+            pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -2718,6 +2722,8 @@ mod tests {
             comments: vec![],
             milestone: None,
             custom_fields: vec![],
+            pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -2735,6 +2741,8 @@ mod tests {
             comments: vec![],
             milestone: Some(milestone.into()),
             custom_fields: vec![],
+            pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -2756,6 +2764,8 @@ mod tests {
             comments: vec![],
             milestone: None,
             custom_fields,
+            pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -4702,6 +4712,8 @@ mod tests {
             comments: vec![],
             milestone: None,
             custom_fields: vec![],
+            pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -4862,6 +4874,8 @@ mod tests {
             comments: vec![],
             milestone: None,
             custom_fields: vec![],
+            pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -5142,6 +5156,8 @@ mod tests {
             comments,
             milestone: None,
             custom_fields: vec![],
+            pr_status: None,
+            linked_prs: vec![],
         }
     }
 

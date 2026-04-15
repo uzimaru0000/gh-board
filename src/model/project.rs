@@ -49,6 +49,39 @@ pub struct Card {
     pub comments: Vec<Comment>,
     pub milestone: Option<String>,
     pub custom_fields: Vec<CustomFieldValue>,
+    pub pr_status: Option<PrStatus>,
+    pub linked_prs: Vec<LinkedPr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkedPr {
+    pub number: i32,
+    pub title: String,
+    pub url: String,
+    pub state: PrState,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PrStatus {
+    pub ci: Option<CiStatus>,
+    pub review_decision: Option<ReviewDecision>,
+    pub review_requests: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CiStatus {
+    Success,
+    Failure,
+    Pending,
+    Error,
+    Expected,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
 }
 
 #[derive(Clone, Debug, PartialEq)]
