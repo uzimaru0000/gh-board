@@ -4,6 +4,8 @@
 
 A [gh](https://cli.github.com/) CLI extension to manage GitHub Projects V2 as a kanban board in your terminal.
 
+![demo](assets/demo.gif)
+
 ## Installation
 
 ```

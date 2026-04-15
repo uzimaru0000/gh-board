@@ -4,6 +4,8 @@
 
 GitHub Projects V2 をターミナル上でカンバンボード形式で操作する [gh](https://cli.github.com/) CLI 拡張。
 
+![demo](assets/demo.gif)
+
 ## インストール
 
 ```
