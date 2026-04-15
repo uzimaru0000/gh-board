@@ -59,6 +59,9 @@ pub struct AppState {
     pub projects: Vec<ProjectSummary>,
     pub selected_project_index: usize,
     pub current_project: Option<ProjectSummary>,
+    pub project_filter_query: String,
+    pub project_filter_cursor: usize,
+    pub filtered_project_indices: Vec<usize>,
 
     // Filter
     pub filter: FilterState,
@@ -139,6 +142,9 @@ impl AppState {
             projects: Vec::new(),
             selected_project_index: 0,
             current_project: None,
+            project_filter_query: String::new(),
+            project_filter_cursor: 0,
+            filtered_project_indices: Vec::new(),
             filter: FilterState::default(),
             confirm_state: None,
             create_card_state: CreateCardState::default(),
@@ -230,11 +236,22 @@ impl AppState {
         }
     }
 
+    /// ProjectSelect モードに遷移する。projects 未ロードなら取得を開始する。
+    pub fn enter_project_select(&mut self) -> Command {
+        self.mode = ViewMode::ProjectSelect;
+        if self.projects.is_empty() {
+            self.start_loading_projects()
+        } else {
+            Command::None
+        }
+    }
+
     pub fn start_loading_project_by_number(
         &mut self,
         owner: Option<String>,
         number: i32,
     ) -> Command {
+        self.mode = ViewMode::Board;
         self.loading = LoadingState::Loading("Loading project...".into());
         Command::LoadProjectByNumber { owner, number }
     }
@@ -305,6 +322,7 @@ impl AppState {
             AppEvent::ProjectsLoaded(Ok(projects)) => {
                 self.projects = projects;
                 self.loading = LoadingState::Idle;
+                self.recompute_filtered_projects();
                 if self.projects.len() == 1 {
                     self.select_project(0)
                 } else {
@@ -570,10 +588,54 @@ impl AppState {
         if let Some(project) = self.projects.get(index) {
             let project = project.clone();
             self.current_project = Some(project.clone());
+            self.project_filter_query.clear();
+            self.project_filter_cursor = 0;
+            self.recompute_filtered_projects();
+            // モーダルを閉じ、Board 画面を Loading 表示にする。
+            // 別プロジェクトの board/キャッシュは持ち越さない。
+            self.mode = ViewMode::Board;
+            self.board = None;
+            self.invalidate_board_cache();
             self.start_loading_board(&project.id)
         } else {
             Command::None
         }
+    }
+
+    pub fn real_project_index(&self) -> Option<usize> {
+        self.filtered_project_indices
+            .get(self.selected_project_index)
+            .copied()
+    }
+
+    pub fn recompute_filtered_projects(&mut self) {
+        use fuzzy_matcher::FuzzyMatcher;
+        use fuzzy_matcher::skim::SkimMatcherV2;
+
+        if self.project_filter_query.is_empty() {
+            self.filtered_project_indices = (0..self.projects.len()).collect();
+        } else {
+            let matcher = SkimMatcherV2::default();
+            let pattern = &self.project_filter_query;
+            let mut scored: Vec<(i64, usize, usize)> = self
+                .projects
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| {
+                    let haystack = match &p.description {
+                        Some(d) if !d.is_empty() => format!("{} {}", p.title, d),
+                        _ => p.title.clone(),
+                    };
+                    matcher
+                        .fuzzy_match(&haystack, pattern)
+                        .map(|score| (score, i, i))
+                })
+                .collect();
+            // スコア降順、同点は元順 (tie-breaker に元 index の昇順)
+            scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.2.cmp(&b.2)));
+            self.filtered_project_indices = scored.into_iter().map(|(_, i, _)| i).collect();
+        }
+        self.selected_project_index = 0;
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Command {
@@ -629,7 +691,7 @@ impl AppState {
         if board.columns.is_empty() {
             match self.keymap.resolve(KeymapMode::Board, &key) {
                 Some(Action::Quit) | Some(Action::ForceQuit) => self.should_quit = true,
-                Some(Action::SwitchProject) => self.mode = ViewMode::ProjectSelect,
+                Some(Action::SwitchProject) => return self.enter_project_select(),
                 Some(Action::ShowHelp) => self.mode = ViewMode::Help,
                 _ => {}
             }
@@ -707,10 +769,7 @@ impl AppState {
                 Command::None
             }
             Action::OpenDetail => self.open_detail_view(),
-            Action::SwitchProject => {
-                self.mode = ViewMode::ProjectSelect;
-                Command::None
-            }
+            Action::SwitchProject => self.enter_project_select(),
             Action::Refresh => {
                 if let Some(project) = &self.current_project {
                     let id = project.id.clone();
@@ -906,38 +965,71 @@ impl AppState {
     }
 
     fn handle_project_select_key(&mut self, key: KeyEvent) -> Command {
-        let action = match self.keymap.resolve(KeymapMode::ProjectSelect, &key) {
-            Some(a) => a,
-            None => return Command::None,
-        };
-
-        match action {
-            Action::Quit => {
-                if self.board.is_some() {
-                    self.mode = ViewMode::Board;
-                } else {
+        // 1. 構造キー優先 (Esc/Enter/Down/Up/ForceQuit)
+        if let Some(action) = self.keymap.resolve(KeymapMode::ProjectSelect, &key) {
+            match action {
+                Action::ForceQuit => {
                     self.should_quit = true;
+                    return Command::None;
                 }
-                Command::None
-            }
-            Action::ForceQuit => {
-                self.should_quit = true;
-                Command::None
-            }
-            Action::MoveDown => {
-                if !self.projects.is_empty() {
-                    self.selected_project_index =
-                        (self.selected_project_index + 1).min(self.projects.len() - 1);
+                Action::Quit => {
+                    if !self.project_filter_query.is_empty() {
+                        self.project_filter_query.clear();
+                        self.project_filter_cursor = 0;
+                        self.recompute_filtered_projects();
+                    } else if self.board.is_some() {
+                        self.mode = ViewMode::Board;
+                    } else {
+                        self.should_quit = true;
+                    }
+                    return Command::None;
                 }
-                Command::None
+                Action::MoveDown => {
+                    if !self.filtered_project_indices.is_empty() {
+                        self.selected_project_index = (self.selected_project_index + 1)
+                            .min(self.filtered_project_indices.len() - 1);
+                    }
+                    return Command::None;
+                }
+                Action::MoveUp => {
+                    self.selected_project_index = self.selected_project_index.saturating_sub(1);
+                    return Command::None;
+                }
+                Action::Select => {
+                    return match self.real_project_index() {
+                        Some(idx) => self.select_project(idx),
+                        None => Command::None,
+                    };
+                }
+                _ => {}
             }
-            Action::MoveUp => {
-                self.selected_project_index = self.selected_project_index.saturating_sub(1);
-                Command::None
-            }
-            Action::Select => self.select_project(self.selected_project_index),
-            _ => Command::None,
         }
+
+        // 2. テキスト入力 (常時入力可)
+        match key.code {
+            KeyCode::Backspace => {
+                if self.project_filter_cursor > 0 {
+                    let new_len = self
+                        .project_filter_query
+                        .char_indices()
+                        .take_while(|(i, _)| *i < self.project_filter_cursor)
+                        .last()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.project_filter_query.truncate(new_len);
+                    self.project_filter_cursor = new_len;
+                    self.recompute_filtered_projects();
+                }
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.project_filter_query
+                    .insert(self.project_filter_cursor, c);
+                self.project_filter_cursor += c.len_utf8();
+                self.recompute_filtered_projects();
+            }
+            _ => {}
+        }
+        Command::None
     }
 
     fn handle_filter_key(&mut self, key: KeyEvent) -> Command {
@@ -3943,6 +4035,248 @@ mod tests {
         assert!(matches!(state.loading, LoadingState::Idle));
         assert_eq!(state.mode, ViewMode::ProjectSelect);
         assert_eq!(cmd, Command::None);
+    }
+
+    fn projects_for_filter() -> Vec<ProjectSummary> {
+        vec![
+            ProjectSummary {
+                id: "p1".into(),
+                title: "Alpha Board".into(),
+                number: 1,
+                description: Some("team alpha".into()),
+            },
+            ProjectSummary {
+                id: "p2".into(),
+                title: "Beta Roadmap".into(),
+                number: 2,
+                description: None,
+            },
+            ProjectSummary {
+                id: "p3".into(),
+                title: "Kanban Proto".into(),
+                number: 3,
+                description: Some("alpha experiment".into()),
+            },
+        ]
+    }
+
+    #[test]
+    fn test_project_filter_initial_state() {
+        let state = AppState::new(None);
+        assert!(state.project_filter_query.is_empty());
+        assert_eq!(state.project_filter_cursor, 0);
+        assert!(state.filtered_project_indices.is_empty());
+    }
+
+    #[test]
+    fn test_recompute_after_projects_loaded() {
+        let mut state = AppState::new(None);
+        state.handle_event(AppEvent::ProjectsLoaded(Ok(projects_for_filter())));
+        assert_eq!(state.filtered_project_indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_filter_query_char_input() {
+        let mut state = AppState::new(None);
+        state.handle_event(AppEvent::ProjectsLoaded(Ok(projects_for_filter())));
+        state.mode = ViewMode::ProjectSelect;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('p'))));
+
+        assert_eq!(state.project_filter_query, "alp");
+        // "alp" は Alpha Board (title) と Kanban Proto (description "alpha") にマッチ
+        assert!(state.filtered_project_indices.contains(&0));
+        assert!(state.filtered_project_indices.contains(&2));
+        assert!(!state.filtered_project_indices.contains(&1));
+        // Alpha Board の方がスコアが高い (title 完全連続一致) 想定
+        assert_eq!(state.filtered_project_indices[0], 0);
+        assert_eq!(state.selected_project_index, 0);
+    }
+
+    #[test]
+    fn test_filter_backspace_removes_char() {
+        let mut state = AppState::new(None);
+        state.handle_event(AppEvent::ProjectsLoaded(Ok(projects_for_filter())));
+        state.mode = ViewMode::ProjectSelect;
+
+        for c in ['a', 'b', 'c'] {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+        assert_eq!(state.project_filter_query, "abc");
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Backspace)));
+        assert_eq!(state.project_filter_query, "ab");
+        assert_eq!(state.project_filter_cursor, 2);
+    }
+
+    #[test]
+    fn test_esc_with_query_clears_only() {
+        let mut state = AppState::new(None);
+        state.handle_event(AppEvent::ProjectsLoaded(Ok(projects_for_filter())));
+        state.mode = ViewMode::ProjectSelect;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
+        assert_eq!(state.project_filter_query, "a");
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert!(state.project_filter_query.is_empty());
+        assert_eq!(state.mode, ViewMode::ProjectSelect);
+        assert!(!state.should_quit);
+        assert_eq!(state.filtered_project_indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_esc_with_empty_query_returns_to_board() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::ProjectSelect;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+
+        assert_eq!(state.mode, ViewMode::Board);
+        assert!(!state.should_quit);
+    }
+
+    #[test]
+    fn test_esc_with_empty_query_no_board_quits() {
+        let mut state = AppState::new(None);
+        state.mode = ViewMode::ProjectSelect;
+        // board is None, query is empty
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+
+        assert!(state.should_quit);
+    }
+
+    #[test]
+    fn test_arrow_keys_clamp_within_filtered() {
+        let mut state = AppState::new(None);
+        state.handle_event(AppEvent::ProjectsLoaded(Ok(projects_for_filter())));
+        state.mode = ViewMode::ProjectSelect;
+
+        // "alp" で 2 件にヒット
+        for c in ['a', 'l', 'p'] {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+        assert_eq!(state.filtered_project_indices.len(), 2);
+        assert_eq!(state.selected_project_index, 0);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Down)));
+        assert_eq!(state.selected_project_index, 1);
+        state.handle_event(AppEvent::Key(key(KeyCode::Down)));
+        assert_eq!(state.selected_project_index, 1);
+        state.handle_event(AppEvent::Key(key(KeyCode::Up)));
+        assert_eq!(state.selected_project_index, 0);
+    }
+
+    #[test]
+    fn test_enter_selects_real_project() {
+        let mut state = AppState::new(None);
+        state.handle_event(AppEvent::ProjectsLoaded(Ok(projects_for_filter())));
+        state.mode = ViewMode::ProjectSelect;
+
+        // "kan" で Kanban Proto のみに絞られる (id = p3)
+        for c in ['k', 'a', 'n'] {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+        assert_eq!(state.filtered_project_indices, vec![2]);
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            state.current_project.as_ref().map(|p| p.id.as_str()),
+            Some("p3")
+        );
+        assert!(matches!(cmd, Command::LoadBoard { ref project_id, .. } if project_id == "p3"));
+        // select_project 後はフィルタがリセットされる
+        assert!(state.project_filter_query.is_empty());
+        assert_eq!(state.filtered_project_indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_select_project_closes_modal_and_enters_loading() {
+        // 既に別プロジェクトの board が表示されている状態でプロジェクト切替
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::ProjectSelect;
+        state.projects = projects_for_filter();
+        state.recompute_filtered_projects();
+
+        let cmd = state.select_project(1);
+
+        // モーダルを閉じて Board 画面を Loading に
+        assert_eq!(state.mode, ViewMode::Board);
+        assert!(state.board.is_none());
+        assert!(matches!(state.loading, LoadingState::Loading(_)));
+        assert!(matches!(cmd, Command::LoadBoard { .. }));
+    }
+
+    #[test]
+    fn test_start_loading_project_by_number_switches_to_board_mode() {
+        // `gh board <number>` 指定時は ProjectSelect 画面を表示せずにロード
+        let mut state = AppState::new(None);
+        assert_eq!(state.mode, ViewMode::ProjectSelect);
+
+        let cmd = state.start_loading_project_by_number(Some("octocat".into()), 42);
+
+        assert_eq!(state.mode, ViewMode::Board);
+        assert!(matches!(state.loading, LoadingState::Loading(_)));
+        assert_eq!(
+            cmd,
+            Command::LoadProjectByNumber {
+                owner: Some("octocat".into()),
+                number: 42,
+            }
+        );
+    }
+
+    #[test]
+    fn test_switch_project_loads_when_projects_empty() {
+        // `gh board <number>` 指定で projects が未ロードのまま Board に居る状態
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.owner = Some("octocat".into());
+        assert!(state.projects.is_empty());
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('p'))));
+
+        assert_eq!(state.mode, ViewMode::ProjectSelect);
+        assert_eq!(
+            cmd,
+            Command::LoadProjects {
+                owner: Some("octocat".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_switch_project_noop_when_projects_loaded() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.projects = projects_for_filter();
+        state.recompute_filtered_projects();
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('p'))));
+
+        assert_eq!(state.mode, ViewMode::ProjectSelect);
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn test_enter_with_no_matches_is_noop() {
+        let mut state = AppState::new(None);
+        state.handle_event(AppEvent::ProjectsLoaded(Ok(projects_for_filter())));
+        state.mode = ViewMode::ProjectSelect;
+
+        for c in ['z', 'z', 'z', 'z'] {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+        assert!(state.filtered_project_indices.is_empty());
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(cmd, Command::None);
+        assert!(state.current_project.is_none());
     }
 
     #[test]

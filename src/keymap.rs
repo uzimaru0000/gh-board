@@ -220,14 +220,11 @@ impl Keymap {
         board.insert(KeyBind::key(KeyCode::Esc), Action::Quit);
         keymap.modes.insert(KeymapMode::Board, board);
 
-        // ProjectSelect mode
+        // ProjectSelect mode (文字キーはフィルタ入力に使うため割り当てない)
         let mut project_select = HashMap::new();
-        project_select.insert(KeyBind::char('j'), Action::MoveDown);
         project_select.insert(KeyBind::key(KeyCode::Down), Action::MoveDown);
-        project_select.insert(KeyBind::char('k'), Action::MoveUp);
         project_select.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
         project_select.insert(KeyBind::key(KeyCode::Enter), Action::Select);
-        project_select.insert(KeyBind::char('q'), Action::Quit);
         project_select.insert(KeyBind::key(KeyCode::Esc), Action::Quit);
         keymap.modes.insert(KeymapMode::ProjectSelect, project_select);
 
