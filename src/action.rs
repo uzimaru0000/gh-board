@@ -17,8 +17,6 @@ pub enum Action {
 
     // Board
     OpenDetail,
-    MoveCardLeft,
-    MoveCardRight,
     GrabCard,
     NewCard,
     DeleteCard,
@@ -27,6 +25,7 @@ pub enum Action {
     Refresh,
     ShowHelp,
     SwitchProject,
+    ChangeGrouping,
 
     // Detail content
     OpenInBrowser,

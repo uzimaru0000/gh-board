@@ -18,6 +18,7 @@ pub enum ViewMode {
     CardGrab,
     EditCard,
     CommentList,
+    GroupBySelect,
     ReactionPicker,
 }
 
@@ -154,6 +155,12 @@ pub struct CommentListState {
 }
 
 #[derive(Clone, Debug)]
+pub struct GroupBySelectState {
+    pub cursor: usize,
+    pub candidates: Vec<super::project::Grouping>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ReactionPickerState {
     pub target: ReactionTarget,
     pub cursor: usize,
@@ -181,8 +188,7 @@ pub struct RepoSelectState {
 pub struct PendingIssueCreate {
     pub title: String,
     pub body: String,
-    pub field_id: String,
-    pub option_id: String,
+    pub initial_status: Option<super::super::command::InitialStatus>,
 }
 
 #[derive(Clone, Debug)]

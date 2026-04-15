@@ -57,7 +57,7 @@ mod tests {
     fn board_with_title(title: &str) -> Board {
         Board {
             project_title: title.to_string(),
-            status_field_id: String::new(),
+            grouping: super::super::project::Grouping::None,
             columns: vec![],
             repositories: vec![],
             field_definitions: vec![],

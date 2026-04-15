@@ -79,6 +79,7 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 - g/G: 先頭/末尾カード
 - Tab/S-Tab: 次/前カラム (ラップ)
 - Enter: カード詳細表示
+- Ctrl+g: グループ化軸の切替 (SingleSelect / Iteration field から選択)
 - p: プロジェクト切替、r: リフレッシュ、?: ヘルプ、q/Esc: 終了
 
 ### カード詳細ビュー (ViewMode::Detail)
@@ -94,7 +95,6 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 - スクロール上限は UI 側で毎フレーム計算し Cell 経由で AppState に書き戻す
 
 ### カード操作
-- H/L: カードを左右のカラムに移動 (updateProjectV2ItemFieldValue mutation)
 - Space: カード選択モード (CardGrab) — 掴んで h/j/k/l でカードを上下左右に移動、Space/Esc で解除
   - j/k: カラム内の並び替え (updateProjectV2ItemPosition mutation)
   - h/l: カラム間移動 (元の高さを維持、Batch で MoveCard + ReorderCard)
@@ -181,8 +181,10 @@ assert_eq!(cmd, Command::MoveCard { ... });
 ## 設計上の注意点
 
 - GraphQL mutation は `project` スコープが必要 (`read:project` では不足)
-- `Board.status_field_id` + `Column.option_id` でカードのステータスを管理
-- "No Status" カラムは `option_id` が空文字列。移動先として選択不可
+- `Board.grouping: Grouping` (SingleSelect / Iteration / None) でカンバンの列軸を表現
+- `Column.option_id` は現在の grouping の値キー (SingleSelect なら option_id、Iteration なら iteration_id)
+- "No <field>" カラムは `option_id` が空文字列。移動先として選択不可
+- 軸切替 (Ctrl+g) は API 呼び出しなしでクライアント側 `build_columns_for_grouping` により再構築
 - フィルタはUIレンダリング時にカードをスキップする client-side 方式。API再呼び出し不要
 - フィルタ適用中はすべてのカード操作 (Enter/d/H/L) が `real_card_index()` 経由で正しいカードを参照
 - `detail_max_scroll` / `detail_max_scroll_x` は `Cell<usize>` で UI 側から `&App` 経由で書き戻す (render は `&self` なので)

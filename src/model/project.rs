@@ -9,10 +9,40 @@ pub struct ProjectSummary {
 #[derive(Clone, Debug)]
 pub struct Board {
     pub project_title: String,
-    pub status_field_id: String,
+    pub grouping: Grouping,
     pub columns: Vec<Column>,
     pub repositories: Vec<Repository>,
     pub field_definitions: Vec<FieldDefinition>,
+}
+
+/// カンバンをグルーピングする軸 (SingleSelect or Iteration)。
+/// grouping が未決定のプロジェクト (groupable field がない) では None と同等の扱いで空 columns を返す。
+#[derive(Clone, Debug, PartialEq)]
+pub enum Grouping {
+    SingleSelect { field_id: String, field_name: String },
+    Iteration { field_id: String, field_name: String },
+    /// Status 相当の field が見つからない場合
+    None,
+}
+
+impl Grouping {
+    pub fn field_id(&self) -> Option<&str> {
+        match self {
+            Grouping::SingleSelect { field_id, .. } | Grouping::Iteration { field_id, .. } => {
+                Some(field_id)
+            }
+            Grouping::None => None,
+        }
+    }
+
+    pub fn field_name(&self) -> Option<&str> {
+        match self {
+            Grouping::SingleSelect { field_name, .. } | Grouping::Iteration { field_name, .. } => {
+                Some(field_name)
+            }
+            Grouping::None => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

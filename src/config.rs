@@ -21,6 +21,16 @@ pub struct Config {
     pub view: Vec<ViewConfig>,
     #[serde(default)]
     pub keys: KeysConfig,
+    #[serde(default)]
+    pub board: BoardConfig,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct BoardConfig {
+    /// 起動時のグルーピング軸にする field 名 (例: "Priority", "Iteration")。
+    /// 未指定または一致する field がない場合は "Status" にフォールバック。
+    pub group_by: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -38,6 +48,7 @@ pub struct KeysConfig {
     pub status_select: HashMap<String, Vec<String>>,
     pub sidebar_edit: HashMap<String, Vec<String>>,
     pub comment_list: HashMap<String, Vec<String>>,
+    pub group_by_select: HashMap<String, Vec<String>>,
     pub reaction_picker: HashMap<String, Vec<String>>,
     pub create_card_type: HashMap<String, Vec<String>>,
     pub create_card_body: HashMap<String, Vec<String>>,
@@ -63,6 +74,7 @@ impl KeysConfig {
             "status_select" => self.status_select.clone(),
             "sidebar_edit" => self.sidebar_edit.clone(),
             "comment_list" => self.comment_list.clone(),
+            "group_by_select" => self.group_by_select.clone(),
             "reaction_picker" => self.reaction_picker.clone(),
             "create_card_type" => self.create_card_type.clone(),
             "create_card_body" => self.create_card_body.clone(),

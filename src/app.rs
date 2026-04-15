@@ -86,11 +86,21 @@ impl App {
                     ));
                 });
             }
-            Command::LoadBoard { project_id, queries } => {
+            Command::LoadBoard {
+                project_id,
+                preferred_grouping_field_name,
+                queries,
+            } => {
                 let client = self.github.clone();
                 let tx = self.event_tx.clone();
                 tokio::spawn(async move {
-                    let result = client.get_board(&project_id, &queries).await;
+                    let result = client
+                        .get_board(
+                            &project_id,
+                            &queries,
+                            preferred_grouping_field_name.as_deref(),
+                        )
+                        .await;
                     let _ = tx.send(AppEvent::BoardLoaded(
                         result.map_err(|e| e.to_string()),
                     ));
@@ -100,13 +110,13 @@ impl App {
                 project_id,
                 item_id,
                 field_id,
-                option_id,
+                value,
             } => {
                 let client = self.github.clone();
                 let tx = self.event_tx.clone();
                 tokio::spawn(async move {
                     let result = client
-                        .move_card(&project_id, &item_id, &field_id, &option_id)
+                        .update_custom_field(&project_id, &item_id, &field_id, &value)
                         .await;
                     let _ = tx.send(AppEvent::CardMoved(result.map_err(|e| e.to_string())));
                 });
@@ -126,8 +136,7 @@ impl App {
                 project_id,
                 title,
                 body,
-                field_id,
-                option_id,
+                initial_status,
             } => {
                 let client = self.github.clone();
                 let tx = self.event_tx.clone();
@@ -137,9 +146,17 @@ impl App {
                             .create_draft_issue(&project_id, &title, &body)
                             .await
                             .map_err(|e| e.to_string())?;
-                        if !option_id.is_empty() {
+                        if let Some(status) = initial_status {
+                            let value = crate::command::CustomFieldValueInput::SingleSelect {
+                                option_id: status.option_id,
+                            };
                             client
-                                .move_card(&project_id, &item_id, &field_id, &option_id)
+                                .update_custom_field(
+                                    &project_id,
+                                    &item_id,
+                                    &status.field_id,
+                                    &value,
+                                )
                                 .await
                                 .map_err(|e| e.to_string())?;
                         }
@@ -154,8 +171,7 @@ impl App {
                 repository_id,
                 title,
                 body,
-                field_id,
-                option_id,
+                initial_status,
             } => {
                 let client = self.github.clone();
                 let tx = self.event_tx.clone();
@@ -169,9 +185,17 @@ impl App {
                             .add_project_item(&project_id, &issue_id)
                             .await
                             .map_err(|e| e.to_string())?;
-                        if !option_id.is_empty() {
+                        if let Some(status) = initial_status {
+                            let value = crate::command::CustomFieldValueInput::SingleSelect {
+                                option_id: status.option_id,
+                            };
                             client
-                                .move_card(&project_id, &item_id, &field_id, &option_id)
+                                .update_custom_field(
+                                    &project_id,
+                                    &item_id,
+                                    &status.field_id,
+                                    &value,
+                                )
                                 .await
                                 .map_err(|e| e.to_string())?;
                         }

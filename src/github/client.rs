@@ -6,7 +6,7 @@ use super::queries::*;
 use crate::command::CustomFieldValueInput;
 use crate::model::project::{
     Board, Card, CardType, CiStatus, Column, ColumnColor, Comment, CustomFieldValue,
-    FieldDefinition, IssueState, IterationOption, Label, LinkedPr, PrState, PrStatus,
+    FieldDefinition, Grouping, IssueState, IterationOption, Label, LinkedPr, PrState, PrStatus,
     ProjectSummary, ReactionContent, ReactionSummary, Repository, ReviewDecision,
     SingleSelectOption,
 };
@@ -48,7 +48,6 @@ impl_reaction_content_from!(remove_reaction_mutation::ReactionContent);
 use project_board::{
     ProjectBoardNode,
     ProjectBoardNodeOnProjectV2FieldsNodes as FieldNodes,
-    ProjectBoardNodeOnProjectV2FieldsNodesOnProjectV2SingleSelectFieldOptions as SSOption,
     ProjectBoardNodeOnProjectV2ItemsNodes as ItemNode,
     ProjectBoardNodeOnProjectV2ItemsNodesContent as Content,
     ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodes as FVNode,
@@ -262,23 +261,6 @@ impl GitHubClient {
         }
     }
 
-    pub async fn move_card(
-        &self,
-        project_id: &str,
-        item_id: &str,
-        field_id: &str,
-        option_id: &str,
-    ) -> anyhow::Result<()> {
-        let vars = move_card::Variables {
-            project_id: project_id.to_string(),
-            item_id: item_id.to_string(),
-            field_id: field_id.to_string(),
-            option_id: option_id.to_string(),
-        };
-        self.query::<MoveCard>(vars).await?;
-        Ok(())
-    }
-
     pub async fn reorder_card(
         &self,
         project_id: &str,
@@ -310,51 +292,79 @@ impl GitHubClient {
         field_id: &str,
         value: &CustomFieldValueInput,
     ) -> anyhow::Result<()> {
-        use update_field_value::ProjectV2FieldValue;
-        let gql_value = match value {
-            CustomFieldValueInput::SingleSelect { option_id } => ProjectV2FieldValue {
-                date: None,
-                iteration_id: None,
-                number: None,
-                single_select_option_id: Some(option_id.clone()),
-                text: None,
-            },
-            CustomFieldValueInput::Iteration { iteration_id } => ProjectV2FieldValue {
-                date: None,
-                iteration_id: Some(iteration_id.clone()),
-                number: None,
-                single_select_option_id: None,
-                text: None,
-            },
-            CustomFieldValueInput::Text { text } => ProjectV2FieldValue {
-                date: None,
-                iteration_id: None,
-                number: None,
-                single_select_option_id: None,
-                text: Some(text.clone()),
-            },
-            CustomFieldValueInput::Number { number } => ProjectV2FieldValue {
-                date: None,
-                iteration_id: None,
-                number: Some(*number),
-                single_select_option_id: None,
-                text: None,
-            },
-            CustomFieldValueInput::Date { date } => ProjectV2FieldValue {
-                date: Some(date.clone()),
-                iteration_id: None,
-                number: None,
-                single_select_option_id: None,
-                text: None,
-            },
+        // GitHub API は ProjectV2FieldValue に含めるフィールドが "ちょうど 1 つ" であることを要求する。
+        // graphql_client の自動生成型は Option::None を `null` としてシリアライズするため、
+        // 排他制約に引っかかる。ここでは value オブジェクトを手動で JSON 化して mutation を送る。
+        let value_json = match value {
+            CustomFieldValueInput::SingleSelect { option_id } => {
+                serde_json::json!({ "singleSelectOptionId": option_id })
+            }
+            CustomFieldValueInput::Iteration { iteration_id } => {
+                serde_json::json!({ "iterationId": iteration_id })
+            }
+            CustomFieldValueInput::Text { text } => serde_json::json!({ "text": text }),
+            CustomFieldValueInput::Number { number } => serde_json::json!({ "number": number }),
+            CustomFieldValueInput::Date { date } => serde_json::json!({ "date": date }),
         };
-        let vars = update_field_value::Variables {
-            project_id: project_id.to_string(),
-            item_id: item_id.to_string(),
-            field_id: field_id.to_string(),
-            value: gql_value,
-        };
-        self.query::<UpdateFieldValue>(vars).await?;
+        let query = r#"
+            mutation UpdateFieldValue(
+              $projectId: ID!
+              $itemId: ID!
+              $fieldId: ID!
+              $value: ProjectV2FieldValue!
+            ) {
+              updateProjectV2ItemFieldValue(
+                input: {
+                  projectId: $projectId
+                  itemId: $itemId
+                  fieldId: $fieldId
+                  value: $value
+                }
+              ) {
+                projectV2Item { id }
+              }
+            }
+        "#;
+        let body = serde_json::json!({
+            "query": query,
+            "variables": {
+                "projectId": project_id,
+                "itemId": item_id,
+                "fieldId": field_id,
+                "value": value_json,
+            }
+        });
+        self.raw_graphql(body).await
+    }
+
+    /// 手書きの GraphQL body (query + variables) を実行する。
+    /// 主に Option フィールドを含まないシリアライズが必要な mutation で使用する。
+    async fn raw_graphql(&self, body: serde_json::Value) -> anyhow::Result<()> {
+        let resp = self
+            .http
+            .post("https://api.github.com/graphql")
+            .bearer_auth(&self.token)
+            .header("User-Agent", "gh-board")
+            .json(&body)
+            .send()
+            .await
+            .context("Failed to send GraphQL request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            bail!("GitHub API returned {status}: {text}");
+        }
+        let json: serde_json::Value = resp.json().await.context("Failed to parse response")?;
+        if let Some(errors) = json.get("errors").and_then(|e| e.as_array())
+            && !errors.is_empty()
+        {
+            let messages: Vec<String> = errors
+                .iter()
+                .filter_map(|e| e.get("message").and_then(|m| m.as_str()).map(String::from))
+                .collect();
+            bail!("GraphQL errors:\n{}", messages.join("\n"));
+        }
         Ok(())
     }
 
@@ -575,6 +585,7 @@ impl GitHubClient {
         &self,
         project_id: &str,
         queries: &[String],
+        preferred_group_by_field_name: Option<&str>,
     ) -> anyhow::Result<Board> {
         // queries が空ならフィルタなしで 1 回ロード。
         // 複数 queries は OR として個別に fetch して item_id で dedup する。
@@ -642,7 +653,7 @@ impl GitHubClient {
             }
         }
 
-        build_board(title, field_nodes, all_items, repositories)
+        build_board(title, field_nodes, all_items, repositories, preferred_group_by_field_name)
     }
 
     pub async fn fetch_all_comments(&self, content_id: &str) -> anyhow::Result<Vec<Comment>> {
@@ -887,25 +898,17 @@ fn build_board(
     field_nodes: Option<Vec<Option<FieldNodes>>>,
     items: Vec<ItemNode>,
     repositories: Vec<Repository>,
+    preferred_group_by_field_name: Option<&str>,
 ) -> anyhow::Result<Board> {
     let field_nodes = field_nodes.unwrap_or_default();
 
-    // Find Status field (or first single-select as fallback) and collect other fields
-    let mut first_ss: Option<(String, Vec<SSOption>)> = None;
-    let mut status_match: Option<(String, Vec<SSOption>)> = None;
+    // 全 SingleSelect / Iteration を field_definitions に格納 (Status も含める)。
+    // Status 特別扱いは廃止: Column への分配は後段で grouping に基づき一括処理。
     let mut field_definitions: Vec<FieldDefinition> = Vec::new();
-    let mut status_candidate_ss: Option<(String, Vec<SSOption>)> = None;
 
     for node in field_nodes.into_iter().flatten() {
         match node {
             FieldNodes::ProjectV2SingleSelectField(ssf) => {
-                if ssf.name == "Status" {
-                    status_match = Some((ssf.id.clone(), ssf.options.clone()));
-                    continue;
-                }
-                if first_ss.is_none() && status_candidate_ss.is_none() {
-                    status_candidate_ss = Some((ssf.id.clone(), ssf.options.clone()));
-                }
                 field_definitions.push(FieldDefinition::SingleSelect {
                     id: ssf.id,
                     name: ssf.name,
@@ -954,56 +957,32 @@ fn build_board(
         }
     }
 
-    if first_ss.is_none() {
-        first_ss = status_candidate_ss;
-    }
-
-    let (status_field_id, options) = status_match
-        .or(first_ss)
-        .unwrap_or_else(|| (String::new(), vec![]));
-
-    let mut columns: Vec<Column> = options
-        .iter()
-        .map(|opt| Column {
-            option_id: opt.id.clone(),
-            name: opt.name.clone(),
-            color: convert_column_color(&opt.color),
-            cards: Vec::new(),
-        })
-        .collect();
-
-    let mut no_status_cards = Vec::new();
-
+    // 全カードの custom_fields を抽出 (Status 分も含めて等しく格納)
+    let mut cards: Vec<Card> = Vec::with_capacity(items.len());
     for item in items {
         let mut card = convert_item(&item);
 
         let fv_nodes = item.field_values.nodes.unwrap_or_default();
-        let mut status_option_id: Option<String> = None;
         for fv in fv_nodes.iter().flatten() {
             match fv {
                 FVNode::ProjectV2ItemFieldSingleSelectValue(sv) => {
-                    if let SSValueField::ProjectV2SingleSelectField(f) = &sv.field {
-                        if f.id == status_field_id {
-                            if let Some(oid) = sv.option_id.clone() {
-                                status_option_id = Some(oid);
-                            }
-                        } else if let Some(option_id) = sv.option_id.clone() {
-                            let def = field_definitions.iter().find(|d| d.id() == f.id);
-                            // 定義に存在するフィールドのみ取り込む (Status/組み込みフィールド除外)
-                            let Some(FieldDefinition::SingleSelect { options, .. }) = def else {
-                                continue;
-                            };
-                            let color = options
-                                .iter()
-                                .find(|o| o.id == option_id)
-                                .and_then(|o| o.color.clone());
-                            card.custom_fields.push(CustomFieldValue::SingleSelect {
-                                field_id: f.id.clone(),
-                                option_id,
-                                name: sv.name.clone().unwrap_or_default(),
-                                color,
-                            });
-                        }
+                    if let SSValueField::ProjectV2SingleSelectField(f) = &sv.field
+                        && let Some(option_id) = sv.option_id.clone()
+                    {
+                        let def = field_definitions.iter().find(|d| d.id() == f.id);
+                        let Some(FieldDefinition::SingleSelect { options, .. }) = def else {
+                            continue;
+                        };
+                        let color = options
+                            .iter()
+                            .find(|o| o.id == option_id)
+                            .and_then(|o| o.color.clone());
+                        card.custom_fields.push(CustomFieldValue::SingleSelect {
+                            field_id: f.id.clone(),
+                            option_id,
+                            name: sv.name.clone().unwrap_or_default(),
+                            color,
+                        });
                     }
                 }
                 FVNode::ProjectV2ItemFieldTextValue(tv) => {
@@ -1069,37 +1048,194 @@ fn build_board(
             }
         }
 
-        match status_option_id {
-            Some(opt_id) => {
-                if let Some(col) = columns.iter_mut().find(|c| c.option_id == opt_id) {
-                    col.cards.push(card);
-                } else {
-                    no_status_cards.push(card);
-                }
-            }
-            None => no_status_cards.push(card),
-        }
+        cards.push(card);
     }
 
-    if !no_status_cards.is_empty() {
-        columns.insert(
-            0,
-            Column {
-                option_id: String::new(),
-                name: "No Status".to_string(),
-                color: None,
-                cards: no_status_cards,
-            },
-        );
-    }
+    let grouping = choose_grouping(&field_definitions, preferred_group_by_field_name);
+    let columns = build_columns_for_grouping(&grouping, &field_definitions, cards);
 
     Ok(Board {
         project_title,
-        status_field_id,
+        grouping,
         columns,
         repositories,
         field_definitions,
     })
+}
+
+/// `preferred_name` にマッチする groupable field があればそれを選び、
+/// なければ "Status" → 最初の SingleSelect → 最初の Iteration の順でフォールバック。
+pub fn choose_grouping(
+    field_definitions: &[FieldDefinition],
+    preferred_name: Option<&str>,
+) -> Grouping {
+    let match_by_name = |name: &str| {
+        field_definitions.iter().find_map(|def| match def {
+            FieldDefinition::SingleSelect { id, name: n, .. } if n == name => {
+                Some(Grouping::SingleSelect {
+                    field_id: id.clone(),
+                    field_name: n.clone(),
+                })
+            }
+            FieldDefinition::Iteration { id, name: n, .. } if n == name => {
+                Some(Grouping::Iteration {
+                    field_id: id.clone(),
+                    field_name: n.clone(),
+                })
+            }
+            _ => None,
+        })
+    };
+
+    if let Some(name) = preferred_name
+        && let Some(g) = match_by_name(name)
+    {
+        return g;
+    }
+    if let Some(g) = match_by_name("Status") {
+        return g;
+    }
+    // fallback: 最初の SingleSelect → 最初の Iteration
+    for def in field_definitions {
+        match def {
+            FieldDefinition::SingleSelect { id, name, .. } => {
+                return Grouping::SingleSelect {
+                    field_id: id.clone(),
+                    field_name: name.clone(),
+                };
+            }
+            FieldDefinition::Iteration { id, name, .. } => {
+                return Grouping::Iteration {
+                    field_id: id.clone(),
+                    field_name: name.clone(),
+                };
+            }
+            _ => {}
+        }
+    }
+    Grouping::None
+}
+
+/// 指定した grouping とカード群から columns を構築する。
+/// 先頭に "No <field_name>" カラム (`option_id` が空) を置き、対応する値を持たないカードを集める。
+pub fn build_columns_for_grouping(
+    grouping: &Grouping,
+    field_definitions: &[FieldDefinition],
+    cards: Vec<Card>,
+) -> Vec<Column> {
+    match grouping {
+        Grouping::SingleSelect { field_id, field_name } => {
+            let options = field_definitions.iter().find_map(|d| match d {
+                FieldDefinition::SingleSelect { id, options, .. } if id == field_id => {
+                    Some(options.clone())
+                }
+                _ => None,
+            });
+            let Some(options) = options else {
+                return vec![no_value_column(field_name, cards)];
+            };
+            let mut columns: Vec<Column> = options
+                .iter()
+                .map(|opt| Column {
+                    option_id: opt.id.clone(),
+                    name: opt.name.clone(),
+                    color: opt.color.clone(),
+                    cards: Vec::new(),
+                })
+                .collect();
+            let mut no_value: Vec<Card> = Vec::new();
+            for card in cards {
+                let matched = card.custom_fields.iter().find_map(|fv| match fv {
+                    CustomFieldValue::SingleSelect {
+                        field_id: fid,
+                        option_id,
+                        ..
+                    } if fid == field_id => Some(option_id.clone()),
+                    _ => None,
+                });
+                match matched {
+                    Some(opt_id) => {
+                        if let Some(col) = columns.iter_mut().find(|c| c.option_id == opt_id) {
+                            col.cards.push(card);
+                        } else {
+                            no_value.push(card);
+                        }
+                    }
+                    None => no_value.push(card),
+                }
+            }
+            if !no_value.is_empty() {
+                columns.insert(0, no_value_column(field_name, no_value));
+            }
+            columns
+        }
+        Grouping::Iteration { field_id, field_name } => {
+            let iterations = field_definitions.iter().find_map(|d| match d {
+                FieldDefinition::Iteration { id, iterations, .. } if id == field_id => {
+                    Some(iterations.clone())
+                }
+                _ => None,
+            });
+            let Some(iterations) = iterations else {
+                return vec![no_value_column(field_name, cards)];
+            };
+            let mut columns: Vec<Column> = iterations
+                .iter()
+                .map(|it| Column {
+                    option_id: it.id.clone(),
+                    name: format!("{} ({})", it.title, it.start_date),
+                    color: None,
+                    cards: Vec::new(),
+                })
+                .collect();
+            let mut no_value: Vec<Card> = Vec::new();
+            for card in cards {
+                let matched = card.custom_fields.iter().find_map(|fv| match fv {
+                    CustomFieldValue::Iteration {
+                        field_id: fid,
+                        iteration_id,
+                        ..
+                    } if fid == field_id => Some(iteration_id.clone()),
+                    _ => None,
+                });
+                match matched {
+                    Some(it_id) => {
+                        if let Some(col) = columns.iter_mut().find(|c| c.option_id == it_id) {
+                            col.cards.push(card);
+                        } else {
+                            no_value.push(card);
+                        }
+                    }
+                    None => no_value.push(card),
+                }
+            }
+            if !no_value.is_empty() {
+                columns.insert(0, no_value_column(field_name, no_value));
+            }
+            columns
+        }
+        Grouping::None => {
+            if cards.is_empty() {
+                Vec::new()
+            } else {
+                vec![Column {
+                    option_id: String::new(),
+                    name: "No Grouping".to_string(),
+                    color: None,
+                    cards,
+                }]
+            }
+        }
+    }
+}
+
+fn no_value_column(field_name: &str, cards: Vec<Card>) -> Column {
+    Column {
+        option_id: String::new(),
+        name: format!("No {field_name}"),
+        color: None,
+        cards,
+    }
 }
 
 fn convert_column_color(

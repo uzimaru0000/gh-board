@@ -39,8 +39,9 @@ fn is_valid_iso_date(s: &str) -> bool {
 use crate::model::state::{
     ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
     CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
-    LoadingState, NewCardType, PendingIssueCreate, ReactionPickerState, ReactionTarget,
-    RepoSelectState, SidebarEditMode, ViewMode, SIDEBAR_ASSIGNEES, SIDEBAR_LABELS, SIDEBAR_STATUS,
+    GroupBySelectState, LoadingState, NewCardType, PendingIssueCreate, ReactionPickerState,
+    ReactionTarget, RepoSelectState, SidebarEditMode, ViewMode, SIDEBAR_ASSIGNEES, SIDEBAR_LABELS,
+    SIDEBAR_STATUS,
 };
 
 pub struct AppState {
@@ -91,6 +92,9 @@ pub struct AppState {
     // Comment list
     pub comment_list_state: Option<CommentListState>,
 
+    // Group-by selector
+    pub group_by_select_state: Option<GroupBySelectState>,
+
     // Reaction picker
     pub reaction_picker_state: Option<ReactionPickerState>,
 
@@ -111,6 +115,9 @@ pub struct AppState {
 
     // Viewer info
     pub viewer_login: String,
+
+    // 起動時のグルーピング軸初期値 (config.toml [board] group_by)。
+    pub preferred_grouping_field_name: Option<String>,
 
     // Keymap
     pub keymap: Keymap,
@@ -145,6 +152,7 @@ impl AppState {
             edit_card_state: None,
             grab_state: None,
             comment_list_state: None,
+            group_by_select_state: None,
             reaction_picker_state: None,
             loading: LoadingState::Idle,
             board_cache: BoardCache::new(8),
@@ -153,6 +161,7 @@ impl AppState {
             active_view: None,
             owner,
             viewer_login: String::new(),
+            preferred_grouping_field_name: None,
             keymap: Keymap::default_keymap(),
         }
     }
@@ -251,6 +260,7 @@ impl AppState {
         self.pending_board_queries = Some(queries.clone());
         Command::LoadBoard {
             project_id: project_id.to_string(),
+            preferred_grouping_field_name: self.preferred_grouping_field_name.clone(),
             queries,
         }
     }
@@ -332,13 +342,10 @@ impl AppState {
                 Command::None
             }
             AppEvent::CardMoved(Err(e)) => {
+                // エラーは画面に残す (自動リロードしない)。
+                // 楽観的にローカル状態は変わっているが、次の `r` で同期できる。
                 self.loading = LoadingState::Error(e);
-                if let Some(project) = &self.current_project {
-                    let id = project.id.clone();
-                    self.start_loading_board(&id)
-                } else {
-                    Command::None
-                }
+                Command::None
             }
             AppEvent::CardDeleted(Ok(())) => {
                 // 楽観的更新済み
@@ -512,13 +519,9 @@ impl AppState {
                 Command::None
             }
             AppEvent::CustomFieldUpdated(Err(e)) => {
+                // エラーは画面に残す (自動リロードしない)。
                 self.loading = LoadingState::Error(e);
-                if let Some(project) = &self.current_project {
-                    let id = project.id.clone();
-                    self.start_loading_board(&id)
-                } else {
-                    Command::None
-                }
+                Command::None
             }
             AppEvent::Tick | AppEvent::Resize(_, _) => Command::None,
         }
@@ -572,6 +575,7 @@ impl AppState {
             ViewMode::CardGrab => self.handle_card_grab_key(key),
             ViewMode::EditCard => self.handle_edit_card_key(key),
             ViewMode::CommentList => self.handle_comment_list_key(key),
+            ViewMode::GroupBySelect => self.handle_group_by_select_key(key),
             ViewMode::ReactionPicker => self.handle_reaction_picker_key(key),
         }
     }
@@ -679,6 +683,10 @@ impl AppState {
                 self.mode = ViewMode::Help;
                 Command::None
             }
+            Action::ChangeGrouping => {
+                self.open_group_by_select();
+                Command::None
+            }
             Action::StartFilter => {
                 self.filter.input.clear();
                 self.filter.cursor_pos = 0;
@@ -720,8 +728,6 @@ impl AppState {
                 }
                 Command::None
             }
-            Action::MoveCardLeft => self.move_card_left(),
-            Action::MoveCardRight => self.move_card_right(),
             _ => Command::None,
         }
     }
@@ -752,8 +758,63 @@ impl AppState {
         }
 
         // 楽観的UI更新: ローカルモデルでカードを移動
-        let card = board.columns[src_col].cards.remove(real_idx);
+        let mut card = board.columns[src_col].cards.remove(real_idx);
         let item_id = card.item_id.clone();
+        // 楽観的更新: card.custom_fields にも新しい grouping 値を反映させ、
+        // 次回の軸切替でも一貫した表示になるようにする。
+        if let Some(field_id) = board.grouping.field_id() {
+            let field_id = field_id.to_string();
+            let target_key = board.columns[target_column].option_id.clone();
+            card.custom_fields.retain(|fv| fv.field_id() != field_id);
+            match &board.grouping {
+                crate::model::project::Grouping::SingleSelect { .. } => {
+                    let (name, color) = board
+                        .field_definitions
+                        .iter()
+                        .find_map(|d| match d {
+                            crate::model::project::FieldDefinition::SingleSelect {
+                                id,
+                                options,
+                                ..
+                            } if id == &field_id => options
+                                .iter()
+                                .find(|o| o.id == target_key)
+                                .map(|o| (o.name.clone(), o.color.clone())),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    card.custom_fields.push(CustomFieldValue::SingleSelect {
+                        field_id: field_id.clone(),
+                        option_id: target_key.clone(),
+                        name,
+                        color,
+                    });
+                }
+                crate::model::project::Grouping::Iteration { .. } => {
+                    let title = board
+                        .field_definitions
+                        .iter()
+                        .find_map(|d| match d {
+                            crate::model::project::FieldDefinition::Iteration {
+                                id,
+                                iterations,
+                                ..
+                            } if id == &field_id => iterations
+                                .iter()
+                                .find(|it| it.id == target_key)
+                                .map(|it| it.title.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    card.custom_fields.push(CustomFieldValue::Iteration {
+                        field_id: field_id.clone(),
+                        iteration_id: target_key.clone(),
+                        title,
+                    });
+                }
+                crate::model::project::Grouping::None => {}
+            }
+        }
         board.columns[target_column].cards.push(card);
 
         // フィルタ後の表示インデックスを再計算して調整
@@ -778,46 +839,29 @@ impl AppState {
             Some(p) => p.id.clone(),
             None => return Command::None,
         };
-        let field_id = board.status_field_id.clone();
+        let Some(field_id) = board.grouping.field_id().map(|s| s.to_string()) else {
+            return Command::None;
+        };
+        let value = match &board.grouping {
+            crate::model::project::Grouping::SingleSelect { .. } => {
+                crate::command::CustomFieldValueInput::SingleSelect {
+                    option_id: target_option_id,
+                }
+            }
+            crate::model::project::Grouping::Iteration { .. } => {
+                crate::command::CustomFieldValueInput::Iteration {
+                    iteration_id: target_option_id,
+                }
+            }
+            crate::model::project::Grouping::None => return Command::None,
+        };
 
         Command::MoveCard {
             project_id,
             item_id,
             field_id,
-            option_id: target_option_id,
+            value,
         }
-    }
-
-    fn move_card_left(&mut self) -> Command {
-        if self.selected_column == 0 {
-            return Command::None;
-        }
-        // "No Status" カラムをスキップ
-        let target = if self.selected_column >= 1
-            && self
-                .board
-                .as_ref()
-                .map(|b| b.columns[self.selected_column - 1].option_id.is_empty())
-                .unwrap_or(false)
-            && self.selected_column >= 2
-        {
-            self.selected_column - 2
-        } else {
-            self.selected_column - 1
-        };
-        self.move_card_to(target)
-    }
-
-    fn move_card_right(&mut self) -> Command {
-        let max = self
-            .board
-            .as_ref()
-            .map(|b| b.columns.len())
-            .unwrap_or(0);
-        if self.selected_column + 1 >= max {
-            return Command::None;
-        }
-        self.move_card_to(self.selected_column + 1)
     }
 
     fn handle_project_select_key(&mut self, key: KeyEvent) -> Command {
@@ -1142,11 +1186,25 @@ impl AppState {
             None => return Command::None,
         };
 
-        let (field_id, option_id) = match &self.board {
+        let initial_status = match &self.board {
             Some(board) => {
-                let col = board.columns.get(self.selected_column);
-                let option_id = col.map(|c| c.option_id.clone()).unwrap_or_default();
-                (board.status_field_id.clone(), option_id)
+                // SingleSelect グルーピング + 非 "No Status" カラムのときのみ初期値を設定
+                match &board.grouping {
+                    crate::model::project::Grouping::SingleSelect { field_id, .. } => {
+                        let col = board.columns.get(self.selected_column);
+                        col.and_then(|c| {
+                            if c.option_id.is_empty() {
+                                None
+                            } else {
+                                Some(crate::command::InitialStatus {
+                                    field_id: field_id.clone(),
+                                    option_id: c.option_id.clone(),
+                                })
+                            }
+                        })
+                    }
+                    _ => None,
+                }
             }
             None => return Command::None,
         };
@@ -1159,8 +1217,7 @@ impl AppState {
                     project_id,
                     title,
                     body,
-                    field_id,
-                    option_id,
+                    initial_status,
                 }
             }
             NewCardType::Issue => {
@@ -1186,8 +1243,7 @@ impl AppState {
                         repository_id: repos[0].id.clone(),
                         title,
                         body,
-                        field_id,
-                        option_id,
+                        initial_status,
                     };
                 }
 
@@ -1197,8 +1253,7 @@ impl AppState {
                     pending_create: PendingIssueCreate {
                         title,
                         body,
-                        field_id,
-                        option_id,
+                        initial_status,
                     },
                 });
                 self.mode = ViewMode::RepoSelect;
@@ -1377,7 +1432,9 @@ impl AppState {
             None => return Command::None,
         };
 
-        let board = match &self.board {
+        let current_column = self.selected_column;
+        let current_card_index = self.real_card_index().unwrap_or(0);
+        let board = match &mut self.board {
             Some(b) => b,
             None => return Command::None,
         };
@@ -1385,9 +1442,6 @@ impl AppState {
             Some(p) => p.id.clone(),
             None => return Command::None,
         };
-
-        let current_column = self.selected_column;
-        let current_card_index = self.real_card_index().unwrap_or(0);
 
         let column_changed = current_column != grab.origin_column;
         let position_changed = current_card_index != grab.origin_card_index;
@@ -1407,14 +1461,88 @@ impl AppState {
         };
 
         if column_changed {
-            let field_id = board.status_field_id.clone();
-            let option_id = board.columns[current_column].option_id.clone();
+            let Some(field_id) = board.grouping.field_id().map(|s| s.to_string()) else {
+                return Command::None;
+            };
+            let target_key = board.columns[current_column].option_id.clone();
+            let value = match &board.grouping {
+                crate::model::project::Grouping::SingleSelect { .. } => {
+                    crate::command::CustomFieldValueInput::SingleSelect {
+                        option_id: target_key.clone(),
+                    }
+                }
+                crate::model::project::Grouping::Iteration { .. } => {
+                    crate::command::CustomFieldValueInput::Iteration {
+                        iteration_id: target_key.clone(),
+                    }
+                }
+                crate::model::project::Grouping::None => return Command::None,
+            };
+
+            // 楽観的更新: 移動先カードの custom_fields に新しい grouping 値を反映
+            // (grab 経路は move_card_to を通らないため、ここで明示的に更新する)
+            if let Some(card) = board.columns[current_column]
+                .cards
+                .iter_mut()
+                .find(|c| c.item_id == grab.item_id)
+            {
+                card.custom_fields.retain(|fv| fv.field_id() != field_id);
+                match &board.grouping {
+                    crate::model::project::Grouping::SingleSelect { .. } => {
+                        let (name, color) = board
+                            .field_definitions
+                            .iter()
+                            .find_map(|d| match d {
+                                crate::model::project::FieldDefinition::SingleSelect {
+                                    id,
+                                    options,
+                                    ..
+                                } if id == &field_id => options
+                                    .iter()
+                                    .find(|o| o.id == target_key)
+                                    .map(|o| (o.name.clone(), o.color.clone())),
+                                _ => None,
+                            })
+                            .unwrap_or_default();
+                        card.custom_fields.push(CustomFieldValue::SingleSelect {
+                            field_id: field_id.clone(),
+                            option_id: target_key.clone(),
+                            name,
+                            color,
+                        });
+                    }
+                    crate::model::project::Grouping::Iteration { .. } => {
+                        let title = board
+                            .field_definitions
+                            .iter()
+                            .find_map(|d| match d {
+                                crate::model::project::FieldDefinition::Iteration {
+                                    id,
+                                    iterations,
+                                    ..
+                                } if id == &field_id => iterations
+                                    .iter()
+                                    .find(|it| it.id == target_key)
+                                    .map(|it| it.title.clone()),
+                                _ => None,
+                            })
+                            .unwrap_or_default();
+                        card.custom_fields.push(CustomFieldValue::Iteration {
+                            field_id: field_id.clone(),
+                            iteration_id: target_key.clone(),
+                            title,
+                        });
+                    }
+                    crate::model::project::Grouping::None => {}
+                }
+            }
+
             Command::Batch(vec![
                 Command::MoveCard {
                     project_id: project_id.clone(),
                     item_id: grab.item_id.clone(),
                     field_id,
-                    option_id,
+                    value,
                 },
                 Command::ReorderCard {
                     project_id,
@@ -1537,8 +1665,7 @@ impl AppState {
             repository_id,
             title: rs.pending_create.title,
             body: rs.pending_create.body,
-            field_id: rs.pending_create.field_id,
-            option_id: rs.pending_create.option_id,
+            initial_status: rs.pending_create.initial_status,
         }
     }
 
@@ -2142,6 +2269,126 @@ impl AppState {
             Action::OpenReactionPicker => self.open_reaction_picker_for_comment(),
             _ => Command::None,
         }
+    }
+
+    /// Board モードから `G` 押下で呼ばれる。
+    /// 利用可能な groupable field (SingleSelect + Iteration) をリスト化し GroupBySelect モードへ移行。
+    fn open_group_by_select(&mut self) {
+        let Some(board) = &self.board else {
+            return;
+        };
+        let mut candidates: Vec<crate::model::project::Grouping> = Vec::new();
+        for def in &board.field_definitions {
+            match def {
+                crate::model::project::FieldDefinition::SingleSelect { id, name, .. } => {
+                    candidates.push(crate::model::project::Grouping::SingleSelect {
+                        field_id: id.clone(),
+                        field_name: name.clone(),
+                    });
+                }
+                crate::model::project::FieldDefinition::Iteration { id, name, .. } => {
+                    candidates.push(crate::model::project::Grouping::Iteration {
+                        field_id: id.clone(),
+                        field_name: name.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+        if candidates.is_empty() {
+            return;
+        }
+        // 現在の軸にカーソルを合わせる
+        let cursor = candidates
+            .iter()
+            .position(|g| g == &board.grouping)
+            .unwrap_or(0);
+        self.group_by_select_state = Some(GroupBySelectState { cursor, candidates });
+        self.mode = ViewMode::GroupBySelect;
+    }
+
+    fn handle_group_by_select_key(&mut self, key: KeyEvent) -> Command {
+        let action = match self.keymap.resolve(KeymapMode::GroupBySelect, &key) {
+            Some(a) => a,
+            None => return Command::None,
+        };
+
+        let candidate_count = self
+            .group_by_select_state
+            .as_ref()
+            .map(|s| s.candidates.len())
+            .unwrap_or(0);
+
+        match action {
+            Action::ForceQuit => {
+                self.should_quit = true;
+                Command::None
+            }
+            Action::Back | Action::Quit => {
+                self.group_by_select_state = None;
+                self.mode = ViewMode::Board;
+                Command::None
+            }
+            Action::MoveDown => {
+                if let Some(ref mut s) = self.group_by_select_state
+                    && candidate_count > 0
+                {
+                    s.cursor = (s.cursor + 1).min(candidate_count - 1);
+                }
+                Command::None
+            }
+            Action::MoveUp => {
+                if let Some(ref mut s) = self.group_by_select_state {
+                    s.cursor = s.cursor.saturating_sub(1);
+                }
+                Command::None
+            }
+            Action::Select => {
+                let grouping = match self.group_by_select_state.take() {
+                    Some(s) => s.candidates.into_iter().nth(s.cursor),
+                    None => None,
+                };
+                self.mode = ViewMode::Board;
+                if let Some(g) = grouping {
+                    self.apply_grouping(g);
+                }
+                Command::None
+            }
+            _ => Command::None,
+        }
+    }
+
+    /// 現在の Board を新しい grouping で再構築する。
+    /// 既存カードを flatten して `build_columns_for_grouping` で再分配する。
+    pub fn apply_grouping(&mut self, grouping: crate::model::project::Grouping) {
+        let Some(board) = &mut self.board else {
+            return;
+        };
+        // カードを flatten
+        let mut all_cards: Vec<Card> = Vec::new();
+        for col in board.columns.drain(..) {
+            all_cards.extend(col.cards);
+        }
+        let new_columns = crate::github::client::build_columns_for_grouping(
+            &grouping,
+            &board.field_definitions,
+            all_cards,
+        );
+        // 以降のリロード (エラー時や `r` キー) で現在の軸を維持するため、
+        // preferred_grouping_field_name をセッション中は新しい軸に追随させる。
+        self.preferred_grouping_field_name =
+            grouping.field_name().map(|s| s.to_string());
+        board.columns = new_columns;
+        board.grouping = grouping;
+        // カーソルをクランプ
+        if board.columns.is_empty() {
+            self.selected_column = 0;
+            self.selected_card = 0;
+        } else {
+            self.selected_column = self.selected_column.min(board.columns.len() - 1);
+            self.selected_card = 0;
+        }
+        self.scroll_offset = 0;
     }
 
     fn open_reaction_picker_for_card(&mut self) -> Command {
@@ -3045,7 +3292,10 @@ mod tests {
     fn make_board(columns: Vec<(&str, &str, Vec<Card>)>) -> Board {
         Board {
             project_title: "Test Project".into(),
-            status_field_id: "field_1".into(),
+            grouping: crate::model::project::Grouping::SingleSelect {
+                field_id: "field_1".into(),
+                field_name: "Status".into(),
+            },
             columns: columns
                 .into_iter()
                 .map(|(name, option_id, cards)| Column {
@@ -3347,130 +3597,6 @@ mod tests {
         assert!(state.filter.active_filter.is_none());
     }
 
-    // ========== カード移動 ==========
-
-    #[test]
-    fn test_move_card_right() {
-        let board = make_board(vec![
-            ("Todo", "opt_1", vec![make_card("1", "A"), make_card("2", "B")]),
-            ("Done", "opt_2", vec![]),
-        ]);
-        let mut state = make_state_with_board(board);
-
-        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('L'))));
-
-        // 楽観的更新: カードが移動している
-        let board = state.board.as_ref().unwrap();
-        assert_eq!(board.columns[0].cards.len(), 1);
-        assert_eq!(board.columns[1].cards.len(), 1);
-        assert_eq!(board.columns[1].cards[0].item_id, "1");
-
-        // 正しい Command が返る
-        assert_eq!(
-            cmd,
-            Command::MoveCard {
-                project_id: "proj_1".into(),
-                item_id: "1".into(),
-                field_id: "field_1".into(),
-                option_id: "opt_2".into(),
-            }
-        );
-    }
-
-    #[test]
-    fn test_move_card_left() {
-        let board = make_board(vec![
-            ("Todo", "opt_1", vec![]),
-            ("Done", "opt_2", vec![make_card("1", "A")]),
-        ]);
-        let mut state = make_state_with_board(board);
-        state.selected_column = 1;
-
-        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('H'))));
-
-        let board = state.board.as_ref().unwrap();
-        assert_eq!(board.columns[0].cards.len(), 1);
-        assert_eq!(board.columns[1].cards.len(), 0);
-
-        assert_eq!(
-            cmd,
-            Command::MoveCard {
-                project_id: "proj_1".into(),
-                item_id: "1".into(),
-                field_id: "field_1".into(),
-                option_id: "opt_1".into(),
-            }
-        );
-    }
-
-    #[test]
-    fn test_move_card_skip_no_status() {
-        let board = make_board(vec![
-            ("No Status", "", vec![]),
-            ("Todo", "opt_1", vec![make_card("1", "A")]),
-            ("Done", "opt_2", vec![]),
-        ]);
-        let mut state = make_state_with_board(board);
-        state.selected_column = 1;
-
-        // 左に移動しようとするが "No Status" はスキップされる
-        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('H'))));
-        assert_eq!(cmd, Command::None);
-        // カードはそのまま
-        assert_eq!(state.board.as_ref().unwrap().columns[1].cards.len(), 1);
-    }
-
-    #[test]
-    fn test_move_card_clamp_selection() {
-        let board = make_board(vec![
-            (
-                "Todo",
-                "opt_1",
-                vec![make_card("1", "A"), make_card("2", "B"), make_card("3", "C")],
-            ),
-            ("Done", "opt_2", vec![]),
-        ]);
-        let mut state = make_state_with_board(board);
-        state.selected_card = 2; // 最後のカード
-
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('L'))));
-
-        // カード移動後、selected_card はクランプされる
-        assert_eq!(state.selected_card, 1); // 残り2枚の最後
-    }
-
-    #[test]
-    fn test_move_card_with_filter() {
-        let board = make_board(vec![
-            (
-                "Todo",
-                "opt_1",
-                vec![
-                    make_card("1", "Fix bug"),
-                    make_card("2", "Add feature"),
-                    make_card("3", "Fix typo"),
-                ],
-            ),
-            ("Done", "opt_2", vec![]),
-        ]);
-        let mut state = make_state_with_board(board);
-        state.filter.active_filter = Some(ActiveFilter::parse("fix"));
-        state.selected_card = 1; // フィルタ後の2番目 = real index 2 (Fix typo)
-
-        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('L'))));
-
-        // "Fix typo" (item_id=3) が移動されるべき
-        assert_eq!(
-            cmd,
-            Command::MoveCard {
-                project_id: "proj_1".into(),
-                item_id: "3".into(),
-                field_id: "field_1".into(),
-                option_id: "opt_2".into(),
-            }
-        );
-    }
-
     // ========== カード削除 ==========
 
     #[test]
@@ -3560,8 +3686,10 @@ mod tests {
                 project_id: "proj_1".into(),
                 title: "New Card".into(),
                 body: "Description".into(),
-                field_id: "field_1".into(),
-                option_id: "opt_1".into(),
+                initial_status: Some(crate::command::InitialStatus {
+                    field_id: "field_1".into(),
+                    option_id: "opt_1".into(),
+                }),
             }
         );
         assert_eq!(state.mode, ViewMode::Board);
@@ -3613,6 +3741,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "p1".into(),
+                preferred_grouping_field_name: None,
                 queries: vec![],
             }
         );
@@ -3637,21 +3766,15 @@ mod tests {
     }
 
     #[test]
-    fn test_card_moved_error_reloads() {
+    fn test_card_moved_error_shows_error() {
         let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
         let mut state = make_state_with_board(board);
 
         let cmd = state.handle_event(AppEvent::CardMoved(Err("API error".into())));
 
-        // エラー後にリロードが発動するので Refreshing 状態になる (既存ボードあり)
-        assert!(matches!(state.loading, LoadingState::Refreshing));
-        assert_eq!(
-            cmd,
-            Command::LoadBoard {
-                project_id: "proj_1".into(),
-                queries: vec![],
-            }
-        );
+        // エラーは画面に残し、自動リロードはしない (ユーザーが `r` で手動リフレッシュ)
+        assert!(matches!(state.loading, LoadingState::Error(ref m) if m == "API error"));
+        assert_eq!(cmd, Command::None);
     }
 
     #[test]
@@ -3688,6 +3811,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
                 queries: vec!["label:\"bug\"".into()],
             }
         );
@@ -3713,6 +3837,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
                 queries: vec!["label:\"bug\"".into(), "label:\"enh\"".into()],
             }
         );
@@ -3732,6 +3857,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
                 queries: vec![],
             }
         );
@@ -3752,6 +3878,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
                 queries: vec![],
             }
         );
@@ -3821,8 +3948,10 @@ mod tests {
             .put(vec!["label:\"bug\"".into()], make_board(vec![]));
         assert_eq!(state.board_cache.len(), 1);
 
-        // H/L でカード移動 → MoveCard が返り、cache は clear される
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('L'))));
+        // grab モードで Done へ移動 → MoveCard が返り、cache は clear される
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('l'))));
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
         assert_eq!(state.board_cache.len(), 0);
     }
 
@@ -3837,6 +3966,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
                 queries: vec!["label:\"bug\"".into()],
             }
         );
@@ -4236,8 +4366,10 @@ mod tests {
                 project_id: "proj_1".into(),
                 title: "My Draft".into(),
                 body: "body".into(),
-                field_id: "field_1".into(),
-                option_id: "opt_1".into(),
+                initial_status: Some(crate::command::InitialStatus {
+                    field_id: "field_1".into(),
+                    option_id: "opt_1".into(),
+                }),
             }
         );
         assert_eq!(state.mode, ViewMode::Board);
@@ -4265,8 +4397,10 @@ mod tests {
                 repository_id: "repo_1".into(),
                 title: "My Issue".into(),
                 body: "body".into(),
-                field_id: "field_1".into(),
-                option_id: "opt_1".into(),
+                initial_status: Some(crate::command::InitialStatus {
+                    field_id: "field_1".into(),
+                    option_id: "opt_1".into(),
+                }),
             }
         );
         assert_eq!(state.mode, ViewMode::Board);
@@ -4390,8 +4524,10 @@ mod tests {
             pending_create: PendingIssueCreate {
                 title: "My Issue".into(),
                 body: "body".into(),
-                field_id: "field_1".into(),
-                option_id: "opt_1".into(),
+                initial_status: Some(crate::command::InitialStatus {
+                    field_id: "field_1".into(),
+                    option_id: "opt_1".into(),
+                }),
             },
         });
         state
@@ -4432,8 +4568,10 @@ mod tests {
                 repository_id: "repo_2".into(),
                 title: "My Issue".into(),
                 body: "body".into(),
-                field_id: "field_1".into(),
-                option_id: "opt_1".into(),
+                initial_status: Some(crate::command::InitialStatus {
+                    field_id: "field_1".into(),
+                    option_id: "opt_1".into(),
+                }),
             }
         );
         assert_eq!(state.mode, ViewMode::Board);
@@ -4792,7 +4930,7 @@ mod tests {
                     project_id: "proj_1".into(),
                     item_id: "1".into(),
                     field_id: "field_1".into(),
-                    option_id: "opt_1".into(),
+                    value: CustomFieldValueInput::SingleSelect { option_id: "opt_1".into() },
                 },
                 Command::ReorderCard {
                     project_id: "proj_1".into(),
@@ -4836,7 +4974,7 @@ mod tests {
                     project_id: "proj_1".into(),
                     item_id: "1".into(),
                     field_id: "field_1".into(),
-                    option_id: "opt_2".into(),
+                    value: CustomFieldValueInput::SingleSelect { option_id: "opt_2".into() },
                 },
                 Command::ReorderCard {
                     project_id: "proj_1".into(),
@@ -4881,7 +5019,7 @@ mod tests {
                     project_id: "proj_1".into(),
                     item_id: "3".into(),
                     field_id: "field_1".into(),
-                    option_id: "opt_2".into(),
+                    value: CustomFieldValueInput::SingleSelect { option_id: "opt_2".into() },
                 },
                 Command::ReorderCard {
                     project_id: "proj_1".into(),
@@ -4938,6 +5076,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
                 queries: vec![],
             }
         );
@@ -5078,7 +5217,7 @@ mod tests {
                 project_id: "proj_1".into(),
                 item_id: "1".into(),
                 field_id: "field_1".into(),
-                option_id: "opt_3".into(),
+                value: CustomFieldValueInput::SingleSelect { option_id: "opt_3".into() },
             }
         );
     }
@@ -6413,6 +6552,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "proj_42".into(),
+                preferred_grouping_field_name: None,
                 queries: vec![],
             }
         );
@@ -6461,6 +6601,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
                 queries: vec!["label:\"bug\"".into()],
             }
         );
@@ -6490,6 +6631,7 @@ mod tests {
             cmd,
             Command::LoadBoard {
                 project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
                 queries: vec![],
             }
         );
@@ -7057,5 +7199,395 @@ mod tests {
         assert_eq!(state.sidebar_selected, 4); // Delete
         state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
         assert_eq!(state.sidebar_selected, 4);
+    }
+
+    // ========== グループ化軸の切替 ==========
+
+    use crate::model::project::{Grouping, IterationOption, SingleSelectOption};
+
+    /// Priority SingleSelect field (2 options) と Sprint Iteration field (2 iterations) を持つ
+    /// Board を作成するヘルパー。初期 grouping は Status (dummy)。
+    fn make_board_with_grouping_fields() -> Board {
+        Board {
+            project_title: "Test".into(),
+            grouping: Grouping::SingleSelect {
+                field_id: "field_status".into(),
+                field_name: "Status".into(),
+            },
+            columns: vec![Column {
+                option_id: "opt_todo".into(),
+                name: "Todo".into(),
+                color: None,
+                cards: vec![
+                    make_card_with_custom_fields(
+                        "1",
+                        "A",
+                        vec![CustomFieldValue::SingleSelect {
+                            field_id: "field_priority".into(),
+                            option_id: "opt_p1".into(),
+                            name: "P1".into(),
+                            color: None,
+                        }],
+                    ),
+                    make_card_with_custom_fields(
+                        "2",
+                        "B",
+                        vec![CustomFieldValue::Iteration {
+                            field_id: "field_sprint".into(),
+                            iteration_id: "it_1".into(),
+                            title: "Sprint 1".into(),
+                        }],
+                    ),
+                    make_card_with_custom_fields("3", "C", vec![]),
+                ],
+            }],
+            repositories: vec![],
+            field_definitions: vec![
+                FieldDefinition::SingleSelect {
+                    id: "field_priority".into(),
+                    name: "Priority".into(),
+                    options: vec![
+                        SingleSelectOption {
+                            id: "opt_p0".into(),
+                            name: "P0".into(),
+                            color: None,
+                        },
+                        SingleSelectOption {
+                            id: "opt_p1".into(),
+                            name: "P1".into(),
+                            color: None,
+                        },
+                    ],
+                },
+                FieldDefinition::Iteration {
+                    id: "field_sprint".into(),
+                    name: "Sprint".into(),
+                    iterations: vec![
+                        IterationOption {
+                            id: "it_1".into(),
+                            title: "Sprint 1".into(),
+                            start_date: "2026-04-01".into(),
+                        },
+                        IterationOption {
+                            id: "it_2".into(),
+                            title: "Sprint 2".into(),
+                            start_date: "2026-04-15".into(),
+                        },
+                    ],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn test_change_grouping_opens_modal() {
+        let mut state = make_state_with_board(make_board_with_grouping_fields());
+        // Ctrl+g を押す
+        state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('g'),
+            KeyModifiers::CONTROL,
+        )));
+        assert_eq!(state.mode, ViewMode::GroupBySelect);
+        let s = state.group_by_select_state.as_ref().expect("state set");
+        assert_eq!(s.candidates.len(), 2); // Priority + Sprint
+    }
+
+    #[test]
+    fn test_apply_grouping_rebuilds_columns_for_single_select() {
+        let mut state = make_state_with_board(make_board_with_grouping_fields());
+        state.apply_grouping(Grouping::SingleSelect {
+            field_id: "field_priority".into(),
+            field_name: "Priority".into(),
+        });
+        let board = state.board.as_ref().unwrap();
+        assert!(matches!(board.grouping, Grouping::SingleSelect { .. }));
+        // P0 カラム, P1 カラム, + 値未設定 (2,3) が "No Priority" カラム (先頭)
+        assert_eq!(board.columns.len(), 3);
+        assert_eq!(board.columns[0].name, "No Priority");
+        assert_eq!(board.columns[0].cards.len(), 2); // item_id 2, 3
+        assert_eq!(board.columns[1].name, "P0");
+        assert_eq!(board.columns[1].cards.len(), 0);
+        assert_eq!(board.columns[2].name, "P1");
+        assert_eq!(board.columns[2].cards.len(), 1); // item_id 1
+        assert_eq!(board.columns[2].cards[0].item_id, "1");
+    }
+
+    #[test]
+    fn test_apply_grouping_rebuilds_columns_for_iteration() {
+        let mut state = make_state_with_board(make_board_with_grouping_fields());
+        state.apply_grouping(Grouping::Iteration {
+            field_id: "field_sprint".into(),
+            field_name: "Sprint".into(),
+        });
+        let board = state.board.as_ref().unwrap();
+        assert!(matches!(board.grouping, Grouping::Iteration { .. }));
+        // Sprint1 + Sprint2 カラム + "No Sprint" (item_id 1, 3 が対応値なし)
+        assert_eq!(board.columns.len(), 3);
+        assert_eq!(board.columns[0].name, "No Sprint");
+        assert_eq!(board.columns[0].cards.len(), 2);
+        // Sprint 1 カラムは iteration_id "it_1" に対応、item_id 2 が入っている
+        let s1 = board
+            .columns
+            .iter()
+            .find(|c| c.option_id == "it_1")
+            .expect("Sprint 1 column");
+        assert_eq!(s1.cards.len(), 1);
+        assert_eq!(s1.cards[0].item_id, "2");
+    }
+
+    #[test]
+    fn test_grab_confirm_sends_iteration_id_for_iteration_axis() {
+        // Iteration 軸で Space → h/l → Space で確定したとき、
+        // Command::MoveCard の value が Iteration { iteration_id } になること。
+        let mut state = make_state_with_board(make_board_with_grouping_fields());
+        state.apply_grouping(Grouping::Iteration {
+            field_id: "field_sprint".into(),
+            field_name: "Sprint".into(),
+        });
+        let sprint1_idx = state
+            .board
+            .as_ref()
+            .unwrap()
+            .columns
+            .iter()
+            .position(|c| c.option_id == "it_1")
+            .unwrap();
+        let sprint2_idx = state
+            .board
+            .as_ref()
+            .unwrap()
+            .columns
+            .iter()
+            .position(|c| c.option_id == "it_2")
+            .unwrap();
+        state.selected_column = sprint1_idx;
+        state.selected_card = 0;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' ')))); // grab
+        let direction_key = if sprint2_idx > sprint1_idx { 'l' } else { 'h' };
+        let steps = (sprint2_idx as isize - sprint1_idx as isize).unsigned_abs();
+        for _ in 0..steps {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(direction_key))));
+        }
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+
+        match cmd {
+            Command::Batch(cmds) => {
+                let move_cmd = cmds.iter().find(|c| matches!(c, Command::MoveCard { .. }));
+                match move_cmd {
+                    Some(Command::MoveCard {
+                        field_id,
+                        value: CustomFieldValueInput::Iteration { iteration_id },
+                        ..
+                    }) => {
+                        assert_eq!(field_id, "field_sprint");
+                        assert_eq!(iteration_id, "it_2");
+                    }
+                    _ => panic!("expected MoveCard with Iteration in Batch, got {cmds:?}"),
+                }
+            }
+            other => panic!("expected Batch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_config_group_by_selects_named_field_on_load() {
+        use crate::github::client::{build_columns_for_grouping, choose_grouping};
+        let field_defs = vec![
+            FieldDefinition::SingleSelect {
+                id: "field_status".into(),
+                name: "Status".into(),
+                options: vec![],
+            },
+            FieldDefinition::SingleSelect {
+                id: "field_priority".into(),
+                name: "Priority".into(),
+                options: vec![SingleSelectOption {
+                    id: "opt_p0".into(),
+                    name: "P0".into(),
+                    color: None,
+                }],
+            },
+        ];
+        let chosen = choose_grouping(&field_defs, Some("Priority"));
+        match chosen {
+            Grouping::SingleSelect {
+                field_id,
+                field_name,
+            } => {
+                assert_eq!(field_id, "field_priority");
+                assert_eq!(field_name, "Priority");
+            }
+            other => panic!("expected Priority SingleSelect, got {other:?}"),
+        }
+        // 存在しない名前 → Status にフォールバック
+        let chosen = choose_grouping(&field_defs, Some("Nonexistent"));
+        match chosen {
+            Grouping::SingleSelect { field_name, .. } => assert_eq!(field_name, "Status"),
+            other => panic!("expected Status fallback, got {other:?}"),
+        }
+        // build_columns_for_grouping が "No Priority" カラム + P0 カラムを返す (カード未配置)
+        let cols = build_columns_for_grouping(
+            &Grouping::SingleSelect {
+                field_id: "field_priority".into(),
+                field_name: "Priority".into(),
+            },
+            &field_defs,
+            vec![],
+        );
+        assert_eq!(cols.len(), 1); // 値なしカードがないので "No Priority" カラムも作られない
+        assert_eq!(cols[0].name, "P0");
+    }
+
+    #[test]
+    fn test_grab_confirm_updates_custom_fields_optimistically() {
+        // Priority 軸で Space → h/l → Space のパスで移動したとき、
+        // card.custom_fields も移動先の値に更新されること。
+        let mut state = make_state_with_board(make_board_with_grouping_fields());
+        state.apply_grouping(Grouping::SingleSelect {
+            field_id: "field_priority".into(),
+            field_name: "Priority".into(),
+        });
+        let p1_idx = state
+            .board
+            .as_ref()
+            .unwrap()
+            .columns
+            .iter()
+            .position(|c| c.option_id == "opt_p1")
+            .unwrap();
+        let p0_idx = state
+            .board
+            .as_ref()
+            .unwrap()
+            .columns
+            .iter()
+            .position(|c| c.option_id == "opt_p0")
+            .unwrap();
+        state.selected_column = p1_idx;
+        state.selected_card = 0;
+
+        // Space で grab 開始
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        assert_eq!(state.mode, ViewMode::CardGrab);
+
+        // h または l で target まで移動 (P0 が P1 の左なら h, 右なら l)
+        let direction_key = if p0_idx < p1_idx { 'h' } else { 'l' };
+        let steps = (p1_idx as isize - p0_idx as isize).unsigned_abs();
+        for _ in 0..steps {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(direction_key))));
+        }
+
+        // Space で確定
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        assert_eq!(state.mode, ViewMode::Board);
+
+        // P0 カラムに item_id "1" がいて、Priority=P0 に更新されている
+        let board = state.board.as_ref().unwrap();
+        let p0_col = &board.columns[p0_idx];
+        let moved = p0_col
+            .cards
+            .iter()
+            .find(|c| c.item_id == "1")
+            .expect("card moved to P0");
+        let pri = moved
+            .custom_fields
+            .iter()
+            .find(|fv| fv.field_id() == "field_priority")
+            .expect("Priority field present");
+        match pri {
+            CustomFieldValue::SingleSelect { option_id, .. } => {
+                assert_eq!(option_id, "opt_p0");
+            }
+            _ => panic!("expected SingleSelect"),
+        }
+    }
+
+    #[test]
+    fn test_grab_confirm_preserves_other_custom_fields() {
+        // 実運用: カードには Status と Priority の SingleSelect が両方設定されている状況。
+        // Priority 軸で grab 移動したとき、Status は維持、Priority だけ書き換わる。
+        let mut board = make_board_with_grouping_fields();
+        board.columns[0].cards[0]
+            .custom_fields
+            .push(CustomFieldValue::SingleSelect {
+                field_id: "field_status".into(),
+                option_id: "opt_todo".into(),
+                name: "Todo".into(),
+                color: None,
+            });
+        let mut state = make_state_with_board(board);
+        state.apply_grouping(Grouping::SingleSelect {
+            field_id: "field_priority".into(),
+            field_name: "Priority".into(),
+        });
+        let p1_idx = state
+            .board
+            .as_ref()
+            .unwrap()
+            .columns
+            .iter()
+            .position(|c| c.option_id == "opt_p1")
+            .unwrap();
+        let p0_idx = state
+            .board
+            .as_ref()
+            .unwrap()
+            .columns
+            .iter()
+            .position(|c| c.option_id == "opt_p0")
+            .unwrap();
+        state.selected_column = p1_idx;
+        state.selected_card = 0;
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+        let direction_key = if p0_idx < p1_idx { 'h' } else { 'l' };
+        let steps = (p1_idx as isize - p0_idx as isize).unsigned_abs();
+        for _ in 0..steps {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(direction_key))));
+        }
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
+
+        let board = state.board.as_ref().unwrap();
+        let p0_col = &board.columns[p0_idx];
+        let moved = p0_col
+            .cards
+            .iter()
+            .find(|c| c.item_id == "1")
+            .expect("card moved to P0");
+
+        // Priority は P0 に更新 (1 件のみ)
+        let priorities: Vec<&CustomFieldValue> = moved
+            .custom_fields
+            .iter()
+            .filter(|fv| fv.field_id() == "field_priority")
+            .collect();
+        assert_eq!(priorities.len(), 1);
+        match priorities[0] {
+            CustomFieldValue::SingleSelect { option_id, .. } => {
+                assert_eq!(option_id, "opt_p0");
+            }
+            _ => panic!("expected SingleSelect"),
+        }
+        // Status は維持
+        let statuses: Vec<&CustomFieldValue> = moved
+            .custom_fields
+            .iter()
+            .filter(|fv| fv.field_id() == "field_status")
+            .collect();
+        assert_eq!(statuses.len(), 1);
+    }
+
+    #[test]
+    fn test_change_grouping_resets_selection() {
+        let mut state = make_state_with_board(make_board_with_grouping_fields());
+        state.selected_column = 0;
+        state.selected_card = 2;
+        state.apply_grouping(Grouping::SingleSelect {
+            field_id: "field_priority".into(),
+            field_name: "Priority".into(),
+        });
+        assert_eq!(state.selected_card, 0);
+        assert!(state.selected_column < state.board.as_ref().unwrap().columns.len());
     }
 }
