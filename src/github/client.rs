@@ -4,8 +4,8 @@ use tokio::process::Command;
 
 use super::queries::*;
 use crate::model::project::{
-    Board, Card, CardType, CiStatus, Column, ColumnColor, Comment, IssueState, Label, PrState,
-    PrStatus, ProjectSummary, Repository, ReviewDecision,
+    Board, Card, CardType, CiStatus, Column, ColumnColor, Comment, IssueState, Label, LinkedPr,
+    PrState, PrStatus, ProjectSummary, Repository, ReviewDecision,
 };
 
 // Type aliases for readability
@@ -774,6 +774,32 @@ fn map_review_decision(d: &project_board::PullRequestReviewDecision) -> Option<R
     }
 }
 
+fn build_linked_prs(
+    issue: &project_board::ProjectBoardNodeOnProjectV2ItemsNodesContentOnIssue,
+) -> Vec<LinkedPr> {
+    issue
+        .closed_by_pull_requests_references
+        .as_ref()
+        .and_then(|c| c.nodes.as_ref())
+        .map(|nodes| {
+            nodes
+                .iter()
+                .flatten()
+                .map(|pr| LinkedPr {
+                    number: pr.number as i32,
+                    title: pr.title.clone(),
+                    url: pr.url.clone(),
+                    state: match pr.state {
+                        project_board::PullRequestState::CLOSED => PrState::Closed,
+                        project_board::PullRequestState::MERGED => PrState::Merged,
+                        _ => PrState::Open,
+                    },
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn build_pr_status(
     pr: &project_board::ProjectBoardNodeOnProjectV2ItemsNodesContentOnPullRequest,
 ) -> PrStatus {
@@ -818,6 +844,7 @@ fn convert_item(item: &ItemNode) -> Card {
     match &item.content {
         Some(Content::Issue(issue)) => Card {
             pr_status: None,
+            linked_prs: build_linked_prs(issue),
             item_id: item.id.clone(),
             content_id: Some(issue.id.clone()),
             title: issue.title.clone(),
@@ -875,6 +902,7 @@ fn convert_item(item: &ItemNode) -> Card {
         },
         Some(Content::PullRequest(pr)) => Card {
             pr_status: Some(build_pr_status(pr)),
+            linked_prs: Vec::new(),
             item_id: item.id.clone(),
             content_id: Some(pr.id.clone()),
             title: pr.title.clone(),
@@ -933,6 +961,7 @@ fn convert_item(item: &ItemNode) -> Card {
         },
         Some(Content::DraftIssue(draft)) => Card {
             pr_status: None,
+            linked_prs: Vec::new(),
             item_id: item.id.clone(),
             content_id: Some(draft.id.clone()),
             title: draft.title.clone(),
@@ -947,6 +976,7 @@ fn convert_item(item: &ItemNode) -> Card {
         },
         None => Card {
             pr_status: None,
+            linked_prs: Vec::new(),
             item_id: item.id.clone(),
             content_id: None,
             title: "(no content)".to_string(),

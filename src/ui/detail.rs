@@ -488,6 +488,13 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     )));
     lines.push(Line::from(""));
 
+    // ── Linked PRs section (Issue only) ──
+    if matches!(card.card_type, CardType::Issue { .. }) {
+        lines.push(Line::from(Span::styled("Linked PRs", header_style)));
+        lines.extend(linked_prs_lines(card));
+        lines.push(Line::from(""));
+    }
+
     let block = Block::default().padding(Padding::horizontal(1));
     let inner = block.inner(area);
     let btn_width = inner.width as usize;
@@ -916,6 +923,33 @@ fn pr_status_lines(card: &Card) -> Vec<Line<'static>> {
     out
 }
 
+fn linked_prs_lines(card: &Card) -> Vec<Line<'static>> {
+    let dim_style = Style::default().fg(theme().text_muted);
+    if card.linked_prs.is_empty() {
+        return vec![Line::from(Span::styled("  --".to_string(), dim_style))];
+    }
+    card.linked_prs
+        .iter()
+        .map(|pr| {
+            let color = match pr.state {
+                PrState::Open => theme().green,
+                PrState::Closed => theme().red,
+                PrState::Merged => theme().purple,
+            };
+            Line::from(vec![
+                Span::raw("  "),
+                // nf-oct-git_pull_request
+                Span::styled("\u{f407} ".to_string(), Style::default().fg(color)),
+                Span::styled(
+                    format!("#{} ", pr.number),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                Span::styled(pr.title.clone(), Style::default().fg(theme().text)),
+            ])
+        })
+        .collect()
+}
+
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let vertical = Layout::vertical([Constraint::Percentage(percent_y)])
         .flex(Flex::Center)
@@ -983,7 +1017,7 @@ mod tests {
         assert_eq!(result.len(), 2); // 6 + 4
     }
 
-    use crate::model::project::PrStatus;
+    use crate::model::project::{LinkedPr, PrStatus};
 
     fn pr_card(pr_status: Option<PrStatus>) -> Card {
         Card {
@@ -999,7 +1033,58 @@ mod tests {
             comments: vec![],
             milestone: None,
             pr_status,
+            linked_prs: vec![],
         }
+    }
+
+    fn issue_card_with_linked(linked: Vec<LinkedPr>) -> Card {
+        Card {
+            item_id: "i1".into(),
+            content_id: Some("issue1".into()),
+            title: "T".into(),
+            number: Some(1),
+            card_type: CardType::Issue { state: IssueState::Open },
+            assignees: vec![],
+            labels: vec![],
+            url: None,
+            body: None,
+            comments: vec![],
+            milestone: None,
+            pr_status: None,
+            linked_prs: linked,
+        }
+    }
+
+    #[test]
+    fn linked_prs_lines_empty_placeholder() {
+        let card = issue_card_with_linked(vec![]);
+        let lines = linked_prs_lines(&card);
+        assert_eq!(lines.len(), 1);
+        assert!(line_text(&lines[0]).contains("--"));
+    }
+
+    #[test]
+    fn linked_prs_lines_renders_entries() {
+        let card = issue_card_with_linked(vec![
+            LinkedPr {
+                number: 42,
+                title: "Fix".into(),
+                url: "https://github.com/o/r/pull/42".into(),
+                state: PrState::Merged,
+            },
+            LinkedPr {
+                number: 43,
+                title: "Follow-up".into(),
+                url: "https://github.com/o/r/pull/43".into(),
+                state: PrState::Open,
+            },
+        ]);
+        let lines = linked_prs_lines(&card);
+        assert_eq!(lines.len(), 2);
+        assert!(line_text(&lines[0]).contains("#42"));
+        assert!(line_text(&lines[0]).contains("Fix"));
+        assert!(line_text(&lines[0]).contains("\u{f407}"));
+        assert!(line_text(&lines[1]).contains("#43"));
     }
 
     fn line_text(line: &Line<'_>) -> String {

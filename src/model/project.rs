@@ -48,6 +48,15 @@ pub struct Card {
     pub comments: Vec<Comment>,
     pub milestone: Option<String>,
     pub pr_status: Option<PrStatus>,
+    pub linked_prs: Vec<LinkedPr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkedPr {
+    pub number: i32,
+    pub title: String,
+    pub url: String,
+    pub state: PrState,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

@@ -2168,6 +2168,7 @@ mod tests {
             comments: vec![],
             milestone: None,
             pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -2192,6 +2193,7 @@ mod tests {
             comments: vec![],
             milestone: None,
             pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -2209,6 +2211,7 @@ mod tests {
             comments: vec![],
             milestone: None,
             pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -2226,6 +2229,7 @@ mod tests {
             comments: vec![],
             milestone: Some(milestone.into()),
             pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -4162,6 +4166,7 @@ mod tests {
             comments: vec![],
             milestone: None,
             pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -4322,6 +4327,7 @@ mod tests {
             comments: vec![],
             milestone: None,
             pr_status: None,
+            linked_prs: vec![],
         }
     }
 
@@ -4602,6 +4608,7 @@ mod tests {
             comments,
             milestone: None,
             pr_status: None,
+            linked_prs: vec![],
         }
     }
 
