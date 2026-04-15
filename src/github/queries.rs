@@ -192,6 +192,22 @@ pub struct FetchComments;
 #[derive(GraphQLQuery)]
 #[graphql(
     schema_path = "schema.graphql",
+    query_path = "src/github/graphql/fetch_sub_issues.graphql",
+    response_derives = "Debug"
+)]
+pub struct FetchSubIssues;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/fetch_issue.graphql",
+    response_derives = "Debug"
+)]
+pub struct FetchIssue;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
     query_path = "src/github/graphql/add_comment.graphql",
     response_derives = "Debug"
 )]

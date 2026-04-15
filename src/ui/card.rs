@@ -70,6 +70,23 @@ impl Widget for CardWidget<'_> {
             number_str,
             Style::default().add_modifier(Modifier::DIM),
         ));
+        if self.card.parent_issue.is_some() {
+            title_spans.push(Span::styled(
+                "↳ ",
+                Style::default().fg(theme().text_dim),
+            ));
+        }
+        if let Some(summary) = &self.card.sub_issues_summary
+            && summary.total > 0
+        {
+            let text = format!("[{}/{}] ", summary.completed, summary.total);
+            let color = if summary.completed >= summary.total {
+                theme().green
+            } else {
+                theme().blue
+            };
+            title_spans.push(Span::styled(text, Style::default().fg(color)));
+        }
         title_spans.push(Span::raw(&self.card.title));
         if let Some(milestone) = &self.card.milestone {
             title_spans.push(Span::styled(

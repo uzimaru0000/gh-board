@@ -83,6 +83,32 @@ pub struct Card {
     pub linked_prs: Vec<LinkedPr>,
     pub reactions: Vec<ReactionSummary>,
     pub archived: bool,
+    pub parent_issue: Option<ParentIssueRef>,
+    pub sub_issues_summary: Option<SubIssuesSummary>,
+    pub sub_issues: Vec<SubIssueRef>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParentIssueRef {
+    pub id: String,
+    pub number: i32,
+    pub title: String,
+    pub url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubIssueRef {
+    pub id: String,
+    pub number: i32,
+    pub title: String,
+    pub state: IssueState,
+    pub url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubIssuesSummary {
+    pub completed: i32,
+    pub total: i32,
 }
 
 #[derive(Clone, Debug, PartialEq)]

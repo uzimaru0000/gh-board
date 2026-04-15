@@ -6,9 +6,9 @@ use super::queries::*;
 use crate::command::CustomFieldValueInput;
 use crate::model::project::{
     Board, Card, CardType, CiStatus, Column, ColumnColor, Comment, CustomFieldValue,
-    FieldDefinition, Grouping, IssueState, IterationOption, Label, LinkedPr, PrState, PrStatus,
-    ProjectSummary, ReactionContent, ReactionSummary, Repository, ReviewDecision,
-    SingleSelectOption,
+    FieldDefinition, Grouping, IssueState, IterationOption, Label, LinkedPr, ParentIssueRef,
+    PrState, PrStatus, ProjectSummary, ReactionContent, ReactionSummary, Repository,
+    ReviewDecision, SingleSelectOption, SubIssueRef, SubIssuesSummary,
 };
 
 // ReactionContent 変換: 各 GraphQL クエリごとに自動生成される enum を model 側の型に変換する。
@@ -43,6 +43,7 @@ impl_reaction_content_from!(fetch_comments::ReactionContent);
 impl_reaction_content_from!(add_comment::ReactionContent);
 impl_reaction_content_from!(add_reaction_mutation::ReactionContent);
 impl_reaction_content_from!(remove_reaction_mutation::ReactionContent);
+impl_reaction_content_from!(fetch_issue::ReactionContent);
 
 // Type aliases for readability
 use project_board::{
@@ -783,6 +784,152 @@ impl GitHubClient {
         Ok(all_comments)
     }
 
+    /// Issue を id で取得し、Card 化して返す (Parent / Sub-issue モーダル表示用)。
+    /// item_id は board 上に対応するカードがあればそれ、なければ content_id を流用 (ボード外 issue)。
+    pub async fn fetch_issue_as_card(&self, content_id: &str) -> anyhow::Result<Card> {
+        let vars = fetch_issue::Variables {
+            id: content_id.to_string(),
+        };
+        let data = self.query::<FetchIssue>(vars).await?;
+        let node = data.node.context("Node not found")?;
+        let fetch_issue::FetchIssueNode::Issue(issue) = node else {
+            bail!("Node is not an Issue");
+        };
+        let assignees = issue
+            .assignees
+            .nodes
+            .as_ref()
+            .map(|n| n.iter().flatten().map(|u| u.login.clone()).collect())
+            .unwrap_or_default();
+        let labels = issue
+            .labels
+            .as_ref()
+            .and_then(|l| l.nodes.as_ref())
+            .map(|n| {
+                n.iter()
+                    .flatten()
+                    .map(|l| Label {
+                        id: l.id.clone(),
+                        name: l.name.clone(),
+                        color: l.color.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let comments = issue
+            .comments
+            .nodes
+            .as_ref()
+            .map(|n| {
+                n.iter()
+                    .flatten()
+                    .map(|c| Comment {
+                        id: c.id.clone(),
+                        author: c
+                            .author
+                            .as_ref()
+                            .map(|a| a.login.clone())
+                            .unwrap_or_else(|| "ghost".into()),
+                        body: c.body.clone(),
+                        created_at: c.created_at.clone(),
+                        reactions: c
+                            .reaction_groups
+                            .as_ref()
+                            .map(|gs| {
+                                gs.iter()
+                                    .filter_map(|g| {
+                                        Some(ReactionSummary {
+                                            content: g.content.to_model()?,
+                                            count: g.reactors.total_count as usize,
+                                            viewer_has_reacted: g.viewer_has_reacted,
+                                        })
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let reactions = issue
+            .reaction_groups
+            .as_ref()
+            .map(|gs| {
+                gs.iter()
+                    .filter_map(|g| {
+                        Some(ReactionSummary {
+                            content: g.content.to_model()?,
+                            count: g.reactors.total_count as usize,
+                            viewer_has_reacted: g.viewer_has_reacted,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let state = match issue.state {
+            fetch_issue::IssueState::CLOSED => IssueState::Closed,
+            _ => IssueState::Open,
+        };
+        Ok(Card {
+            // Parent/Sub-issue はボード上の ProjectV2 item ではないので item_id を持たない。
+            // 代わりに content_id を流用しておく (ナビゲーション用途では未使用)。
+            item_id: issue.id.clone(),
+            content_id: Some(issue.id.clone()),
+            title: issue.title.clone(),
+            number: Some(issue.number as i32),
+            card_type: CardType::Issue { state },
+            assignees,
+            labels,
+            url: Some(issue.url.clone()),
+            body: Some(issue.body.clone()),
+            comments,
+            milestone: issue.milestone.as_ref().map(|m| m.title.clone()),
+            custom_fields: Vec::new(),
+            pr_status: None,
+            linked_prs: Vec::new(),
+            reactions,
+            archived: false,
+            parent_issue: issue.parent.as_ref().map(|p| ParentIssueRef {
+                id: p.id.clone(),
+                number: p.number as i32,
+                title: p.title.clone(),
+                url: Some(p.url.clone()),
+            }),
+            sub_issues_summary: Some(SubIssuesSummary {
+                completed: issue.sub_issues_summary.completed as i32,
+                total: issue.sub_issues_summary.total as i32,
+            }),
+            sub_issues: Vec::new(),
+        })
+    }
+
+    pub async fn fetch_sub_issues(&self, content_id: &str) -> anyhow::Result<Vec<SubIssueRef>> {
+        let vars = fetch_sub_issues::Variables {
+            id: content_id.to_string(),
+        };
+        let data = self.query::<FetchSubIssues>(vars).await?;
+        let node = data.node.context("Node not found")?;
+        let mut sub_issues = Vec::new();
+        if let fetch_sub_issues::FetchSubIssuesNode::Issue(issue) = node
+            && let Some(nodes) = issue.sub_issues.nodes
+        {
+            for n in nodes.into_iter().flatten() {
+                let state = match n.state {
+                    fetch_sub_issues::IssueState::CLOSED => IssueState::Closed,
+                    _ => IssueState::Open,
+                };
+                sub_issues.push(SubIssueRef {
+                    id: n.id,
+                    number: n.number as i32,
+                    title: n.title,
+                    state,
+                    url: Some(n.url),
+                });
+            }
+        }
+        Ok(sub_issues)
+    }
+
     pub async fn add_comment(
         &self,
         subject_id: &str,
@@ -1392,6 +1539,17 @@ fn convert_item(item: &ItemNode) -> Card {
         Some(Content::Issue(issue)) => Card {
             pr_status: None,
             linked_prs: build_linked_prs(issue),
+            parent_issue: issue.parent.as_ref().map(|p| ParentIssueRef {
+                id: p.id.clone(),
+                number: p.number as i32,
+                title: p.title.clone(),
+                url: Some(p.url.clone()),
+            }),
+            sub_issues_summary: Some(SubIssuesSummary {
+                completed: issue.sub_issues_summary.completed as i32,
+                total: issue.sub_issues_summary.total as i32,
+            }),
+            sub_issues: Vec::new(),
             item_id: item.id.clone(),
             archived: item.is_archived,
             content_id: Some(issue.id.clone()),
@@ -1482,6 +1640,9 @@ fn convert_item(item: &ItemNode) -> Card {
         Some(Content::PullRequest(pr)) => Card {
             pr_status: Some(build_pr_status(pr)),
             linked_prs: Vec::new(),
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: Vec::new(),
             item_id: item.id.clone(),
             archived: item.is_archived,
             content_id: Some(pr.id.clone()),
@@ -1573,6 +1734,9 @@ fn convert_item(item: &ItemNode) -> Card {
         Some(Content::DraftIssue(draft)) => Card {
             pr_status: None,
             linked_prs: Vec::new(),
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: Vec::new(),
             item_id: item.id.clone(),
             archived: item.is_archived,
             content_id: Some(draft.id.clone()),
@@ -1591,6 +1755,9 @@ fn convert_item(item: &ItemNode) -> Card {
         None => Card {
             pr_status: None,
             linked_prs: Vec::new(),
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: Vec::new(),
             item_id: item.id.clone(),
             archived: item.is_archived,
             content_id: None,

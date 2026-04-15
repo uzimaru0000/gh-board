@@ -5,7 +5,7 @@ use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::model::project::{Board, Card, Comment, Label, ProjectSummary};
+use crate::model::project::{Board, Card, Comment, Label, ProjectSummary, SubIssueRef};
 
 pub enum AppEvent {
     Key(KeyEvent),
@@ -29,6 +29,8 @@ pub enum AppEvent {
     CommentAdded(Result<Comment, String>),
     CommentUpdated(Result<Comment, String>),
     CommentsLoaded(Result<(String, Vec<Comment>), String>),
+    SubIssuesLoaded(Result<(String, Vec<SubIssueRef>), String>),
+    IssueDetailLoaded(Result<Box<Card>, String>),
     CustomFieldUpdated(Result<(), String>),
     ReactionToggled(Result<(), String>),
 }
