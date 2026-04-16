@@ -2,6 +2,7 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, BorderType, Borders},
     Frame,
 };
@@ -116,16 +117,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         };
 
         // タイトル: スクロール可能なら "N-M/Total"、そうでなければ "(Total)"
-        let title = if AppState::should_show_scrollbar(total, max_visible) {
+        let title_text = if AppState::should_show_scrollbar(total, max_visible) {
             let start = scroll + 1;
             let end = (scroll + max_visible).min(total);
             format!(" {} {start}-{end}/{total} ", column.name)
         } else {
             format!(" {} ({}) ", column.name, total)
         };
+        let mut title_spans: Vec<Span> = vec![Span::styled(title_text, title_style)];
+        if let Some(spinner) = loading_spinner_span(&app.state.loading) {
+            title_spans.push(spinner);
+        }
         let col_block = Block::default()
-            .title(title)
-            .title_style(title_style)
+            .title(Line::from(title_spans))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(border_style);
@@ -200,18 +204,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
     if has_right {
         draw_right_arrow(buf, area);
-    }
-
-    // プログレッシブレンダリング中のスピナー (右上に表示)
-    if let Some(spinner) = loading_spinner_span(&app.state.loading) {
-        let spinner_width = spinner.width() as u16;
-        let spinner_area = Rect {
-            x: area.x + area.width.saturating_sub(spinner_width + 1),
-            y: area.y,
-            width: spinner_width,
-            height: 1,
-        };
-        frame.render_widget(spinner, spinner_area);
     }
 }
 
