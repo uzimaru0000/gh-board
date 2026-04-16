@@ -1,4 +1,4 @@
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ProjectSummary {
     pub id: String,
     pub title: String,
@@ -6,7 +6,7 @@ pub struct ProjectSummary {
     pub description: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Board {
     pub project_title: String,
     pub grouping: Grouping,
@@ -17,7 +17,8 @@ pub struct Board {
 
 /// カンバンをグルーピングする軸 (SingleSelect or Iteration)。
 /// grouping が未決定のプロジェクト (groupable field がない) では None と同等の扱いで空 columns を返す。
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Grouping {
     SingleSelect { field_id: String, field_name: String },
     Iteration { field_id: String, field_name: String },
@@ -63,7 +64,7 @@ impl Board {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Column {
     pub option_id: String,
     pub name: String,
@@ -71,7 +72,8 @@ pub struct Column {
     pub cards: Vec<Card>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ColumnColor {
     Blue,
     Gray,
@@ -83,7 +85,7 @@ pub enum ColumnColor {
     Yellow,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Card {
     pub item_id: String,
     pub content_id: Option<String>,
@@ -106,7 +108,7 @@ pub struct Card {
     pub sub_issues: Vec<SubIssueRef>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ParentIssueRef {
     pub id: String,
     pub number: i32,
@@ -114,7 +116,7 @@ pub struct ParentIssueRef {
     pub url: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct SubIssueRef {
     pub id: String,
     pub number: i32,
@@ -123,13 +125,13 @@ pub struct SubIssueRef {
     pub url: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct SubIssuesSummary {
     pub completed: i32,
     pub total: i32,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct LinkedPr {
     pub number: i32,
     pub title: String,
@@ -137,14 +139,15 @@ pub struct LinkedPr {
     pub state: PrState,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct PrStatus {
     pub ci: Option<CiStatus>,
     pub review_decision: Option<ReviewDecision>,
     pub review_requests: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CiStatus {
     Success,
     Failure,
@@ -153,14 +156,16 @@ pub enum CiStatus {
     Expected,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReviewDecision {
     Approved,
     ChangesRequested,
     ReviewRequired,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FieldDefinition {
     SingleSelect {
         id: String,
@@ -208,14 +213,14 @@ impl FieldDefinition {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct SingleSelectOption {
     pub id: String,
     pub name: String,
     pub color: Option<ColumnColor>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct IterationOption {
     pub id: String,
     pub title: String,
@@ -224,7 +229,8 @@ pub struct IterationOption {
     pub completed: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CustomFieldValue {
     SingleSelect {
         field_id: String,
@@ -263,7 +269,7 @@ impl CustomFieldValue {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Comment {
     pub id: String,
     pub author: String,
@@ -272,7 +278,8 @@ pub struct Comment {
     pub reactions: Vec<ReactionSummary>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReactionContent {
     ThumbsUp,
     ThumbsDown,
@@ -312,7 +319,7 @@ impl ReactionContent {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ReactionSummary {
     pub content: ReactionContent,
     pub count: usize,
@@ -349,34 +356,37 @@ pub fn apply_reaction_toggle(
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CardType {
     Issue { state: IssueState },
     PullRequest { state: PrState },
     DraftIssue,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum IssueState {
     Open,
     Closed,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PrState {
     Open,
     Closed,
     Merged,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Label {
     pub id: String,
     pub name: String,
     pub color: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Repository {
     pub id: String,
     pub name_with_owner: String,

@@ -124,7 +124,8 @@ pub enum Command {
     Batch(Vec<Command>),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CustomFieldValueInput {
     SingleSelect { option_id: String },
     Iteration { iteration_id: String },
