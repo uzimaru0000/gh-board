@@ -1251,7 +1251,7 @@ impl AppState {
             let target_key = board.columns[target_column].option_id.clone();
             card.custom_fields.retain(|fv| fv.field_id() != field_id);
             match &board.grouping {
-                crate::model::project::Grouping::SingleSelect { .. } => {
+                crate::model::project::Grouping::SingleSelect { field_name: gfn, .. } => {
                     let (name, color) = board
                         .field_definitions
                         .iter()
@@ -1269,12 +1269,13 @@ impl AppState {
                         .unwrap_or_default();
                     card.custom_fields.push(CustomFieldValue::SingleSelect {
                         field_id: field_id.clone(),
+                        field_name: gfn.clone(),
                         option_id: target_key.clone(),
                         name,
                         color,
                     });
                 }
-                crate::model::project::Grouping::Iteration { .. } => {
+                crate::model::project::Grouping::Iteration { field_name: gfn, .. } => {
                     let title = board
                         .field_definitions
                         .iter()
@@ -1292,6 +1293,7 @@ impl AppState {
                         .unwrap_or_default();
                     card.custom_fields.push(CustomFieldValue::Iteration {
                         field_id: field_id.clone(),
+                        field_name: gfn.clone(),
                         iteration_id: target_key.clone(),
                         title,
                     });
@@ -2174,7 +2176,7 @@ impl AppState {
             {
                 card.custom_fields.retain(|fv| fv.field_id() != field_id);
                 match &board.grouping {
-                    crate::model::project::Grouping::SingleSelect { .. } => {
+                    crate::model::project::Grouping::SingleSelect { field_name: gfn, .. } => {
                         let (name, color) = board
                             .field_definitions
                             .iter()
@@ -2192,12 +2194,13 @@ impl AppState {
                             .unwrap_or_default();
                         card.custom_fields.push(CustomFieldValue::SingleSelect {
                             field_id: field_id.clone(),
+                            field_name: gfn.clone(),
                             option_id: target_key.clone(),
                             name,
                             color,
                         });
                     }
-                    crate::model::project::Grouping::Iteration { .. } => {
+                    crate::model::project::Grouping::Iteration { field_name: gfn, .. } => {
                         let title = board
                             .field_definitions
                             .iter()
@@ -2215,6 +2218,7 @@ impl AppState {
                             .unwrap_or_default();
                         card.custom_fields.push(CustomFieldValue::Iteration {
                             field_id: field_id.clone(),
+                            field_name: gfn.clone(),
                             iteration_id: target_key.clone(),
                             title,
                         });
@@ -3747,6 +3751,7 @@ impl AppState {
         {
             Some(SidebarEditMode::CustomFieldSingleSelect {
                 field_id,
+                field_name,
                 options,
                 cursor,
                 ..
@@ -3766,6 +3771,7 @@ impl AppState {
                     let opt = &options[cursor];
                     let new_val = CustomFieldValue::SingleSelect {
                         field_id: field_id.clone(),
+                        field_name: field_name.clone(),
                         option_id: opt.id.clone(),
                         name: opt.name.clone(),
                         color: opt.color.clone(),
@@ -3786,6 +3792,7 @@ impl AppState {
             }
             Some(SidebarEditMode::CustomFieldIteration {
                 field_id,
+                field_name,
                 iterations,
                 cursor,
                 ..
@@ -3804,6 +3811,7 @@ impl AppState {
                     let it = &iterations[cursor];
                     let new_val = CustomFieldValue::Iteration {
                         field_id: field_id.clone(),
+                        field_name: field_name.clone(),
                         iteration_id: it.id.clone(),
                         title: it.title.clone(),
                     };
@@ -3933,7 +3941,7 @@ impl AppState {
         let edit = self.sidebar_edit.take();
         match edit {
             Some(SidebarEditMode::CustomFieldText {
-                field_id, input, ..
+                field_id, field_name, input, ..
             }) => {
                 if input.is_empty() {
                     self.apply_custom_field_optimistic(&field_id, None);
@@ -3945,6 +3953,7 @@ impl AppState {
                 } else {
                     let new_val = CustomFieldValue::Text {
                         field_id: field_id.clone(),
+                        field_name: field_name.clone(),
                         text: input.clone(),
                     };
                     self.apply_custom_field_optimistic(&field_id, Some(new_val));
@@ -3974,6 +3983,7 @@ impl AppState {
                     Ok(n) if n.is_finite() => {
                         let new_val = CustomFieldValue::Number {
                             field_id: field_id.clone(),
+                            field_name: field_name.clone(),
                             number: n,
                         };
                         self.apply_custom_field_optimistic(&field_id, Some(new_val));
@@ -4013,6 +4023,7 @@ impl AppState {
                 if is_valid_iso_date(&input) {
                     let new_val = CustomFieldValue::Date {
                         field_id: field_id.clone(),
+                        field_name: field_name.clone(),
                         date: input.clone(),
                     };
                     self.apply_custom_field_optimistic(&field_id, Some(new_val));
@@ -8431,6 +8442,7 @@ mod tests {
             "Card A",
             vec![CustomFieldValue::SingleSelect {
                 field_id: "fld_priority".into(),
+                field_name: "Priority".into(),
                 option_id: "opt_p1".into(),
                 name: "P1".into(),
                 color: Some(ColumnColor::Orange),
@@ -8500,6 +8512,7 @@ mod tests {
             "Card A",
             vec![CustomFieldValue::SingleSelect {
                 field_id: "fld_priority".into(),
+                field_name: "Priority".into(),
                 option_id: "opt_p1".into(),
                 name: "P1".into(),
                 color: Some(ColumnColor::Orange),
@@ -8734,6 +8747,7 @@ mod tests {
                         "A",
                         vec![CustomFieldValue::SingleSelect {
                             field_id: "field_priority".into(),
+                            field_name: "Priority".into(),
                             option_id: "opt_p1".into(),
                             name: "P1".into(),
                             color: None,
@@ -8744,6 +8758,7 @@ mod tests {
                         "B",
                         vec![CustomFieldValue::Iteration {
                             field_id: "field_sprint".into(),
+                            field_name: "Sprint".into(),
                             iteration_id: "it_1".into(),
                             title: "Sprint 1".into(),
                         }],
@@ -9026,6 +9041,7 @@ mod tests {
             .custom_fields
             .push(CustomFieldValue::SingleSelect {
                 field_id: "field_status".into(),
+                field_name: "Status".into(),
                 option_id: "opt_todo".into(),
                 name: "Todo".into(),
                 color: None,
