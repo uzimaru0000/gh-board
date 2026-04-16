@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] - 2026-04-16
+
+### Added
+
+- `item list` CLI subcommand with custom field values (#56)
+
+### Changed
+
+- **BREAKING**: Remove `card create-issue` subcommand; use `card create --type issue` instead (#57)
+- Include field name in `item list` custom field output for readability
+
 ## [0.4.0] - 2026-04-16
 
 ### Added
@@ -78,6 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Wide character bleeding through detail modal left border
 
+[1.0.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.0.0
 [0.4.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v0.4.0
 [0.3.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v0.3.0
 [0.2.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v0.2.0
