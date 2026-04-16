@@ -15,6 +15,13 @@ pub enum Command {
         /// 空 vec の場合はフィルタなし。複数の場合は OR として各クエリを実行しマージ。
         queries: Vec<String>,
     },
+    /// プログレッシブレンダリング: 2ページ目以降を取得
+    LoadBoardNextPage {
+        project_id: String,
+        preferred_grouping_field_name: Option<String>,
+        pagination: Vec<crate::model::project::PaginationState>,
+        generation: u64,
+    },
     MoveCard {
         project_id: String,
         item_id: String,
@@ -85,6 +92,11 @@ pub enum Command {
     UpdateComment {
         comment_id: String,
         body: String,
+    },
+    /// Detail ビュー表示時に body / comments / reactions / linked_prs を遅延取得
+    FetchCardDetail {
+        item_id: String,
+        content_id: String,
     },
     FetchComments {
         content_id: String,

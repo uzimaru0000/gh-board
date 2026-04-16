@@ -101,36 +101,9 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
               number
               state
               url
-              body
               milestone { title }
               assignees(first: 5) { nodes { login } }
               labels(first: 10) { nodes { id name color } }
-              reactionGroups {
-                content
-                viewerHasReacted
-                reactors { totalCount }
-              }
-              comments(first: 20) {
-                nodes {
-                  id
-                  author { __typename login }
-                  body
-                  createdAt
-                  reactionGroups {
-                    content
-                    viewerHasReacted
-                    reactors { totalCount }
-                  }
-                }
-              }
-              closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
-                nodes {
-                  number
-                  title
-                  url
-                  state
-                }
-              }
               parent {
                 id
                 number
@@ -148,28 +121,9 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
               number
               state
               url
-              body
               milestone { title }
               assignees(first: 5) { nodes { login } }
               labels(first: 10) { nodes { id name color } }
-              reactionGroups {
-                content
-                viewerHasReacted
-                reactors { totalCount }
-              }
-              comments(first: 20) {
-                nodes {
-                  id
-                  author { __typename login }
-                  body
-                  createdAt
-                  reactionGroups {
-                    content
-                    viewerHasReacted
-                    reactors { totalCount }
-                  }
-                }
-              }
               reviewDecision
               reviewRequests(first: 10) {
                 nodes {
@@ -191,7 +145,6 @@ query ProjectBoard($projectId: ID!, $itemsCursor: String, $query: String) {
             ... on DraftIssue {
               id
               title
-              body
             }
           }
         }

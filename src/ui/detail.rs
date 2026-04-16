@@ -258,17 +258,29 @@ fn render_content_pane(
     };
 
     // Body
-    let body_text = card.body.as_deref().unwrap_or("");
-    if body_text.is_empty() {
-        push_text(
-            &mut tagged,
-            Line::from(Span::styled(
-                "(No description)",
-                Style::default().fg(theme().text_muted),
-            )),
-        );
-    } else {
-        render_markdown(body_text, &mut tagged);
+    match card.body.as_deref() {
+        None => {
+            // body 未取得 (FetchCardDetail 待ち)
+            push_text(
+                &mut tagged,
+                Line::from(Span::styled(
+                    "Loading...",
+                    Style::default().fg(theme().text_muted),
+                )),
+            );
+        }
+        Some("") => {
+            push_text(
+                &mut tagged,
+                Line::from(Span::styled(
+                    "(No description)",
+                    Style::default().fg(theme().text_muted),
+                )),
+            );
+        }
+        Some(body_text) => {
+            render_markdown(body_text, &mut tagged);
+        }
     }
 
     // Body reactions (if any)

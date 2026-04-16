@@ -252,3 +252,11 @@ pub struct AddReactionMutation;
     response_derives = "Debug"
 )]
 pub struct RemoveReactionMutation;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "schema.graphql",
+    query_path = "src/github/graphql/fetch_card_detail.graphql",
+    response_derives = "Debug"
+)]
+pub struct FetchCardDetail;

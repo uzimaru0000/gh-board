@@ -5,7 +5,9 @@ use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::model::project::{Board, Card, Comment, Label, ProjectSummary, SubIssueRef};
+use crate::model::project::{
+    Board, Card, CardDetail, Comment, Label, PaginationState, ProjectSummary, SubIssueRef,
+};
 
 pub enum AppEvent {
     Key(KeyEvent),
@@ -15,6 +17,8 @@ pub enum AppEvent {
     ProjectsLoaded(Result<Vec<ProjectSummary>, String>),
     ProjectLoaded(Result<ProjectSummary, String>),
     BoardLoaded(Result<Board, String>),
+    /// プログレッシブレンダリング: 追加ページのカード
+    BoardPageLoaded(Result<BoardPageData, String>),
     CardMoved(Result<(), String>),
     CardArchived(Result<(), String>),
     CardUnarchived(Result<String, String>),
@@ -28,11 +32,19 @@ pub enum AppEvent {
     CardUpdated(Result<(), String>),
     CommentAdded(Result<Comment, String>),
     CommentUpdated(Result<Comment, String>),
+    /// Detail ビュー用の遅延取得結果 (item_id, detail)
+    CardDetailLoaded(Result<(String, CardDetail), String>),
     CommentsLoaded(Result<(String, Vec<Comment>), String>),
     SubIssuesLoaded(Result<(String, Vec<SubIssueRef>), String>),
     IssueDetailLoaded(Result<Box<Card>, String>),
     CustomFieldUpdated(Result<(), String>),
     ReactionToggled(Result<(), String>),
+}
+
+pub struct BoardPageData {
+    pub cards: Vec<Card>,
+    pub remaining: Vec<PaginationState>,
+    pub generation: u64,
 }
 
 pub struct EventHandler {

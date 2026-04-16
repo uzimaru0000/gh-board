@@ -1,0 +1,61 @@
+query FetchCardDetail($id: ID!) {
+  node(id: $id) {
+    __typename
+    ... on Issue {
+      id
+      body
+      reactionGroups {
+        content
+        viewerHasReacted
+        reactors { totalCount }
+      }
+      comments(first: 20) {
+        nodes {
+          id
+          author { __typename login }
+          body
+          createdAt
+          reactionGroups {
+            content
+            viewerHasReacted
+            reactors { totalCount }
+          }
+        }
+      }
+      closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
+        nodes {
+          number
+          title
+          url
+          state
+        }
+      }
+    }
+    ... on PullRequest {
+      id
+      body
+      reactionGroups {
+        content
+        viewerHasReacted
+        reactors { totalCount }
+      }
+      comments(first: 20) {
+        nodes {
+          id
+          author { __typename login }
+          body
+          createdAt
+          reactionGroups {
+            content
+            viewerHasReacted
+            reactors { totalCount }
+          }
+        }
+      }
+    }
+    ... on DraftIssue {
+      id
+      body
+    }
+  }
+}
