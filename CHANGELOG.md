@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-04-16
+
+### Added
+
+- CLI subcommands for coding agent integration (#46)
+- Preset color themes and theme.toml support (#44)
+
 ## [0.3.0] - 2026-04-15
 
 ### Added
@@ -71,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Wide character bleeding through detail modal left border
 
+[0.4.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v0.4.0
 [0.3.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v0.3.0
 [0.2.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v0.2.0
 [0.1.1]: https://github.com/uzimaru0000/gh-board/releases/tag/v0.1.1
