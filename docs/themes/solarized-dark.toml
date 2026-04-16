@@ -1,0 +1,23 @@
+# Solarized Dark
+# https://ethanschoonover.com/solarized/
+#
+# ~/.config/gh-board/theme.toml にコピーしてください
+
+[theme]
+text = "#839496"            # base0
+text_dim = "#586E75"        # base01
+text_muted = "#073642"      # base02
+text_inverted = "#002B36"   # base03
+border_focused = "#268BD2"  # blue
+border_unfocused = "#586E75" # base01
+accent = "#268BD2"          # blue
+shadow_fg = "#073642"       # base02
+shadow_bg = "#002B36"       # base03
+blue = "#268BD2"            # blue
+gray = "#586E75"            # base01
+green = "#859900"           # green
+orange = "#CB4B16"          # orange
+pink = "#D33682"            # magenta
+purple = "#6C71C4"          # violet
+red = "#DC322F"             # red
+yellow = "#B58900"          # yellow

@@ -1,0 +1,23 @@
+# Catppuccin Latte
+# https://github.com/catppuccin/catppuccin
+#
+# ~/.config/gh-board/theme.toml にコピーしてください
+
+[theme]
+text = "#4C4F69"            # Text
+text_dim = "#6C6F85"        # Subtext0
+text_muted = "#9CA0B0"      # Overlay0
+text_inverted = "#EFF1F5"   # Base
+border_focused = "#8839EF"  # Mauve
+border_unfocused = "#CCD0DA" # Surface0
+accent = "#8839EF"          # Mauve
+shadow_fg = "#CCD0DA"       # Surface0
+shadow_bg = "#DCE0E8"       # Crust
+blue = "#1E66F5"            # Blue
+gray = "#8C8FA1"            # Overlay1
+green = "#40A02B"           # Green
+orange = "#FE640B"          # Peach
+pink = "#EA76CB"            # Pink
+purple = "#8839EF"          # Mauve
+red = "#D20F39"             # Red
+yellow = "#DF8E1D"          # Yellow

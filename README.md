@@ -18,7 +18,7 @@ A [gh](https://cli.github.com/) CLI extension to manage GitHub Projects V2 as a 
 - **Comments** — post new comments and edit your own (`$EDITOR` integration)
 - **Filter** — free text, `label:`, `assignee:`, `milestone:`, compound `AND`/`OR`
 - **Fuzzy project selection** — quickly find projects with fuzzy matching
-- **Configurable key bindings & theme** — customize via `config.toml`
+- **Configurable key bindings & theme** — customize via `config.toml` / `theme.toml`
 
 ## Installation
 
@@ -116,12 +116,19 @@ Modes: `global`, `board`, `project_select`, `detail_content`, `detail_sidebar`, 
 
 Key notation: `j`, `Enter`, `Esc`, `Tab`, `S-Tab`, `Space`, `Up`, `Down`, `Left`, `Right`, `Backspace`, `C-c` (Ctrl), `A-x` (Alt)
 
-### Theme & Views
+### Theme
+
+Place a theme file at `~/.config/gh-board/theme.toml` to change the color theme.
+See [`docs/themes/`](docs/themes/) for preset themes.
+
+```bash
+# Example: apply Catppuccin Mocha
+cp docs/themes/catppuccin-mocha.toml ~/.config/gh-board/theme.toml
+```
+
+### Views
 
 ```toml
-[theme]
-accent = "red"
-
 [[view]]
 name = "Bugs"
 filter = "label:bug"

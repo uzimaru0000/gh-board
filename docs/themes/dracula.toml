@@ -1,0 +1,23 @@
+# Dracula
+# https://draculatheme.com
+#
+# ~/.config/gh-board/theme.toml にコピーしてください
+
+[theme]
+text = "#F8F8F2"            # Foreground
+text_dim = "#6272A4"        # Comment
+text_muted = "#44475A"      # Selection
+text_inverted = "#282A36"   # Background
+border_focused = "#BD93F9"  # Purple
+border_unfocused = "#6272A4" # Comment
+accent = "#BD93F9"          # Purple
+shadow_fg = "#44475A"       # Selection
+shadow_bg = "#21222C"       # Darker background
+blue = "#8BE9FD"            # Cyan
+gray = "#6272A4"            # Comment
+green = "#50FA7B"           # Green
+orange = "#FFB86C"          # Orange
+pink = "#FF79C6"            # Pink
+purple = "#BD93F9"          # Purple
+red = "#FF5555"             # Red
+yellow = "#F1FA8C"          # Yellow

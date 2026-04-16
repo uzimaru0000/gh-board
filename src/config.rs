@@ -26,7 +26,6 @@ pub struct ViewConfig {
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
-    pub theme: ThemeConfig,
     #[serde(default)]
     pub view: Vec<ViewConfig>,
     #[serde(default)]
@@ -221,14 +220,22 @@ fn parse_color_str(s: &str) -> Option<Color> {
     }
 }
 
-pub fn config_path() -> PathBuf {
-    let config_dir = std::env::var("XDG_CONFIG_HOME")
+fn config_dir() -> PathBuf {
+    std::env::var("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
             PathBuf::from(home).join(".config")
-        });
-    config_dir.join("gh-board").join("config.toml")
+        })
+        .join("gh-board")
+}
+
+pub fn config_path() -> PathBuf {
+    config_dir().join("config.toml")
+}
+
+pub fn theme_path() -> PathBuf {
+    config_dir().join("theme.toml")
 }
 
 pub fn load_config() -> anyhow::Result<Config> {
@@ -243,27 +250,47 @@ pub fn load_config() -> anyhow::Result<Config> {
     Ok(config)
 }
 
+/// `~/.config/gh-board/theme.toml` が存在すればそのテーマ設定を返す。
+#[derive(Deserialize)]
+pub(crate) struct ThemeFile {
+    #[serde(default)]
+    pub theme: ThemeConfig,
+}
+
+/// `~/.config/gh-board/theme.toml` が存在すればそのテーマ設定を返す。
+pub fn load_theme_file() -> anyhow::Result<Option<ThemeConfig>> {
+    let path = theme_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", path.display()))?;
+    let file: ThemeFile = toml::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse {}: {e}", path.display()))?;
+    Ok(Some(file.theme))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_empty_toml() {
-        let config: Config = toml::from_str("").unwrap();
-        assert!(matches!(config.theme.text.0, Color::White));
-        assert!(matches!(config.theme.accent.0, Color::Cyan));
+    fn test_theme_default() {
+        let theme = ThemeConfig::default();
+        assert!(matches!(theme.text.0, Color::White));
+        assert!(matches!(theme.accent.0, Color::Cyan));
     }
 
     #[test]
-    fn test_parse_partial_theme() {
+    fn test_theme_partial() {
         let toml = r#"
 [theme]
 accent = "red"
 "#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(matches!(config.theme.accent.0, Color::Red));
+        let file: ThemeFile = toml::from_str(toml).unwrap();
+        assert!(matches!(file.theme.accent.0, Color::Red));
         // unchanged defaults
-        assert!(matches!(config.theme.text.0, Color::White));
+        assert!(matches!(file.theme.text.0, Color::White));
     }
 
     #[test]
@@ -274,10 +301,10 @@ text = "cyan"
 text_dim = "dark_gray"
 text_muted = "lightblue"
 "#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(matches!(config.theme.text.0, Color::Cyan));
-        assert!(matches!(config.theme.text_dim.0, Color::DarkGray));
-        assert!(matches!(config.theme.text_muted.0, Color::LightBlue));
+        let file: ThemeFile = toml::from_str(toml).unwrap();
+        assert!(matches!(file.theme.text.0, Color::Cyan));
+        assert!(matches!(file.theme.text_dim.0, Color::DarkGray));
+        assert!(matches!(file.theme.text_muted.0, Color::LightBlue));
     }
 
     #[test]
@@ -286,8 +313,8 @@ text_muted = "lightblue"
 [theme]
 accent = "#FF6600"
 "##;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(matches!(config.theme.accent.0, Color::Rgb(255, 102, 0)));
+        let file: ThemeFile = toml::from_str(toml).unwrap();
+        assert!(matches!(file.theme.accent.0, Color::Rgb(255, 102, 0)));
     }
 
     #[test]
@@ -296,8 +323,8 @@ accent = "#FF6600"
 [theme]
 blue = [100, 149, 237]
 "#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(matches!(config.theme.blue.0, Color::Rgb(100, 149, 237)));
+        let file: ThemeFile = toml::from_str(toml).unwrap();
+        assert!(matches!(file.theme.blue.0, Color::Rgb(100, 149, 237)));
     }
 
     #[test]
@@ -306,7 +333,7 @@ blue = [100, 149, 237]
 [theme]
 accent = "not_a_color"
 "#;
-        let result: Result<Config, _> = toml::from_str(toml);
+        let result: Result<ThemeFile, _> = toml::from_str(toml);
         assert!(result.is_err());
     }
 
@@ -316,7 +343,7 @@ accent = "not_a_color"
 [theme]
 blue = [100, 149]
 "#;
-        let result: Result<Config, _> = toml::from_str(toml);
+        let result: Result<ThemeFile, _> = toml::from_str(toml);
         assert!(result.is_err());
     }
 
@@ -342,14 +369,14 @@ purple = "#A371F7"
 red = "#F45151"
 yellow = "#FFD633"
 "##;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(matches!(config.theme.text.0, Color::White));
+        let file: ThemeFile = toml::from_str(toml).unwrap();
+        assert!(matches!(file.theme.text.0, Color::White));
         assert!(matches!(
-            config.theme.border_focused.0,
+            file.theme.border_focused.0,
             Color::Rgb(0, 255, 255)
         ));
         assert!(matches!(
-            config.theme.shadow_fg.0,
+            file.theme.shadow_fg.0,
             Color::Rgb(60, 60, 60)
         ));
     }
@@ -448,17 +475,13 @@ name = "Bugs"
     }
 
     #[test]
-    fn test_parse_views_with_theme() {
+    fn test_parse_views() {
         let toml = r#"
-[theme]
-accent = "red"
-
 [[view]]
 name = "Bugs"
 filter = "label:bug"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
-        assert!(matches!(config.theme.accent.0, Color::Red));
         assert_eq!(config.view.len(), 1);
         assert_eq!(config.view[0].name, "Bugs");
     }
@@ -493,11 +516,8 @@ move_up = ["p", "Up"]
     }
 
     #[test]
-    fn test_parse_keys_config_with_theme_and_views() {
+    fn test_parse_keys_config_with_views() {
         let toml = r#"
-[theme]
-accent = "red"
-
 [[view]]
 name = "Bugs"
 filter = "label:bug"
@@ -506,7 +526,6 @@ filter = "label:bug"
 refresh = ["R"]
 "#;
         let config: Config = toml::from_str(toml).unwrap();
-        assert!(matches!(config.theme.accent.0, Color::Red));
         assert_eq!(config.view.len(), 1);
         assert_eq!(config.keys.board.get("refresh").unwrap(), &vec!["R".to_string()]);
     }

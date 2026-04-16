@@ -1,0 +1,23 @@
+# Gruvbox Light
+# https://github.com/morhetz/gruvbox
+#
+# ~/.config/gh-board/theme.toml にコピーしてください
+
+[theme]
+text = "#3C3836"            # fg (dark1)
+text_dim = "#665C54"        # dark4
+text_muted = "#928374"      # gray
+text_inverted = "#FBF1C7"   # bg (light0)
+border_focused = "#B57614"  # faded yellow
+border_unfocused = "#D5C4A1" # light3
+accent = "#B57614"          # faded yellow
+shadow_fg = "#D5C4A1"       # light3
+shadow_bg = "#EBDBB2"       # light1
+blue = "#076678"            # faded blue
+gray = "#928374"            # gray
+green = "#79740E"           # faded green
+orange = "#AF3A03"          # faded orange
+pink = "#8F3F71"            # faded purple (closest to pink)
+purple = "#8F3F71"          # faded purple
+red = "#9D0006"             # faded red
+yellow = "#B57614"          # faded yellow

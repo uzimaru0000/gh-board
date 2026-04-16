@@ -46,7 +46,12 @@ async fn main() -> Result<()> {
         eprintln!("Warning: failed to load config: {e}");
         config::Config::default()
     });
-    ui::theme::init_theme(&cfg.theme);
+    let theme_cfg = config::load_theme_file().unwrap_or_else(|e| {
+        eprintln!("Warning: failed to load theme: {e}");
+        None
+    });
+    let default_theme = config::ThemeConfig::default();
+    ui::theme::init_theme(theme_cfg.as_ref().unwrap_or(&default_theme));
 
     let cli = Cli::parse();
     let github = GitHubClient::new().await?;

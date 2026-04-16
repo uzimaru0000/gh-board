@@ -1,0 +1,23 @@
+# Nord
+# https://www.nordtheme.com
+#
+# ~/.config/gh-board/theme.toml にコピーしてください
+
+[theme]
+text = "#D8DEE9"            # nord4 (Snow Storm)
+text_dim = "#81A1C1"        # nord9 (Frost)
+text_muted = "#4C566A"      # nord3 (Polar Night)
+text_inverted = "#2E3440"   # nord0 (Polar Night)
+border_focused = "#88C0D0"  # nord8 (Frost)
+border_unfocused = "#4C566A" # nord3 (Polar Night)
+accent = "#88C0D0"          # nord8 (Frost)
+shadow_fg = "#3B4252"       # nord1
+shadow_bg = "#2E3440"       # nord0
+blue = "#5E81AC"            # nord10 (Frost)
+gray = "#4C566A"            # nord3 (Polar Night)
+green = "#A3BE8C"           # nord14 (Aurora)
+orange = "#D08770"          # nord12 (Aurora)
+pink = "#B48EAD"            # nord15 (Aurora)
+purple = "#B48EAD"          # nord15 (Aurora)
+red = "#BF616A"             # nord11 (Aurora)
+yellow = "#EBCB8B"          # nord13 (Aurora)

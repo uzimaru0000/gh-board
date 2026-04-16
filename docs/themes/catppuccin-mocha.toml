@@ -1,0 +1,23 @@
+# Catppuccin Mocha
+# https://github.com/catppuccin/catppuccin
+#
+# ~/.config/gh-board/theme.toml にコピーしてください
+
+[theme]
+text = "#CDD6F4"           # Text
+text_dim = "#A6ADC8"        # Subtext0
+text_muted = "#6C7086"      # Overlay0
+text_inverted = "#11111B"   # Crust
+border_focused = "#CBA6F7"  # Mauve
+border_unfocused = "#585B70" # Surface2
+accent = "#CBA6F7"          # Mauve
+shadow_fg = "#313244"       # Surface0
+shadow_bg = "#11111B"       # Crust
+blue = "#89B4FA"            # Blue
+gray = "#7F849C"            # Overlay1
+green = "#A6E3A1"           # Green
+orange = "#FAB387"          # Peach
+pink = "#F5C2E7"            # Pink
+purple = "#CBA6F7"          # Mauve
+red = "#F38BA8"             # Red
+yellow = "#F9E2AF"          # Yellow

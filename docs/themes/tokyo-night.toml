@@ -1,0 +1,23 @@
+# Tokyo Night
+# https://github.com/enkia/tokyo-night-vscode-theme
+#
+# ~/.config/gh-board/theme.toml にコピーしてください
+
+[theme]
+text = "#A9B1D6"            # Foreground
+text_dim = "#565F89"        # Comment
+text_muted = "#3B4261"      # Dark comment
+text_inverted = "#1A1B26"   # Background
+border_focused = "#7AA2F7"  # Blue
+border_unfocused = "#3B4261" # Comment
+accent = "#7AA2F7"          # Blue
+shadow_fg = "#292E42"       # Dark surface
+shadow_bg = "#16161E"       # Dark background
+blue = "#7AA2F7"            # Blue
+gray = "#565F89"            # Comment
+green = "#9ECE6A"           # Green
+orange = "#FF9E64"          # Orange
+pink = "#F7768E"            # Red/Pink
+purple = "#BB9AF7"          # Purple
+red = "#F7768E"             # Red
+yellow = "#E0AF68"          # Yellow
