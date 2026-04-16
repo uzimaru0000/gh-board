@@ -1173,7 +1173,7 @@ fn build_board(
                         && let Some(option_id) = sv.option_id.clone()
                     {
                         let def = field_definitions.iter().find(|d| d.id() == f.id);
-                        let Some(FieldDefinition::SingleSelect { options, .. }) = def else {
+                        let Some(FieldDefinition::SingleSelect { name: field_name, options, .. }) = def else {
                             continue;
                         };
                         let color = options
@@ -1182,6 +1182,7 @@ fn build_board(
                             .and_then(|o| o.color.clone());
                         card.custom_fields.push(CustomFieldValue::SingleSelect {
                             field_id: f.id.clone(),
+                            field_name: field_name.clone(),
                             option_id,
                             name: sv.name.clone().unwrap_or_default(),
                             color,
@@ -1191,13 +1192,12 @@ fn build_board(
                 FVNode::ProjectV2ItemFieldTextValue(tv) => {
                     use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldTextValueField as TField;
                     if let TField::ProjectV2Field(f) = &tv.field
-                        && matches!(
-                            field_definitions.iter().find(|d| d.id() == f.id),
-                            Some(FieldDefinition::Text { .. })
-                        )
+                        && let Some(FieldDefinition::Text { name: field_name, .. }) =
+                            field_definitions.iter().find(|d| d.id() == f.id)
                     {
                         card.custom_fields.push(CustomFieldValue::Text {
                             field_id: f.id.clone(),
+                            field_name: field_name.clone(),
                             text: tv.text.clone().unwrap_or_default(),
                         });
                     }
@@ -1206,13 +1206,12 @@ fn build_board(
                     use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldNumberValueField as NField;
                     if let NField::ProjectV2Field(f) = &nv.field
                         && let Some(n) = nv.number
-                        && matches!(
-                            field_definitions.iter().find(|d| d.id() == f.id),
-                            Some(FieldDefinition::Number { .. })
-                        )
+                        && let Some(FieldDefinition::Number { name: field_name, .. }) =
+                            field_definitions.iter().find(|d| d.id() == f.id)
                     {
                         card.custom_fields.push(CustomFieldValue::Number {
                             field_id: f.id.clone(),
+                            field_name: field_name.clone(),
                             number: n,
                         });
                     }
@@ -1221,13 +1220,12 @@ fn build_board(
                     use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldDateValueField as DField;
                     if let DField::ProjectV2Field(f) = &dv.field
                         && let Some(d) = dv.date.clone()
-                        && matches!(
-                            field_definitions.iter().find(|d| d.id() == f.id),
-                            Some(FieldDefinition::Date { .. })
-                        )
+                        && let Some(FieldDefinition::Date { name: field_name, .. }) =
+                            field_definitions.iter().find(|d| d.id() == f.id)
                     {
                         card.custom_fields.push(CustomFieldValue::Date {
                             field_id: f.id.clone(),
+                            field_name: field_name.clone(),
                             date: d,
                         });
                     }
@@ -1235,13 +1233,12 @@ fn build_board(
                 FVNode::ProjectV2ItemFieldIterationValue(iv) => {
                     use project_board::ProjectBoardNodeOnProjectV2ItemsNodesFieldValuesNodesOnProjectV2ItemFieldIterationValueField as IField;
                     if let IField::ProjectV2IterationField(f) = &iv.field
-                        && matches!(
-                            field_definitions.iter().find(|d| d.id() == f.id),
-                            Some(FieldDefinition::Iteration { .. })
-                        )
+                        && let Some(FieldDefinition::Iteration { name: field_name, .. }) =
+                            field_definitions.iter().find(|d| d.id() == f.id)
                     {
                         card.custom_fields.push(CustomFieldValue::Iteration {
                             field_id: f.id.clone(),
+                            field_name: field_name.clone(),
                             iteration_id: iv.iteration_id.clone(),
                             title: iv.title.clone(),
                         });

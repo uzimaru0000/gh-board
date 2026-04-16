@@ -234,24 +234,29 @@ pub struct IterationOption {
 pub enum CustomFieldValue {
     SingleSelect {
         field_id: String,
+        field_name: String,
         option_id: String,
         name: String,
         color: Option<ColumnColor>,
     },
     Text {
         field_id: String,
+        field_name: String,
         text: String,
     },
     Number {
         field_id: String,
+        field_name: String,
         number: f64,
     },
     Date {
         field_id: String,
+        field_name: String,
         date: String,
     },
     Iteration {
         field_id: String,
+        field_name: String,
         iteration_id: String,
         title: String,
     },

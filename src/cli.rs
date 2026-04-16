@@ -42,6 +42,11 @@ pub enum CliCommand {
         #[command(subcommand)]
         action: AssigneeAction,
     },
+    /// List project items
+    Item {
+        #[command(subcommand)]
+        action: ItemAction,
+    },
     /// Output skills.md describing available CLI commands
     Skill,
 }
@@ -220,6 +225,18 @@ pub enum AssigneeAction {
     },
 }
 
+#[derive(Subcommand)]
+pub enum ItemAction {
+    /// List all items in a project (flat list with custom fields)
+    List {
+        /// Project number
+        number: i32,
+        /// Login of the owner
+        #[arg(long)]
+        owner: Option<String>,
+    },
+}
+
 pub async fn run(cmd: CliCommand, github: GitHubClient) -> anyhow::Result<()> {
     match cmd {
         CliCommand::Project { action } => run_project(action, &github).await,
@@ -229,6 +246,7 @@ pub async fn run(cmd: CliCommand, github: GitHubClient) -> anyhow::Result<()> {
         CliCommand::Field { action } => run_field(action, &github).await,
         CliCommand::Label { action } => run_label(action, &github).await,
         CliCommand::Assignee { action } => run_assignee(action, &github).await,
+        CliCommand::Item { action } => run_item(action, &github).await,
         CliCommand::Skill => {
             print!("{}", include_str!("../assets/skills.md"));
             Ok(())
@@ -464,6 +482,17 @@ async fn run_assignee(action: AssigneeAction, github: &GitHubClient) -> anyhow::
                 .map(|(id, login)| serde_json::json!({ "id": id, "login": login }))
                 .collect();
             print_json(&users)
+        }
+    }
+}
+
+async fn run_item(action: ItemAction, github: &GitHubClient) -> anyhow::Result<()> {
+    match action {
+        ItemAction::List { number, owner } => {
+            let project = resolve_project(github, number, owner.as_deref()).await?;
+            let board = github.get_board(&project.id, &[], None).await?;
+            let cards: Vec<_> = board.columns.into_iter().flat_map(|col| col.cards).collect();
+            print_json(&cards)
         }
     }
 }
