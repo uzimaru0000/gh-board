@@ -1,7 +1,7 @@
 ---
 name: release
 description: 変更内容からセマンティックバージョニングに基づいてバージョンを判定し、リリース準備を行う
-allowed-tools: Bash Read Edit Grep
+allowed-tools: Bash Read Edit Grep Write
 argument-hint: "[patch|minor|major]"
 ---
 
@@ -31,7 +31,32 @@ argument-hint: "[patch|minor|major]"
 - 引数がなければ、変更内容から自動判定した結果をユーザーに提案し、確認を取る
 - セマンティックバージョニング: `major.minor.patch`
 
-### 4. リリース準備を実行
+### 4. CHANGELOG を更新
+
+`CHANGELOG.md` に新バージョンのエントリを追加する。
+
+1. `CHANGELOG.md` を読み込む
+2. ステップ 2 で分析したコミットを [Keep a Changelog](https://keepachangelog.com/) 形式で分類する:
+   - **Added** — 新機能 (feat, add)
+   - **Changed** — 既存機能の変更
+   - **Fixed** — バグ修正 (fix)
+   - **Removed** — 削除された機能
+   - **Deprecated** — 非推奨になった機能
+   - Merge コミット、chore: bump version、CI のみの変更はスキップする
+3. `## [Unreleased]` の直後 (なければ最初の `## [x.y.z]` の直前) に新しいセクションを挿入する:
+   ```markdown
+   ## [X.Y.Z] - YYYY-MM-DD
+
+   ### Added
+   - 変更内容 (#Issue番号)
+   ```
+4. ファイル末尾のリンク一覧にも新バージョンのリンクを追加する:
+   ```markdown
+   [X.Y.Z]: https://github.com/uzimaru0000/gh-board/releases/tag/vX.Y.Z
+   ```
+5. ユーザーに CHANGELOG の内容を見せて確認を取る。修正の要望があれば反映する
+
+### 5. リリース準備を実行
 
 確認が取れたら、以下を行う:
 
@@ -48,3 +73,4 @@ argument-hint: "[patch|minor|major]"
 
 - push やリリース作成は絶対に自動実行しない。コマンドの案内のみ行う
 - タグの push により `.github/workflows/release.yml` が起動し、クロスコンパイル → GitHub Release 作成が自動で行われる
+- CHANGELOG は人間が読むものなので、コミットメッセージをそのまま貼るのではなく、ユーザー視点で意味のある変更内容にまとめる
