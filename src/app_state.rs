@@ -1507,19 +1507,17 @@ impl AppState {
 
         // 2. テキスト入力 (常時入力可)
         match key.code {
-            KeyCode::Backspace => {
-                if self.project_filter_cursor > 0 {
-                    let new_len = self
-                        .project_filter_query
-                        .char_indices()
-                        .take_while(|(i, _)| *i < self.project_filter_cursor)
-                        .last()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    self.project_filter_query.truncate(new_len);
-                    self.project_filter_cursor = new_len;
-                    self.recompute_filtered_projects();
-                }
+            KeyCode::Backspace if self.project_filter_cursor > 0 => {
+                let new_len = self
+                    .project_filter_query
+                    .char_indices()
+                    .take_while(|(i, _)| *i < self.project_filter_cursor)
+                    .last()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                self.project_filter_query.truncate(new_len);
+                self.project_filter_cursor = new_len;
+                self.recompute_filtered_projects();
             }
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.project_filter_query
@@ -1568,24 +1566,18 @@ impl AppState {
 
         // Text input handling (not configurable)
         match key.code {
-            KeyCode::Backspace => {
-                if self.filter.cursor_pos > 0 {
-                    let prev = prev_char_pos(&self.filter.input, self.filter.cursor_pos);
-                    self.filter.input.drain(prev..self.filter.cursor_pos);
-                    self.filter.cursor_pos = prev;
-                }
+            KeyCode::Backspace if self.filter.cursor_pos > 0 => {
+                let prev = prev_char_pos(&self.filter.input, self.filter.cursor_pos);
+                self.filter.input.drain(prev..self.filter.cursor_pos);
+                self.filter.cursor_pos = prev;
             }
-            KeyCode::Left => {
-                if self.filter.cursor_pos > 0 {
-                    self.filter.cursor_pos =
-                        prev_char_pos(&self.filter.input, self.filter.cursor_pos);
-                }
+            KeyCode::Left if self.filter.cursor_pos > 0 => {
+                self.filter.cursor_pos =
+                    prev_char_pos(&self.filter.input, self.filter.cursor_pos);
             }
-            KeyCode::Right => {
-                if self.filter.cursor_pos < self.filter.input.len() {
-                    self.filter.cursor_pos =
-                        next_char_pos(&self.filter.input, self.filter.cursor_pos);
-                }
+            KeyCode::Right if self.filter.cursor_pos < self.filter.input.len() => {
+                self.filter.cursor_pos =
+                    next_char_pos(&self.filter.input, self.filter.cursor_pos);
             }
             KeyCode::Char(c) => {
                 self.filter.input.insert(self.filter.cursor_pos, c);
@@ -2958,24 +2950,18 @@ impl AppState {
                     None => return Command::None,
                 };
                 match key.code {
-                    KeyCode::Backspace => {
-                        if state.title_cursor > 0 {
-                            let prev = prev_char_pos(&state.title_input, state.title_cursor);
-                            state.title_input.drain(prev..state.title_cursor);
-                            state.title_cursor = prev;
-                        }
+                    KeyCode::Backspace if state.title_cursor > 0 => {
+                        let prev = prev_char_pos(&state.title_input, state.title_cursor);
+                        state.title_input.drain(prev..state.title_cursor);
+                        state.title_cursor = prev;
                     }
-                    KeyCode::Left => {
-                        if state.title_cursor > 0 {
-                            state.title_cursor =
-                                prev_char_pos(&state.title_input, state.title_cursor);
-                        }
+                    KeyCode::Left if state.title_cursor > 0 => {
+                        state.title_cursor =
+                            prev_char_pos(&state.title_input, state.title_cursor);
                     }
-                    KeyCode::Right => {
-                        if state.title_cursor < state.title_input.len() {
-                            state.title_cursor =
-                                next_char_pos(&state.title_input, state.title_cursor);
-                        }
+                    KeyCode::Right if state.title_cursor < state.title_input.len() => {
+                        state.title_cursor =
+                            next_char_pos(&state.title_input, state.title_cursor);
                     }
                     KeyCode::Char(c) => {
                         state.title_input.insert(state.title_cursor, c);
@@ -4023,21 +4009,19 @@ impl AppState {
                 input.insert(byte, c);
                 *cursor_pos += 1;
             }
-            KeyCode::Backspace => {
-                if *cursor_pos > 0 {
-                    let prev_byte = input
-                        .char_indices()
-                        .nth(*cursor_pos - 1)
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    let cur_byte = input
-                        .char_indices()
-                        .nth(*cursor_pos)
-                        .map(|(i, _)| i)
-                        .unwrap_or(input.len());
-                    input.drain(prev_byte..cur_byte);
-                    *cursor_pos -= 1;
-                }
+            KeyCode::Backspace if *cursor_pos > 0 => {
+                let prev_byte = input
+                    .char_indices()
+                    .nth(*cursor_pos - 1)
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                let cur_byte = input
+                    .char_indices()
+                    .nth(*cursor_pos)
+                    .map(|(i, _)| i)
+                    .unwrap_or(input.len());
+                input.drain(prev_byte..cur_byte);
+                *cursor_pos -= 1;
             }
             KeyCode::Left => {
                 *cursor_pos = cursor_pos.saturating_sub(1);

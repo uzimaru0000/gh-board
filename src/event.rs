@@ -87,15 +87,15 @@ impl EventHandler {
                     }
                     event = reader.next() => {
                         match event {
-                            Some(Ok(crossterm::event::Event::Key(key))) => {
-                                if event_tx.send(AppEvent::Key(key)).is_err() {
-                                    break;
-                                }
+                            Some(Ok(crossterm::event::Event::Key(key)))
+                                if event_tx.send(AppEvent::Key(key)).is_err() =>
+                            {
+                                break;
                             }
-                            Some(Ok(crossterm::event::Event::Resize(w, h))) => {
-                                if event_tx.send(AppEvent::Resize(w, h)).is_err() {
-                                    break;
-                                }
+                            Some(Ok(crossterm::event::Event::Resize(w, h)))
+                                if event_tx.send(AppEvent::Resize(w, h)).is_err() =>
+                            {
+                                break;
                             }
                             Some(Err(_)) | None => break,
                             _ => {}
