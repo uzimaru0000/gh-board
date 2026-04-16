@@ -258,18 +258,35 @@ fn render_content_pane(
     };
 
     // Body
+    if card.body.is_none() {
+        // body 未取得 (FetchCardDetail 待ち) — エリア中央にスピナー表示
+        use rattles::presets::prelude as presets;
+        let spinner = presets::dots_circle().current_frame();
+        let loading_text = format!("{spinner} Loading...");
+        let loading_line = Line::from(Span::styled(
+            loading_text,
+            Style::default()
+                .fg(theme().yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        let center_y = content_inner.y + content_inner.height / 2;
+        let text_width = loading_line.width() as u16;
+        let center_x =
+            content_inner.x + content_inner.width.saturating_sub(text_width) / 2;
+        let center_rect = Rect {
+            x: center_x,
+            y: center_y,
+            width: text_width.min(content_inner.width),
+            height: 1,
+        };
+        frame.render_widget(loading_line, center_rect);
+        app.state.detail_max_scroll.set(0);
+        app.state.detail_max_scroll_x.set(0);
+        return;
+    }
+
     match card.body.as_deref() {
-        None => {
-            // body 未取得 (FetchCardDetail 待ち)
-            push_text(
-                &mut tagged,
-                Line::from(Span::styled(
-                    "Loading...",
-                    Style::default().fg(theme().text_muted),
-                )),
-            );
-        }
-        Some("") => {
+        Some("") | None => {
             push_text(
                 &mut tagged,
                 Line::from(Span::styled(
