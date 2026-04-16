@@ -225,7 +225,7 @@ pub struct PendingIssueCreate {
     pub initial_status: Option<super::super::command::InitialStatus>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LoadingState {
     Idle,
     Loading(String),

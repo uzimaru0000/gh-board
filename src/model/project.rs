@@ -1,3 +1,10 @@
+/// プログレッシブレンダリング用のページネーション状態
+#[derive(Clone, Debug, PartialEq)]
+pub struct PaginationState {
+    pub query: Option<String>,
+    pub cursor: String,
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ProjectSummary {
     pub id: String,
@@ -129,6 +136,15 @@ pub struct SubIssueRef {
 pub struct SubIssuesSummary {
     pub completed: i32,
     pub total: i32,
+}
+
+/// Detail ビューで遅延取得するカードの詳細データ
+#[derive(Clone, Debug)]
+pub struct CardDetail {
+    pub body: String,
+    pub comments: Vec<Comment>,
+    pub reactions: Vec<ReactionSummary>,
+    pub linked_prs: Vec<LinkedPr>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -270,6 +286,24 @@ impl CustomFieldValue {
             | CustomFieldValue::Number { field_id, .. }
             | CustomFieldValue::Date { field_id, .. }
             | CustomFieldValue::Iteration { field_id, .. } => field_id,
+        }
+    }
+
+    /// カラム分配に使う (field_id, option_id) を返す。
+    /// SingleSelect と Iteration のみ対応 (カンバンの列軸になりうるフィールド)。
+    pub fn field_and_option_id(&self) -> Option<(&str, &str)> {
+        match self {
+            CustomFieldValue::SingleSelect {
+                field_id,
+                option_id,
+                ..
+            } => Some((field_id, option_id)),
+            CustomFieldValue::Iteration {
+                field_id,
+                iteration_id,
+                ..
+            } => Some((field_id, iteration_id)),
+            _ => None,
         }
     }
 }

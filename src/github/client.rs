@@ -5,10 +5,10 @@ use tokio::process::Command;
 use super::queries::*;
 use crate::command::CustomFieldValueInput;
 use crate::model::project::{
-    Board, Card, CardType, CiStatus, Column, ColumnColor, Comment, CustomFieldValue,
-    FieldDefinition, Grouping, IssueState, IterationOption, Label, LinkedPr, ParentIssueRef,
-    PrState, PrStatus, ProjectSummary, ReactionContent, ReactionSummary, Repository,
-    ReviewDecision, SingleSelectOption, SubIssueRef, SubIssuesSummary,
+    Board, Card, CardDetail, CardType, CiStatus, Column, ColumnColor, Comment, CustomFieldValue,
+    FieldDefinition, Grouping, IssueState, IterationOption, Label, LinkedPr, PaginationState,
+    ParentIssueRef, PrState, PrStatus, ProjectSummary, ReactionContent, ReactionSummary,
+    Repository, ReviewDecision, SingleSelectOption, SubIssueRef, SubIssuesSummary,
 };
 
 // ReactionContent 変換: 各 GraphQL クエリごとに自動生成される enum を model 側の型に変換する。
@@ -38,12 +38,12 @@ trait ReactionContentFromGraphQL {
     fn to_model(&self) -> Option<ReactionContent>;
 }
 
-impl_reaction_content_from!(project_board::ReactionContent);
 impl_reaction_content_from!(fetch_comments::ReactionContent);
 impl_reaction_content_from!(add_comment::ReactionContent);
 impl_reaction_content_from!(add_reaction_mutation::ReactionContent);
 impl_reaction_content_from!(remove_reaction_mutation::ReactionContent);
 impl_reaction_content_from!(fetch_issue::ReactionContent);
+impl_reaction_content_from!(fetch_card_detail::ReactionContent);
 
 // Type aliases for readability
 use project_board::{
@@ -623,6 +623,154 @@ impl GitHubClient {
         Ok(board)
     }
 
+    /// プログレッシブレンダリング: 1ページ目を取得し Board + ページネーション状態を返す。
+    /// アーカイブカードは除外する。
+    pub async fn get_board_first_page(
+        &self,
+        project_id: &str,
+        queries: &[String],
+        preferred_group_by_field_name: Option<&str>,
+    ) -> anyhow::Result<(Board, Vec<PaginationState>)> {
+        let query_iter: Vec<Option<String>> = if queries.is_empty() {
+            vec![None]
+        } else {
+            queries.iter().cloned().map(Some).collect()
+        };
+
+        let mut seen_item_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        let mut all_items: Vec<ItemNode> = Vec::new();
+        let mut title = String::new();
+        let mut field_nodes = None;
+        let mut repositories: Vec<Repository> = Vec::new();
+        let mut remaining_pagination: Vec<PaginationState> = Vec::new();
+
+        for query in &query_iter {
+            let vars = project_board::Variables {
+                project_id: project_id.to_string(),
+                items_cursor: None,
+                query: query.clone(),
+            };
+            let data = self.query::<ProjectBoard>(vars).await?;
+            let node = data.node.context("Project not found")?;
+
+            let pv2 = match node {
+                ProjectBoardNode::ProjectV2(pv2) => pv2,
+                _ => bail!("Node is not a ProjectV2"),
+            };
+
+            let has_next = pv2.items.page_info.has_next_page;
+            let next_cursor = pv2.items.page_info.end_cursor;
+
+            if let Some(nodes) = pv2.items.nodes {
+                for item in nodes.into_iter().flatten() {
+                    if seen_item_ids.insert(item.id.clone()) {
+                        all_items.push(item);
+                    }
+                }
+            }
+
+            if title.is_empty() {
+                title = pv2.title;
+                field_nodes = pv2.fields.nodes;
+                repositories = pv2
+                    .repositories
+                    .nodes
+                    .unwrap_or_default()
+                    .into_iter()
+                    .flatten()
+                    .map(|r| Repository {
+                        id: r.id,
+                        name_with_owner: r.name_with_owner,
+                    })
+                    .collect();
+            }
+
+            if has_next
+                && let Some(cursor) = next_cursor
+            {
+                remaining_pagination.push(PaginationState {
+                    query: query.clone(),
+                    cursor,
+                });
+            }
+        }
+
+        let mut board = build_board(
+            title,
+            field_nodes,
+            all_items,
+            repositories,
+            preferred_group_by_field_name,
+        )?;
+        for col in &mut board.columns {
+            col.cards.retain(|c| !c.archived);
+        }
+        Ok((board, remaining_pagination))
+    }
+
+    /// プログレッシブレンダリング: 2ページ目以降を取得しカード一覧を返す。
+    pub async fn get_board_next_page(
+        &self,
+        project_id: &str,
+        pagination: Vec<PaginationState>,
+        preferred_group_by_field_name: Option<&str>,
+    ) -> anyhow::Result<(Vec<Card>, Vec<PaginationState>)> {
+        let mut all_cards: Vec<Card> = Vec::new();
+        let mut remaining: Vec<PaginationState> = Vec::new();
+
+        for page_state in pagination {
+            let vars = project_board::Variables {
+                project_id: project_id.to_string(),
+                items_cursor: Some(page_state.cursor),
+                query: page_state.query.clone(),
+            };
+            let data = self.query::<ProjectBoard>(vars).await?;
+            let node = data.node.context("Project not found")?;
+            let pv2 = match node {
+                ProjectBoardNode::ProjectV2(pv2) => pv2,
+                _ => bail!("Node is not a ProjectV2"),
+            };
+
+            let has_next = pv2.items.page_info.has_next_page;
+            let next_cursor = pv2.items.page_info.end_cursor;
+
+            // field_definitions は1ページ目で取得済みなのでここでは必要だが、
+            // convert_item + custom_fields のパースにはフィールド定義が必要
+            let field_nodes_for_page = pv2.fields.nodes;
+
+            if let Some(nodes) = pv2.items.nodes {
+                let items: Vec<ItemNode> = nodes.into_iter().flatten().collect();
+                // build_board を使って正しく custom_fields をパースする
+                let board = build_board(
+                    String::new(),
+                    field_nodes_for_page,
+                    items,
+                    Vec::new(),
+                    preferred_group_by_field_name,
+                )?;
+                for col in board.columns {
+                    for card in col.cards {
+                        if !card.archived {
+                            all_cards.push(card);
+                        }
+                    }
+                }
+            }
+
+            if has_next
+                && let Some(cursor) = next_cursor
+            {
+                remaining.push(PaginationState {
+                    query: page_state.query,
+                    cursor,
+                });
+            }
+        }
+
+        Ok((all_cards, remaining))
+    }
+
     /// アーカイブを含む全アイテムを返す内部 API。`get_archived_items` から再利用する。
     async fn get_board_raw(
         &self,
@@ -901,6 +1049,176 @@ impl GitHubClient {
             }),
             sub_issues: Vec::new(),
         })
+    }
+
+    pub async fn fetch_card_detail(&self, content_id: &str) -> anyhow::Result<CardDetail> {
+        let vars = fetch_card_detail::Variables {
+            id: content_id.to_string(),
+        };
+        let data = self.query::<FetchCardDetail>(vars).await?;
+        let node = data.node.context("Node not found")?;
+
+        match node {
+            fetch_card_detail::FetchCardDetailNode::Issue(issue) => {
+                let comments = Self::convert_card_detail_comments(&issue.comments.nodes);
+                let reactions = Self::convert_card_detail_reactions(&issue.reaction_groups);
+                let linked_prs = issue
+                    .closed_by_pull_requests_references
+                    .as_ref()
+                    .and_then(|c| c.nodes.as_ref())
+                    .map(|nodes| {
+                        nodes
+                            .iter()
+                            .flatten()
+                            .map(|pr| LinkedPr {
+                                number: pr.number as i32,
+                                title: pr.title.clone(),
+                                url: pr.url.clone(),
+                                state: match pr.state {
+                                    fetch_card_detail::PullRequestState::CLOSED => PrState::Closed,
+                                    fetch_card_detail::PullRequestState::MERGED => PrState::Merged,
+                                    _ => PrState::Open,
+                                },
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Ok(CardDetail {
+                    body: issue.body.clone(),
+                    comments,
+                    reactions,
+                    linked_prs,
+                })
+            }
+            fetch_card_detail::FetchCardDetailNode::PullRequest(pr) => {
+                let comments = pr
+                    .comments
+                    .nodes
+                    .as_ref()
+                    .map(|n| {
+                        n.iter()
+                            .flatten()
+                            .map(|c| Comment {
+                                id: c.id.clone(),
+                                author: c
+                                    .author
+                                    .as_ref()
+                                    .map(|a| a.login.clone())
+                                    .unwrap_or_else(|| "ghost".into()),
+                                body: c.body.clone(),
+                                created_at: c.created_at.clone(),
+                                reactions: c
+                                    .reaction_groups
+                                    .as_ref()
+                                    .map(|gs| {
+                                        gs.iter()
+                                            .filter_map(|g| {
+                                                Some(ReactionSummary {
+                                                    content: g.content.to_model()?,
+                                                    count: g.reactors.total_count as usize,
+                                                    viewer_has_reacted: g.viewer_has_reacted,
+                                                })
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let reactions = pr
+                    .reaction_groups
+                    .as_ref()
+                    .map(|gs| {
+                        gs.iter()
+                            .filter_map(|g| {
+                                Some(ReactionSummary {
+                                    content: g.content.to_model()?,
+                                    count: g.reactors.total_count as usize,
+                                    viewer_has_reacted: g.viewer_has_reacted,
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Ok(CardDetail {
+                    body: pr.body.clone(),
+                    comments,
+                    reactions,
+                    linked_prs: Vec::new(),
+                })
+            }
+            fetch_card_detail::FetchCardDetailNode::DraftIssue(draft) => Ok(CardDetail {
+                body: draft.body.clone(),
+                comments: Vec::new(),
+                reactions: Vec::new(),
+                linked_prs: Vec::new(),
+            }),
+            _ => bail!("Unexpected node type for card detail"),
+        }
+    }
+
+    fn convert_card_detail_comments(
+        nodes: &Option<
+            Vec<
+                Option<
+                    fetch_card_detail::FetchCardDetailNodeOnIssueCommentsNodes,
+                >,
+            >,
+        >,
+    ) -> Vec<Comment> {
+        nodes
+            .as_ref()
+            .map(|n| {
+                n.iter()
+                    .flatten()
+                    .map(|c| Comment {
+                        id: c.id.clone(),
+                        author: c
+                            .author
+                            .as_ref()
+                            .map(|a| a.login.clone())
+                            .unwrap_or_else(|| "ghost".into()),
+                        body: c.body.clone(),
+                        created_at: c.created_at.clone(),
+                        reactions: c
+                            .reaction_groups
+                            .as_ref()
+                            .map(|gs| {
+                                gs.iter()
+                                    .filter_map(|g| {
+                                        Some(ReactionSummary {
+                                            content: g.content.to_model()?,
+                                            count: g.reactors.total_count as usize,
+                                            viewer_has_reacted: g.viewer_has_reacted,
+                                        })
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn convert_card_detail_reactions(
+        groups: &Option<Vec<fetch_card_detail::FetchCardDetailNodeOnIssueReactionGroups>>,
+    ) -> Vec<ReactionSummary> {
+        groups
+            .as_ref()
+            .map(|gs| {
+                gs.iter()
+                    .filter_map(|g| {
+                        Some(ReactionSummary {
+                            content: g.content.to_model()?,
+                            count: g.reactors.total_count as usize,
+                            viewer_has_reacted: g.viewer_has_reacted,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub async fn fetch_sub_issues(&self, content_id: &str) -> anyhow::Result<Vec<SubIssueRef>> {
@@ -1479,32 +1797,6 @@ fn map_review_decision(d: &project_board::PullRequestReviewDecision) -> Option<R
     }
 }
 
-fn build_linked_prs(
-    issue: &project_board::ProjectBoardNodeOnProjectV2ItemsNodesContentOnIssue,
-) -> Vec<LinkedPr> {
-    issue
-        .closed_by_pull_requests_references
-        .as_ref()
-        .and_then(|c| c.nodes.as_ref())
-        .map(|nodes| {
-            nodes
-                .iter()
-                .flatten()
-                .map(|pr| LinkedPr {
-                    number: pr.number as i32,
-                    title: pr.title.clone(),
-                    url: pr.url.clone(),
-                    state: match pr.state {
-                        project_board::PullRequestState::CLOSED => PrState::Closed,
-                        project_board::PullRequestState::MERGED => PrState::Merged,
-                        _ => PrState::Open,
-                    },
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn build_pr_status(
     pr: &project_board::ProjectBoardNodeOnProjectV2ItemsNodesContentOnPullRequest,
 ) -> PrStatus {
@@ -1549,7 +1841,7 @@ fn convert_item(item: &ItemNode) -> Card {
     match &item.content {
         Some(Content::Issue(issue)) => Card {
             pr_status: None,
-            linked_prs: build_linked_prs(issue),
+            linked_prs: Vec::new(),
             parent_issue: issue.parent.as_ref().map(|p| ParentIssueRef {
                 id: p.id.clone(),
                 number: p.number as i32,
@@ -1594,59 +1886,11 @@ fn convert_item(item: &ItemNode) -> Card {
                 })
                 .unwrap_or_default(),
             url: Some(issue.url.clone()),
-            body: Some(issue.body.clone()),
+            body: None,
             milestone: issue.milestone.as_ref().map(|m| m.title.clone()),
-            comments: issue
-                .comments
-                .nodes
-                .as_ref()
-                .map(|n| {
-                    n.iter()
-                        .flatten()
-                        .map(|c| Comment {
-                            id: c.id.clone(),
-                            author: c
-                                .author
-                                .as_ref()
-                                .map(|a| a.login.clone())
-                                .unwrap_or_else(|| "ghost".into()),
-                            body: c.body.clone(),
-                            created_at: c.created_at.clone(),
-                            reactions: c
-                                .reaction_groups
-                                .as_ref()
-                                .map(|gs| {
-                                    gs.iter()
-                                        .filter_map(|g| {
-                                            Some(ReactionSummary {
-                                                content: g.content.to_model()?,
-                                                count: g.reactors.total_count as usize,
-                                                viewer_has_reacted: g.viewer_has_reacted,
-                                            })
-                                        })
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
+            comments: Vec::new(),
             custom_fields: Vec::new(),
-            reactions: issue
-                .reaction_groups
-                .as_ref()
-                .map(|gs| {
-                    gs.iter()
-                        .filter_map(|g| {
-                            Some(ReactionSummary {
-                                content: g.content.to_model()?,
-                                count: g.reactors.total_count as usize,
-                                viewer_has_reacted: g.viewer_has_reacted,
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
+            reactions: Vec::new(),
         },
         Some(Content::PullRequest(pr)) => Card {
             pr_status: Some(build_pr_status(pr)),
@@ -1688,59 +1932,11 @@ fn convert_item(item: &ItemNode) -> Card {
                 })
                 .unwrap_or_default(),
             url: Some(pr.url.clone()),
-            body: Some(pr.body.clone()),
+            body: None,
             milestone: pr.milestone.as_ref().map(|m| m.title.clone()),
-            comments: pr
-                .comments
-                .nodes
-                .as_ref()
-                .map(|n| {
-                    n.iter()
-                        .flatten()
-                        .map(|c| Comment {
-                            id: c.id.clone(),
-                            author: c
-                                .author
-                                .as_ref()
-                                .map(|a| a.login.clone())
-                                .unwrap_or_else(|| "ghost".into()),
-                            body: c.body.clone(),
-                            created_at: c.created_at.clone(),
-                            reactions: c
-                                .reaction_groups
-                                .as_ref()
-                                .map(|gs| {
-                                    gs.iter()
-                                        .filter_map(|g| {
-                                            Some(ReactionSummary {
-                                                content: g.content.to_model()?,
-                                                count: g.reactors.total_count as usize,
-                                                viewer_has_reacted: g.viewer_has_reacted,
-                                            })
-                                        })
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
+            comments: Vec::new(),
             custom_fields: Vec::new(),
-            reactions: pr
-                .reaction_groups
-                .as_ref()
-                .map(|gs| {
-                    gs.iter()
-                        .filter_map(|g| {
-                            Some(ReactionSummary {
-                                content: g.content.to_model()?,
-                                count: g.reactors.total_count as usize,
-                                viewer_has_reacted: g.viewer_has_reacted,
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
+            reactions: Vec::new(),
         },
         Some(Content::DraftIssue(draft)) => Card {
             pr_status: None,
@@ -1757,7 +1953,7 @@ fn convert_item(item: &ItemNode) -> Card {
             assignees: Vec::new(),
             labels: Vec::new(),
             url: None,
-            body: Some(draft.body.clone()),
+            body: None,
             comments: Vec::new(),
             milestone: None,
             custom_fields: Vec::new(),

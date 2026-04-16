@@ -2,6 +2,7 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, BorderType, Borders},
     Frame,
 };
@@ -11,6 +12,7 @@ use crate::app_state::AppState;
 use crate::model::state::ViewMode;
 use crate::ui::card::{CardWidget, CARD_HEIGHT};
 use crate::ui::scroll_fade::{draw_bottom_arrow, draw_left_arrow, draw_right_arrow, draw_top_arrow};
+use crate::ui::statusline::loading_spinner_span;
 use crate::ui::theme::theme;
 
 pub const COLUMN_WIDTH: u16 = 36;
@@ -115,16 +117,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         };
 
         // タイトル: スクロール可能なら "N-M/Total"、そうでなければ "(Total)"
-        let title = if AppState::should_show_scrollbar(total, max_visible) {
+        let title_text = if AppState::should_show_scrollbar(total, max_visible) {
             let start = scroll + 1;
             let end = (scroll + max_visible).min(total);
             format!(" {} {start}-{end}/{total} ", column.name)
         } else {
             format!(" {} ({}) ", column.name, total)
         };
+        let mut title_spans: Vec<Span> = vec![Span::styled(title_text, title_style)];
+        if let Some(spinner) = loading_spinner_span(&app.state.loading) {
+            title_spans.push(spinner);
+        }
         let col_block = Block::default()
-            .title(title)
-            .title_style(title_style)
+            .title(Line::from(title_spans))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(border_style);

@@ -93,17 +93,83 @@ impl App {
             } => {
                 let client = self.github.clone();
                 let tx = self.event_tx.clone();
+                let generation = self.state.board_generation;
                 tokio::spawn(async move {
                     let result = client
-                        .get_board(
+                        .get_board_first_page(
                             &project_id,
                             &queries,
                             preferred_grouping_field_name.as_deref(),
                         )
                         .await;
-                    let _ = tx.send(AppEvent::BoardLoaded(
-                        result.map_err(|e| e.to_string()),
-                    ));
+                    match result {
+                        Ok((board, remaining)) => {
+                            let _ = tx.send(AppEvent::BoardLoaded(Ok(board)));
+                            // 残りページがあればバックグラウンドで継続取得
+                            if !remaining.is_empty() {
+                                let result = client
+                                    .get_board_next_page(
+                                        &project_id,
+                                        remaining,
+                                        preferred_grouping_field_name.as_deref(),
+                                    )
+                                    .await;
+                                match result {
+                                    Ok((cards, remaining)) => {
+                                        let _ = tx.send(AppEvent::BoardPageLoaded(Ok(
+                                            crate::event::BoardPageData {
+                                                cards,
+                                                remaining,
+                                                generation,
+                                            },
+                                        )));
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(AppEvent::BoardPageLoaded(Err(
+                                            e.to_string(),
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::BoardLoaded(Err(e.to_string())));
+                        }
+                    }
+                });
+            }
+            Command::LoadBoardNextPage {
+                project_id,
+                preferred_grouping_field_name,
+                pagination,
+                generation,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client
+                        .get_board_next_page(
+                            &project_id,
+                            pagination,
+                            preferred_grouping_field_name.as_deref(),
+                        )
+                        .await;
+                    match result {
+                        Ok((cards, remaining)) => {
+                            let _ =
+                                tx.send(AppEvent::BoardPageLoaded(Ok(
+                                    crate::event::BoardPageData {
+                                        cards,
+                                        remaining,
+                                        generation,
+                                    },
+                                )));
+                        }
+                        Err(e) => {
+                            let _ =
+                                tx.send(AppEvent::BoardPageLoaded(Err(e.to_string())));
+                        }
+                    }
                 });
             }
             Command::MoveCard {
@@ -342,6 +408,16 @@ impl App {
                     let result = client.update_comment(&comment_id, &body).await;
                     let _ = tx.send(AppEvent::CommentUpdated(
                         result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
+            Command::FetchCardDetail { item_id, content_id } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client.fetch_card_detail(&content_id).await;
+                    let _ = tx.send(AppEvent::CardDetailLoaded(
+                        result.map(|detail| (item_id, detail)).map_err(|e| e.to_string()),
                     ));
                 });
             }

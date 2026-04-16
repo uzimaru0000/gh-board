@@ -129,6 +129,10 @@ pub struct AppState {
     /// 直近に発行した LoadBoard の queries (BoardLoaded 時にキャッシュ保存するため)
     pub pending_board_queries: Option<Vec<String>>,
 
+    /// プログレッシブレンダリング: ボードロードの世代番号。リロード/フィルタ変更時にインクリメントし、
+    /// 古い BoardPageLoaded を無視する。
+    pub board_generation: u64,
+
     // Views (saved filter presets)
     pub views: Vec<ViewConfig>,
     pub active_view: Option<usize>,
@@ -190,6 +194,7 @@ impl AppState {
             loading: LoadingState::Idle,
             board_cache: BoardCache::new(8),
             pending_board_queries: None,
+            board_generation: 0,
             views: Vec::new(),
             active_view: None,
             owner,
@@ -342,6 +347,7 @@ impl AppState {
         } else {
             LoadingState::Loading("Loading board...".into())
         };
+        self.board_generation = self.board_generation.wrapping_add(1);
         self.pending_board_queries = Some(queries.clone());
         Command::LoadBoard {
             project_id: project_id.to_string(),
@@ -422,6 +428,68 @@ impl AppState {
                 Command::None
             }
             AppEvent::BoardLoaded(Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                Command::None
+            }
+            AppEvent::BoardPageLoaded(Ok(page_data)) => {
+                // generation が古ければ無視 (リロード/フィルタ変更で obsolete)
+                if page_data.generation != self.board_generation {
+                    return Command::None;
+                }
+                if let Some(board) = &mut self.board {
+                    // 新しいカードを既存カラムに option_id マッチで追加
+                    for card in page_data.cards {
+                        let mut placed = false;
+                        let field_id = board.grouping.field_id().map(|s| s.to_string());
+                        if let Some(fid) = &field_id {
+                            for cf in &card.custom_fields {
+                                if let Some((cf_field_id, cf_option_id)) = cf.field_and_option_id()
+                                    && cf_field_id == fid
+                                {
+                                    for col in &mut board.columns {
+                                        if col.option_id == cf_option_id {
+                                            col.cards.push(card.clone());
+                                            placed = true;
+                                            break;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        if !placed {
+                            // "No <field>" カラム (option_id が空) に追加
+                            if let Some(col) = board.columns.iter_mut().find(|c| c.option_id.is_empty()) {
+                                col.cards.push(card);
+                            } else if let Some(col) = board.columns.first_mut() {
+                                col.cards.push(card);
+                            }
+                        }
+                    }
+                }
+                self.rebuild_table_order();
+                if page_data.remaining.is_empty() {
+                    // 全ページ完了
+                    self.loading = LoadingState::Idle;
+                    Command::None
+                } else {
+                    // まだページがある → 次ページを取得
+                    self.loading = LoadingState::Refreshing;
+                    if let Some(project) = &self.current_project {
+                        Command::LoadBoardNextPage {
+                            project_id: project.id.clone(),
+                            preferred_grouping_field_name: self
+                                .preferred_grouping_field_name
+                                .clone(),
+                            pagination: page_data.remaining,
+                            generation: self.board_generation,
+                        }
+                    } else {
+                        Command::None
+                    }
+                }
+            }
+            AppEvent::BoardPageLoaded(Err(e)) => {
                 self.loading = LoadingState::Error(e);
                 Command::None
             }
@@ -692,6 +760,52 @@ impl AppState {
             }
             AppEvent::CustomFieldUpdated(Err(e)) => {
                 // エラーは画面に残す (自動リロードしない)。
+                self.loading = LoadingState::Error(e);
+                Command::None
+            }
+            AppEvent::CardDetailLoaded(Ok((item_id, detail))) => {
+                // Board 上のカードに body/comments/reactions/linked_prs をマージ
+                if let Some(board) = &mut self.board {
+                    for col in &mut board.columns {
+                        for card in &mut col.cards {
+                            if card.item_id == item_id {
+                                card.body = Some(detail.body.clone());
+                                card.comments = detail.comments.clone();
+                                card.reactions = detail.reactions.clone();
+                                card.linked_prs = detail.linked_prs.clone();
+                            }
+                        }
+                    }
+                }
+                // detail_stack 上のカードにもマージ
+                for card in &mut self.detail_stack {
+                    if card.item_id == item_id {
+                        card.body = Some(detail.body.clone());
+                        card.comments = detail.comments.clone();
+                        card.reactions = detail.reactions.clone();
+                        card.linked_prs = detail.linked_prs.clone();
+                    }
+                }
+                // コメントが 20 件以上なら追加で全件取得
+                if detail.comments.len() >= 20 {
+                    // content_id を Board のカードから取得
+                    if let Some(board) = &self.board {
+                        for col in &board.columns {
+                            for card in &col.cards {
+                                if card.item_id == item_id
+                                    && let Some(cid) = &card.content_id
+                                {
+                                    return Command::FetchComments {
+                                        content_id: cid.clone(),
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+                Command::None
+            }
+            AppEvent::CardDetailLoaded(Err(e)) => {
                 self.loading = LoadingState::Error(e);
                 Command::None
             }
@@ -1393,19 +1507,17 @@ impl AppState {
 
         // 2. テキスト入力 (常時入力可)
         match key.code {
-            KeyCode::Backspace => {
-                if self.project_filter_cursor > 0 {
-                    let new_len = self
-                        .project_filter_query
-                        .char_indices()
-                        .take_while(|(i, _)| *i < self.project_filter_cursor)
-                        .last()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    self.project_filter_query.truncate(new_len);
-                    self.project_filter_cursor = new_len;
-                    self.recompute_filtered_projects();
-                }
+            KeyCode::Backspace if self.project_filter_cursor > 0 => {
+                let new_len = self
+                    .project_filter_query
+                    .char_indices()
+                    .take_while(|(i, _)| *i < self.project_filter_cursor)
+                    .last()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                self.project_filter_query.truncate(new_len);
+                self.project_filter_cursor = new_len;
+                self.recompute_filtered_projects();
             }
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.project_filter_query
@@ -1454,24 +1566,18 @@ impl AppState {
 
         // Text input handling (not configurable)
         match key.code {
-            KeyCode::Backspace => {
-                if self.filter.cursor_pos > 0 {
-                    let prev = prev_char_pos(&self.filter.input, self.filter.cursor_pos);
-                    self.filter.input.drain(prev..self.filter.cursor_pos);
-                    self.filter.cursor_pos = prev;
-                }
+            KeyCode::Backspace if self.filter.cursor_pos > 0 => {
+                let prev = prev_char_pos(&self.filter.input, self.filter.cursor_pos);
+                self.filter.input.drain(prev..self.filter.cursor_pos);
+                self.filter.cursor_pos = prev;
             }
-            KeyCode::Left => {
-                if self.filter.cursor_pos > 0 {
-                    self.filter.cursor_pos =
-                        prev_char_pos(&self.filter.input, self.filter.cursor_pos);
-                }
+            KeyCode::Left if self.filter.cursor_pos > 0 => {
+                self.filter.cursor_pos =
+                    prev_char_pos(&self.filter.input, self.filter.cursor_pos);
             }
-            KeyCode::Right => {
-                if self.filter.cursor_pos < self.filter.input.len() {
-                    self.filter.cursor_pos =
-                        next_char_pos(&self.filter.input, self.filter.cursor_pos);
-                }
+            KeyCode::Right if self.filter.cursor_pos < self.filter.input.len() => {
+                self.filter.cursor_pos =
+                    next_char_pos(&self.filter.input, self.filter.cursor_pos);
             }
             KeyCode::Char(c) => {
                 self.filter.input.insert(self.filter.cursor_pos, c);
@@ -2569,15 +2675,23 @@ impl AppState {
         self.sidebar_edit = None;
         self.mode = ViewMode::Detail;
 
-        // コメントが20件（上限）の場合、追加コメントを取得
-        // sub-issue サマリーを持つ Issue の場合、子 Issue 一覧を取得
         let mut commands: Vec<Command> = Vec::new();
         if let Some(card) = self.selected_card_ref() {
             let content_id = card.content_id.clone();
-            if card.comments.len() >= 20
-                && let Some(cid) = content_id.clone()
-            {
-                commands.push(Command::FetchComments { content_id: cid });
+            // body が未取得（ボード初期ロード時は None）なら遅延取得を発行
+            if card.body.is_none() {
+                if let Some(cid) = content_id.clone() {
+                    commands.push(Command::FetchCardDetail {
+                        item_id: card.item_id.clone(),
+                        content_id: cid,
+                    });
+                }
+            } else if card.comments.len() >= 20 {
+                // body が取得済み（CardDetailLoaded 済み or FetchIssueDetail 経由）の場合のみ
+                // コメント追加取得を判定
+                if let Some(cid) = content_id.clone() {
+                    commands.push(Command::FetchComments { content_id: cid });
+                }
             }
             let needs_sub_issues = matches!(card.card_type, CardType::Issue { .. })
                 && card
@@ -2836,24 +2950,18 @@ impl AppState {
                     None => return Command::None,
                 };
                 match key.code {
-                    KeyCode::Backspace => {
-                        if state.title_cursor > 0 {
-                            let prev = prev_char_pos(&state.title_input, state.title_cursor);
-                            state.title_input.drain(prev..state.title_cursor);
-                            state.title_cursor = prev;
-                        }
+                    KeyCode::Backspace if state.title_cursor > 0 => {
+                        let prev = prev_char_pos(&state.title_input, state.title_cursor);
+                        state.title_input.drain(prev..state.title_cursor);
+                        state.title_cursor = prev;
                     }
-                    KeyCode::Left => {
-                        if state.title_cursor > 0 {
-                            state.title_cursor =
-                                prev_char_pos(&state.title_input, state.title_cursor);
-                        }
+                    KeyCode::Left if state.title_cursor > 0 => {
+                        state.title_cursor =
+                            prev_char_pos(&state.title_input, state.title_cursor);
                     }
-                    KeyCode::Right => {
-                        if state.title_cursor < state.title_input.len() {
-                            state.title_cursor =
-                                next_char_pos(&state.title_input, state.title_cursor);
-                        }
+                    KeyCode::Right if state.title_cursor < state.title_input.len() => {
+                        state.title_cursor =
+                            next_char_pos(&state.title_input, state.title_cursor);
                     }
                     KeyCode::Char(c) => {
                         state.title_input.insert(state.title_cursor, c);
@@ -3901,21 +4009,19 @@ impl AppState {
                 input.insert(byte, c);
                 *cursor_pos += 1;
             }
-            KeyCode::Backspace => {
-                if *cursor_pos > 0 {
-                    let prev_byte = input
-                        .char_indices()
-                        .nth(*cursor_pos - 1)
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    let cur_byte = input
-                        .char_indices()
-                        .nth(*cursor_pos)
-                        .map(|(i, _)| i)
-                        .unwrap_or(input.len());
-                    input.drain(prev_byte..cur_byte);
-                    *cursor_pos -= 1;
-                }
+            KeyCode::Backspace if *cursor_pos > 0 => {
+                let prev_byte = input
+                    .char_indices()
+                    .nth(*cursor_pos - 1)
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                let cur_byte = input
+                    .char_indices()
+                    .nth(*cursor_pos)
+                    .map(|(i, _)| i)
+                    .unwrap_or(input.len());
+                input.drain(prev_byte..cur_byte);
+                *cursor_pos -= 1;
             }
             KeyCode::Left => {
                 *cursor_pos = cursor_pos.saturating_sub(1);
@@ -7396,6 +7502,8 @@ mod tests {
         use crate::model::project::SubIssuesSummary;
         let mut card = make_issue_card("1", "Parent");
         card.sub_issues_summary = Some(SubIssuesSummary { completed: 1, total: 3 });
+        // body を設定して FetchCardDetail が発行されないようにする
+        card.body = Some("body".into());
         let board = make_board(vec![("Todo", "opt_1", vec![card])]);
         let mut state = make_state_with_board(board);
 
@@ -7415,6 +7523,8 @@ mod tests {
         use crate::model::project::SubIssuesSummary;
         let mut card = make_issue_card("1", "No subs");
         card.sub_issues_summary = Some(SubIssuesSummary { completed: 0, total: 0 });
+        // body を設定して FetchCardDetail が発行されないようにする
+        card.body = Some("body".into());
         let board = make_board(vec![("Todo", "opt_1", vec![card])]);
         let mut state = make_state_with_board(board);
 
@@ -7424,7 +7534,9 @@ mod tests {
 
     #[test]
     fn test_detail_no_fetch_sub_issues_for_draft() {
-        let card = make_draft_card("1", "Draft", "body");
+        let mut card = make_draft_card("1", "Draft", "body");
+        // body を設定して FetchCardDetail が発行されないようにする
+        card.body = Some("body".into());
         let board = make_board(vec![("Todo", "opt_1", vec![card])]);
         let mut state = make_state_with_board(board);
 
@@ -9402,5 +9514,258 @@ mod tests {
         assert_eq!(state.current_layout, LayoutMode::Board);
         assert_eq!(state.selected_column, 1);
         assert_eq!(state.selected_card, 0);
+    }
+
+    // ── Step 2: Detail 遅延取得 ──────────────────────────
+
+    #[test]
+    fn test_open_detail_fetches_card_detail_when_body_is_none() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_issue_card("1", "Card A")],
+        )]);
+        let mut state = make_state_with_board(board);
+
+        // body が None のカードで Detail を開く → FetchCardDetail が返る
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+        assert!(
+            matches!(
+                cmd,
+                Command::FetchCardDetail {
+                    ref item_id,
+                    ref content_id,
+                } if item_id == "1" && content_id == "issue_1"
+            ),
+            "Expected FetchCardDetail, got {:?}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_open_detail_does_not_fetch_when_body_present() {
+        let mut card = make_issue_card("1", "Card A");
+        card.body = Some("some body".into());
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+        // body が既にあるので FetchCardDetail は発行されない
+        assert!(
+            !matches!(cmd, Command::FetchCardDetail { .. }),
+            "Should not fetch card detail when body is present, got {:?}",
+            cmd
+        );
+    }
+
+    #[test]
+    fn test_card_detail_loaded_merges_into_board() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_issue_card("1", "Card A")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+
+        let detail = CardDetail {
+            body: "Hello world".into(),
+            comments: vec![Comment {
+                id: "c1".into(),
+                author: "alice".into(),
+                body: "A comment".into(),
+                created_at: "2024-01-01T00:00:00Z".into(),
+                reactions: vec![],
+            }],
+            reactions: vec![],
+            linked_prs: vec![],
+        };
+
+        let cmd = state.handle_event(AppEvent::CardDetailLoaded(Ok(("1".into(), detail))));
+        assert_eq!(cmd, Command::None);
+
+        // ボード上のカードに body / comments がマージされている
+        let card = &state.board.as_ref().unwrap().columns[0].cards[0];
+        assert_eq!(card.body.as_deref(), Some("Hello world"));
+        assert_eq!(card.comments.len(), 1);
+        assert_eq!(card.comments[0].author, "alice");
+    }
+
+    #[test]
+    fn test_card_detail_loaded_triggers_fetch_comments_when_20() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_issue_card("1", "Card A")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Detail;
+
+        // 20 件のコメントで CardDetailLoaded
+        let comments: Vec<Comment> = (0..20)
+            .map(|i| Comment {
+                id: format!("c{i}"),
+                author: "alice".into(),
+                body: format!("comment {i}"),
+                created_at: "2024-01-01T00:00:00Z".into(),
+                reactions: vec![],
+            })
+            .collect();
+
+        let detail = CardDetail {
+            body: "body".into(),
+            comments,
+            reactions: vec![],
+            linked_prs: vec![],
+        };
+
+        let cmd = state.handle_event(AppEvent::CardDetailLoaded(Ok(("1".into(), detail))));
+        // 20 件以上なので FetchComments が返る
+        assert!(
+            matches!(cmd, Command::FetchComments { ref content_id } if content_id == "issue_1"),
+            "Expected FetchComments, got {:?}",
+            cmd
+        );
+    }
+
+    // ── Step 3: プログレッシブレンダリング ──────────────
+
+    #[test]
+    fn test_board_page_loaded_adds_cards_to_correct_column() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+            ("Done", "opt_2", vec![]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.mode = ViewMode::Board;
+        let current_gen = state.board_generation;
+
+        // "opt_2" (Done) にマッチする custom_fields を持つカードを追加
+        let mut new_card = make_card("2", "Card B");
+        new_card.custom_fields = vec![CustomFieldValue::SingleSelect {
+            field_id: "field_1".into(),
+            field_name: "Status".into(),
+            option_id: "opt_2".into(),
+            name: "Done".into(),
+            color: None,
+        }];
+
+        let page_data = crate::event::BoardPageData {
+            cards: vec![new_card],
+            remaining: vec![],
+            generation: current_gen,
+        };
+
+        let cmd = state.handle_event(AppEvent::BoardPageLoaded(Ok(page_data)));
+        assert_eq!(cmd, Command::None);
+
+        // Done カラムにカードが追加されている
+        let board = state.board.as_ref().unwrap();
+        assert_eq!(board.columns[0].cards.len(), 1); // Todo: 1
+        assert_eq!(board.columns[1].cards.len(), 1); // Done: 1
+        assert_eq!(board.columns[1].cards[0].title, "Card B");
+    }
+
+    #[test]
+    fn test_board_page_loaded_ignores_stale_generation() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        let stale = state.board_generation.wrapping_sub(1);
+
+        let page_data = crate::event::BoardPageData {
+            cards: vec![make_card("2", "Card B")],
+            remaining: vec![],
+            generation: stale,
+        };
+
+        let cmd = state.handle_event(AppEvent::BoardPageLoaded(Ok(page_data)));
+        assert_eq!(cmd, Command::None);
+
+        // stale なので Todo カラムにカードは追加されない
+        let board = state.board.as_ref().unwrap();
+        assert_eq!(board.columns[0].cards.len(), 1);
+    }
+
+    #[test]
+    fn test_board_page_loaded_with_remaining_issues_next_page() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.current_project = Some(ProjectSummary {
+            id: "proj_1".into(),
+            title: "Test".into(),
+            number: 1,
+            description: None,
+        });
+        let current_gen = state.board_generation;
+
+        let remaining = vec![PaginationState {
+            query: None,
+            cursor: "cursor_2".into(),
+        }];
+
+        let page_data = crate::event::BoardPageData {
+            cards: vec![],
+            remaining,
+            generation: current_gen,
+        };
+
+        let cmd = state.handle_event(AppEvent::BoardPageLoaded(Ok(page_data)));
+        // 残りページがあるので LoadBoardNextPage が返る
+        assert!(
+            matches!(
+                cmd,
+                Command::LoadBoardNextPage {
+                    ref project_id,
+                    generation,
+                    ..
+                } if project_id == "proj_1" && generation == current_gen
+            ),
+            "Expected LoadBoardNextPage, got {:?}",
+            cmd
+        );
+        assert_eq!(state.loading, LoadingState::Refreshing);
+    }
+
+    #[test]
+    fn test_board_page_loaded_no_remaining_sets_idle() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.loading = LoadingState::Refreshing;
+        let current_gen = state.board_generation;
+
+        let page_data = crate::event::BoardPageData {
+            cards: vec![],
+            remaining: vec![],
+            generation: current_gen,
+        };
+
+        let cmd = state.handle_event(AppEvent::BoardPageLoaded(Ok(page_data)));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.loading, LoadingState::Idle);
+    }
+
+    #[test]
+    fn test_start_loading_board_increments_generation() {
+        let board = make_board(vec![
+            ("Todo", "opt_1", vec![make_card("1", "Card A")]),
+        ]);
+        let mut state = make_state_with_board(board);
+        state.current_project = Some(ProjectSummary {
+            id: "proj_1".into(),
+            title: "Test".into(),
+            number: 1,
+            description: None,
+        });
+        let before = state.board_generation;
+        state.start_loading_board("proj_1");
+        assert_eq!(state.board_generation, before + 1);
     }
 }

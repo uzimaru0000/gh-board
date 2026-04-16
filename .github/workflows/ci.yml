@@ -12,9 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: jdx/mise-action@v2
         with:
-          components: clippy
+          experimental: true
+
+      - name: Add clippy component
+        run: rustup component add clippy
 
       - uses: Swatinem/rust-cache@v2
 
