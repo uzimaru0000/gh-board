@@ -209,6 +209,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
+/// Refreshing 中ならスピナー付きの短いテキスト Span を返す (Block タイトルに追加する用途)
+pub(crate) fn loading_spinner_span(loading: &LoadingState) -> Option<Span<'static>> {
+    use rattles::presets::prelude as presets;
+    match loading {
+        LoadingState::Refreshing => {
+            let style = Style::default().fg(theme().yellow).add_modifier(Modifier::BOLD);
+            let spinner = presets::dots_circle().current_frame();
+            Some(Span::styled(format!(" {spinner} "), style))
+        }
+        _ => None,
+    }
+}
+
 fn build_loading_line(loading: &LoadingState) -> Option<Line<'static>> {
     use rattles::presets::prelude as presets;
 

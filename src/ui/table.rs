@@ -10,6 +10,7 @@ use crate::app::App;
 use crate::model::project::{Board, Card, CardType, CustomFieldValue, FieldDefinition};
 use crate::model::state::ViewMode;
 use crate::ui::card::{column_color_to_tui, parse_hex_color};
+use crate::ui::statusline::loading_spinner_span;
 use crate::ui::theme::theme;
 
 const COL_WIDTH_NUMBER: u16 = 6;
@@ -233,9 +234,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .collect();
     let header = Row::new(header_cells).height(1);
 
-    let title = format!(" {} ({}) ", board.project_title, total_rows);
+    let mut title_spans = vec![Span::from(format!(
+        " {} ({}) ",
+        board.project_title, total_rows
+    ))];
+    if let Some(spinner) = loading_spinner_span(&app.state.loading) {
+        title_spans.push(spinner);
+    }
     let block = Block::default()
-        .title(title)
+        .title(Line::from(title_spans))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme().border_focused));

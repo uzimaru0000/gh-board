@@ -11,6 +11,7 @@ use crate::app_state::AppState;
 use crate::model::state::ViewMode;
 use crate::ui::card::{CardWidget, CARD_HEIGHT};
 use crate::ui::scroll_fade::{draw_bottom_arrow, draw_left_arrow, draw_right_arrow, draw_top_arrow};
+use crate::ui::statusline::loading_spinner_span;
 use crate::ui::theme::theme;
 
 pub const COLUMN_WIDTH: u16 = 36;
@@ -199,6 +200,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
     if has_right {
         draw_right_arrow(buf, area);
+    }
+
+    // プログレッシブレンダリング中のスピナー (右上に表示)
+    if let Some(spinner) = loading_spinner_span(&app.state.loading) {
+        let spinner_width = spinner.width() as u16;
+        let spinner_area = Rect {
+            x: area.x + area.width.saturating_sub(spinner_width + 1),
+            y: area.y,
+            width: spinner_width,
+            height: 1,
+        };
+        frame.render_widget(spinner, spinner_area);
     }
 }
 
