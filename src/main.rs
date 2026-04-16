@@ -1,6 +1,7 @@
 mod action;
 mod app;
 mod app_state;
+mod cli;
 mod command;
 mod config;
 mod event;
@@ -32,6 +33,9 @@ use model::state::{LoadingState, ViewMode};
 #[derive(Parser)]
 #[command(name = "gh-board", about = "View GitHub Projects V2 as a kanban board")]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<cli::CliCommand>,
+
     /// Project number to open directly
     number: Option<i32>,
 
@@ -42,6 +46,20 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // CLI subcommand mode: no TUI initialization
+    if let Some(cmd) = cli.command {
+        let github = GitHubClient::new().await?;
+        if let Err(e) = cli::run(cmd, github).await {
+            let msg = serde_json::json!({ "error": format!("{e:#}") });
+            eprintln!("{}", serde_json::to_string_pretty(&msg).unwrap_or_default());
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
+    // TUI mode
     let cfg = config::load_config().unwrap_or_else(|e| {
         eprintln!("Warning: failed to load config: {e}");
         config::Config::default()
@@ -53,7 +71,6 @@ async fn main() -> Result<()> {
     let default_theme = config::ThemeConfig::default();
     ui::theme::init_theme(theme_cfg.as_ref().unwrap_or(&default_theme));
 
-    let cli = Cli::parse();
     let github = GitHubClient::new().await?;
 
     let mut terminal = ratatui::init();
