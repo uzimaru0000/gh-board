@@ -6,6 +6,20 @@ A [gh](https://cli.github.com/) CLI extension to manage GitHub Projects V2 as a 
 
 ![demo](assets/demo.gif)
 
+## Features
+
+- **Board / Table / Roadmap views** — switch between kanban board, table, and roadmap layouts
+- **Card grab & reorder** — move cards between columns or reorder within a column
+- **Card detail** — Markdown rendering with table support, comments, emoji reactions, linked PRs, CI/review status
+- **Sub-issues** — parent/child relationship display with navigable sidebar drill-down
+- **Custom fields** — display and edit SingleSelect, Iteration, and other project fields
+- **Grouping axis** — switch the kanban column grouping by SingleSelect or Iteration fields (`Ctrl+g`)
+- **Archive / Unarchive** — archive cards from the board or restore them from the archive list
+- **Comments** — post new comments and edit your own (`$EDITOR` integration)
+- **Filter** — free text, `label:`, `assignee:`, `milestone:`, compound `AND`/`OR`
+- **Fuzzy project selection** — quickly find projects with fuzzy matching
+- **Configurable key bindings & theme** — customize via `config.toml`
+
 ## Installation
 
 ```
@@ -30,12 +44,13 @@ Running without arguments lets you choose from your accessible projects.
 | `j` / `k` | Move between cards |
 | `g` / `G` | First / last card |
 | `Tab` / `S-Tab` | Next / previous column (wraps) |
-| `H` / `L` | Move card to left / right column |
-| `Space` | Grab card (reorder with h/j/k/l) |
+| `Space` | Grab card (reorder with h/j/k/l, release with Space/Esc) |
 | `Enter` | Open card detail |
 | `n` | Create draft issue |
-| `d` | Delete card |
-| `/` | Filter |
+| `a` | Archive card (with confirmation) |
+| `v` | View archived cards |
+| `Ctrl+g` | Switch grouping axis |
+| `/` | Filter (`C-u` to clear) |
 | `p` | Switch project |
 | `r` | Refresh |
 | `?` | Help |
@@ -47,10 +62,29 @@ Running without arguments lets you choose from your accessible projects.
 |-----|--------|
 | `j` / `k` | Scroll vertically |
 | `h` / `l` | Scroll table horizontally |
-| `c` | Post new comment |
+| `c` | Post new comment (Issue/PR only) |
 | `C` | Open comment list |
 | `Enter` / `o` | Open in browser |
-| `Esc` / `q` | Close |
+| `Esc` / `q` | Back (pops detail stack) |
+
+### Comment List
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move between comments |
+| `e` | Edit your own comment |
+| `c` | Post new comment |
+| `Esc` | Back to detail |
+
+### Archive List
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move between cards |
+| `Enter` | Open in browser |
+| `u` | Unarchive card |
+| `r` | Reload |
+| `Esc` / `q` | Back to board |
 
 ### Filter
 
@@ -91,6 +125,11 @@ accent = "red"
 [[view]]
 name = "Bugs"
 filter = "label:bug"
+
+[[view]]
+name = "My Tasks"
+filter = "assignee:@me"
+layout = "table"
 ```
 
 ## Building
