@@ -89,10 +89,13 @@ pub enum BoardAction {
 
 #[derive(Subcommand)]
 pub enum CardAction {
-    /// Create a draft issue on the project
+    /// Create a card on the project (draft issue by default, or a real issue with --type issue)
     Create {
         /// Project number
         number: i32,
+        /// Card type: draft or issue
+        #[arg(long, name = "type", default_value = "draft")]
+        card_type: String,
         /// Card title
         #[arg(long)]
         title: String,
@@ -105,26 +108,9 @@ pub enum CardAction {
         /// Initial status name (must match a SingleSelect option)
         #[arg(long)]
         status: Option<String>,
-    },
-    /// Create a real issue and add it to the project
-    CreateIssue {
-        /// Project number
-        number: i32,
-        /// Repository in OWNER/REPO format
+        /// Repository in OWNER/REPO format (for --type issue; auto-detected if project has only one repo)
         #[arg(long)]
-        repo: String,
-        /// Issue title
-        #[arg(long)]
-        title: String,
-        /// Issue body
-        #[arg(long, default_value = "")]
-        body: String,
-        /// Login of the owner
-        #[arg(long)]
-        owner: Option<String>,
-        /// Initial status name (must match a SingleSelect option)
-        #[arg(long)]
-        status: Option<String>,
+        repo: Option<String>,
     },
     /// Archive a card
     Archive {
@@ -320,36 +306,49 @@ async fn run_card(action: CardAction, github: &GitHubClient) -> anyhow::Result<(
     match action {
         CardAction::Create {
             number,
+            card_type,
             title,
             body,
             owner,
             status,
-        } => {
-            let project = resolve_project(github, number, owner.as_deref()).await?;
-            let item_id = github.create_draft_issue(&project.id, &title, &body).await?;
-            if let Some(status_name) = status {
-                set_initial_status(github, &project.id, &item_id, &status_name).await?;
-            }
-            print_json(&serde_json::json!({ "item_id": item_id }))
-        }
-        CardAction::CreateIssue {
-            number,
             repo,
-            title,
-            body,
-            owner,
-            status,
-        } => {
-            let project = resolve_project(github, number, owner.as_deref()).await?;
-            let board = github.get_board(&project.id, &[], None).await?;
-            let (repo_owner, repo_name) = parse_repo(&repo)?;
-            let repository = board
-                .repositories
-                .iter()
-                .find(|r| r.name_with_owner == repo)
-                .with_context(|| {
-                    format!(
-                        "Repository '{repo}' not linked to this project. Available: {}",
+        } => match card_type.as_str() {
+            "draft" => {
+                let project = resolve_project(github, number, owner.as_deref()).await?;
+                let item_id = github.create_draft_issue(&project.id, &title, &body).await?;
+                if let Some(status_name) = status {
+                    set_initial_status(github, &project.id, &item_id, &status_name).await?;
+                }
+                print_json(&serde_json::json!({ "item_id": item_id }))
+            }
+            "issue" => {
+                let project = resolve_project(github, number, owner.as_deref()).await?;
+                let board = github.get_board(&project.id, &[], None).await?;
+                let repository = if let Some(repo) = &repo {
+                    let (repo_owner, repo_name) = parse_repo(repo)?;
+                    let _ = (repo_owner, repo_name);
+                    board
+                        .repositories
+                        .iter()
+                        .find(|r| r.name_with_owner == *repo)
+                        .with_context(|| {
+                            format!(
+                                "Repository '{repo}' not linked to this project. Available: {}",
+                                board
+                                    .repositories
+                                    .iter()
+                                    .map(|r| r.name_with_owner.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        })?
+                } else if board.repositories.len() == 1 {
+                    &board.repositories[0]
+                } else if board.repositories.is_empty() {
+                    bail!("No repositories linked to this project.")
+                } else {
+                    bail!(
+                        "Multiple repositories linked to this project. Specify one with --repo: {}",
                         board
                             .repositories
                             .iter()
@@ -357,18 +356,19 @@ async fn run_card(action: CardAction, github: &GitHubClient) -> anyhow::Result<(
                             .collect::<Vec<_>>()
                             .join(", ")
                     )
-                })?;
-            let _ = (repo_owner, repo_name); // used for validation above
-            let issue_id = github.create_issue(&repository.id, &title, &body).await?;
-            let item_id = github.add_project_item(&project.id, &issue_id).await?;
-            if let Some(status_name) = status {
-                set_initial_status(github, &project.id, &item_id, &status_name).await?;
+                };
+                let issue_id = github.create_issue(&repository.id, &title, &body).await?;
+                let item_id = github.add_project_item(&project.id, &issue_id).await?;
+                if let Some(status_name) = status {
+                    set_initial_status(github, &project.id, &item_id, &status_name).await?;
+                }
+                print_json(&serde_json::json!({
+                    "item_id": item_id,
+                    "issue_id": issue_id,
+                }))
             }
-            print_json(&serde_json::json!({
-                "item_id": item_id,
-                "issue_id": issue_id,
-            }))
-        }
+            other => bail!("Unknown card type: '{other}'. Use: draft, issue"),
+        },
         CardAction::Archive {
             project_id,
             item_id,
