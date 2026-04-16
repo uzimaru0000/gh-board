@@ -40,6 +40,15 @@ gh board board view <NUMBER> [--owner <LOGIN>] [--group-by <FIELD_NAME>]
 gh board board archived <NUMBER> [--owner <LOGIN>]
 ```
 
+### Item
+
+```bash
+# List all items in a project (flat list with custom field values)
+gh board item list <NUMBER> [--owner <LOGIN>]
+```
+
+Each item includes `custom_fields` containing all project field values (Priority, Sprint, etc.).
+
 ### Card
 
 ```bash
@@ -151,7 +160,7 @@ gh board comment add <CONTENT_ID> --body "This is my comment"
 Many commands use GitHub GraphQL node IDs. These are opaque strings like `PVT_kwHOAB...`. You can obtain them from the JSON output of other commands:
 
 - `project_id`: from `gh board project view` → `.id`
-- `item_id`: from `gh board board view` → `.columns[].cards[].item_id`
+- `item_id`: from `gh board board view` → `.columns[].cards[].item_id` or `gh board item list` → `[].item_id`
 - `content_id`: from `gh board board view` → `.columns[].cards[].content_id`
 - `field_id`: from `gh board field list` → `[].id` (for SingleSelect) or nested `.id`
 - `option_id`: from `gh board field list` → SingleSelect's `.options[].id`
