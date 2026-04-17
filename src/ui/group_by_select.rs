@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::model::project::Grouping;
-use crate::ui::layout::centered_rect_pct;
+use crate::ui::layout::modal_area_pct;
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -19,7 +19,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let current = app.state.board.as_ref().map(|b| &b.grouping);
 
-    let popup = centered_rect_pct(50, 60, area);
+    let popup = modal_area_pct(50, 60, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()

@@ -8,12 +8,12 @@ use ratatui::{
 
 use crate::model::project::Repository;
 use crate::model::state::RepoSelectState;
-use crate::ui::layout::centered_rect_fixed;
+use crate::ui::layout::modal_area_fixed;
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, repos: &[Repository], state: &RepoSelectState) {
     let height = (repos.len() as u16 + 4).min(20);
-    let popup = centered_rect_fixed(50, height, area);
+    let popup = modal_area_fixed(50, height, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
