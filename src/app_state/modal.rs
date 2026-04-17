@@ -9,7 +9,7 @@ impl AppState {
 
         match action {
             Action::ConfirmYes => {
-                if let Some(state) = self.confirm_state.take() {
+                if let Some(state) = self.exit_confirm() {
                     let return_to = state.return_to;
                     let cmd = match state.action {
                         ConfirmAction::ArchiveCard { item_id } => self.archive_card(&item_id),
@@ -26,11 +26,9 @@ impl AppState {
             }
             Action::ConfirmNo => {
                 let return_to = self
-                    .confirm_state
-                    .as_ref()
-                    .map(|s| s.return_to.clone())
+                    .exit_confirm()
+                    .map(|s| s.return_to)
                     .unwrap_or(ViewMode::Board);
-                self.confirm_state = None;
                 self.mode = return_to;
                 Command::None
             }
@@ -161,14 +159,13 @@ impl AppState {
             .and_then(|c| c.cards.get(real_idx));
 
         if let Some(card) = card {
-            self.confirm_state = Some(ConfirmState {
+            self.enter_confirm(ConfirmState {
                 action: ConfirmAction::ArchiveCard {
                     item_id: card.item_id.clone(),
                 },
                 title: card.title.clone(),
                 return_to,
             });
-            self.mode = ViewMode::Confirm;
         }
     }
 

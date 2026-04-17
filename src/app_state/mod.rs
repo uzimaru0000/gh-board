@@ -34,13 +34,16 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
         ViewMode::ProjectSelect => Scene::ProjectSelect,
         ViewMode::Help => Scene::Help,
         ViewMode::Filter => Scene::Filter,
-        ViewMode::Confirm => Scene::Confirm,
         ViewMode::CreateCard => Scene::CreateCard,
         ViewMode::Detail => Scene::Detail,
         ViewMode::RepoSelect => Scene::RepoSelect,
         ViewMode::CardGrab => Scene::CardGrab,
         ViewMode::EditCard => Scene::EditCard,
         ViewMode::CommentList => Scene::CommentList,
+        ViewMode::Confirm => {
+            debug_assert!(false, "Confirm scene must be entered via enter_confirm()");
+            Scene::Board
+        }
         // state を持つバリアントは enter_* 経由でしか対応 ViewMode にならない想定。
         ViewMode::ReactionPicker => {
             debug_assert!(false, "ReactionPicker scene must be entered via enter_reaction_picker()");
@@ -114,9 +117,6 @@ pub struct AppState {
 
     // Filter
     pub filter: FilterState,
-
-    // Confirm dialog
-    pub confirm_state: Option<ConfirmState>,
 
     // Create card
     pub create_card_state: CreateCardState,
@@ -203,7 +203,6 @@ impl AppState {
             project_filter_cursor: 0,
             filtered_project_indices: Vec::new(),
             filter: FilterState::default(),
-            confirm_state: None,
             create_card_state: CreateCardState::default(),
             repo_select_state: None,
             detail_scroll: 0,
@@ -369,6 +368,7 @@ impl AppState {
             Scene::ReactionPicker(_) if self.mode == ViewMode::ReactionPicker => return,
             Scene::GroupBySelect(_) if self.mode == ViewMode::GroupBySelect => return,
             Scene::ArchivedList(_) if self.mode == ViewMode::ArchivedList => return,
+            Scene::Confirm(_) if self.mode == ViewMode::Confirm => return,
             _ => {}
         }
         self.scene = scene_from_mode_tag(&self.mode);
@@ -466,6 +466,34 @@ impl AppState {
     pub(crate) fn exit_archived_list(&mut self) {
         self.mode = ViewMode::Board;
         self.scene = scene_from_mode_tag(&self.mode);
+    }
+
+    /// Confirm シーンに入る。Scene に state を直接持たせ、`mode` も同時に更新する。
+    pub(crate) fn enter_confirm(&mut self, state: ConfirmState) {
+        self.mode = ViewMode::Confirm;
+        self.scene = Scene::Confirm(state);
+    }
+
+    #[allow(dead_code)]
+    pub fn confirm_state(&self) -> Option<&ConfirmState> {
+        if let Scene::Confirm(s) = &self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    /// Confirm シーンを終了し、既存の state を取り出して mode を return_to に戻す。
+    pub(crate) fn exit_confirm(&mut self) -> Option<ConfirmState> {
+        let taken = if let Scene::Confirm(s) = std::mem::replace(&mut self.scene, Scene::Board) {
+            Some(s)
+        } else {
+            None
+        };
+        // 呼び出し側で return_to を使って mode を決める想定 (ここでは Board に仮置き)
+        self.mode = ViewMode::Board;
+        self.scene = scene_from_mode_tag(&self.mode);
+        taken
     }
 
     fn handle_event_inner(&mut self, event: AppEvent) -> Command {
@@ -1520,7 +1548,7 @@ mod tests {
         // a で確認ダイアログ
         state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
         assert_eq!(state.mode, ViewMode::Confirm);
-        assert!(state.confirm_state.is_some());
+        assert!(state.confirm_state().is_some());
 
         // y でアーカイブ実行
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('y'))));
@@ -1565,7 +1593,7 @@ mod tests {
         state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
 
         assert_eq!(state.mode, ViewMode::Confirm);
-        let confirm = state.confirm_state.as_ref().unwrap();
+        let confirm = state.confirm_state().unwrap();
         assert_eq!(confirm.title, "My Card");
         match &confirm.action {
             ConfirmAction::ArchiveCard { item_id } => assert_eq!(item_id, "1"),
@@ -3517,8 +3545,8 @@ mod tests {
 
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
         assert_eq!(state.mode, ViewMode::Confirm);
-        assert!(state.confirm_state.is_some());
-        let cs = state.confirm_state.as_ref().unwrap();
+        assert!(state.confirm_state().is_some());
+        let cs = state.confirm_state().unwrap();
         assert!(matches!(cs.action, ConfirmAction::ArchiveCard { .. }));
         assert_eq!(cs.return_to, ViewMode::Detail);
         assert_eq!(cmd, Command::None);
@@ -3538,7 +3566,7 @@ mod tests {
 
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('a'))));
         assert_eq!(state.mode, ViewMode::Confirm);
-        assert!(state.confirm_state.is_some());
+        assert!(state.confirm_state().is_some());
         assert_eq!(cmd, Command::None);
     }
 

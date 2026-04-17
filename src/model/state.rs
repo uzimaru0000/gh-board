@@ -40,7 +40,7 @@ pub enum Scene {
     ProjectSelect,
     Help,
     Filter,
-    Confirm,
+    Confirm(ConfirmState),
     CreateCard,
     Detail,
     RepoSelect,

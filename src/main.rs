@@ -257,12 +257,10 @@ fn render(frame: &mut Frame, app: &App) {
             render_board_with_tabs(frame, main_area, app);
             ui::filter_bar::render(frame, area, app);
         }
-        Scene::Confirm => {
+        Scene::Confirm(ref state) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
-            if let Some(state) = &app.state.confirm_state {
-                ui::confirm::render(frame, area, state);
-            }
+            ui::confirm::render(frame, area, state);
         }
         Scene::CreateCard => {
             render_board_with_tabs(frame, main_area, app);
