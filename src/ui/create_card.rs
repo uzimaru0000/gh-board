@@ -71,7 +71,8 @@ pub fn render(frame: &mut Frame, area: Rect, state: &CreateCardState) {
         .title(Span::styled(" Title ", title_label_style))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(title_border_style);
+        .border_style(title_border_style)
+        .padding(Padding::horizontal(1));
 
     let title_inner = title_block.inner(chunks[2]);
     frame.render_widget(title_block, chunks[2]);

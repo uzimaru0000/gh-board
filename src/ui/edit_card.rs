@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
     Frame,
 };
 
@@ -63,7 +63,8 @@ pub fn render(frame: &mut Frame, area: Rect, state: &EditCardState) {
         .title(Span::styled(" Title ", title_label_style))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(title_border_style);
+        .border_style(title_border_style)
+        .padding(Padding::horizontal(1));
 
     let title_inner = title_block.inner(chunks[0]);
     frame.render_widget(title_block, chunks[0]);
