@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-04-17
+
+### Added
+
+- Release update notification on the status bar (#64)
+- Version info and self-update instructions in skill output (#62)
+
+### Changed
+
+- Faster initial load via lighter queries, lazy fetching, and progressive rendering
+- Show spinner on column titles while the board is progressively rendering
+- Show spinner on Table and Roadmap views during progressive rendering
+- Center the Detail view loading indicator with a spinner
+
+### Fixed
+
+- Shift+Tab (BackTab) not working
+
+### Removed
+
+- Archived list TUI screen; `v` now opens the archive page in the browser
+
 ## [1.0.0] - 2026-04-16
 
 ### Added
@@ -89,6 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Wide character bleeding through detail modal left border
 
+[1.1.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.1.0
 [1.0.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.0.0
 [0.4.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v0.4.0
 [0.3.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v0.3.0
