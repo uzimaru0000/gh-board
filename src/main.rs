@@ -290,7 +290,7 @@ fn render(frame: &mut Frame, app: &App) {
                 ui::edit_card::render(frame, area, edit_state);
             }
         }
-        Scene::CardGrab => {
+        Scene::CardGrab(_) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
         }

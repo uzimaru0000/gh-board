@@ -36,7 +36,10 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
         ViewMode::Filter => Scene::Filter,
         ViewMode::CreateCard => Scene::CreateCard,
         ViewMode::Detail => Scene::Detail,
-        ViewMode::CardGrab => Scene::CardGrab,
+        ViewMode::CardGrab => {
+            debug_assert!(false, "CardGrab scene must be entered via enter_card_grab()");
+            Scene::Board
+        }
         ViewMode::EditCard => Scene::EditCard,
         ViewMode::CommentList => Scene::CommentList,
         ViewMode::Confirm => {
@@ -143,9 +146,6 @@ pub struct AppState {
     // Edit card
     pub edit_card_state: Option<EditCardState>,
 
-    // Card grab
-    pub grab_state: Option<GrabState>,
-
     // Comment list
     pub comment_list_state: Option<CommentListState>,
 
@@ -216,7 +216,6 @@ impl AppState {
             detail_stack: Vec::new(),
             detail_loading_id: None,
             edit_card_state: None,
-            grab_state: None,
             comment_list_state: None,
             loading: LoadingState::Idle,
             board_cache: BoardCache::new(8),
@@ -369,6 +368,7 @@ impl AppState {
             Scene::ArchivedList(_) if self.mode == ViewMode::ArchivedList => return,
             Scene::Confirm(_) if self.mode == ViewMode::Confirm => return,
             Scene::RepoSelect(_) if self.mode == ViewMode::RepoSelect => return,
+            Scene::CardGrab(_) if self.mode == ViewMode::CardGrab => return,
             _ => {}
         }
         self.scene = scene_from_mode_tag(&self.mode);
@@ -523,6 +523,33 @@ impl AppState {
     pub(crate) fn exit_repo_select(&mut self) -> Option<RepoSelectState> {
         let taken = if let Scene::RepoSelect(s) = std::mem::replace(&mut self.scene, Scene::Board)
         {
+            Some(s)
+        } else {
+            None
+        };
+        self.mode = ViewMode::Board;
+        self.scene = scene_from_mode_tag(&self.mode);
+        taken
+    }
+
+    /// CardGrab シーンに入る。
+    pub(crate) fn enter_card_grab(&mut self, state: GrabState) {
+        self.mode = ViewMode::CardGrab;
+        self.scene = Scene::CardGrab(state);
+    }
+
+    #[allow(dead_code)]
+    pub fn grab_state(&self) -> Option<&GrabState> {
+        if let Scene::CardGrab(s) = &self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    /// CardGrab シーンを終了し、Board モードに戻す。state を取り出して返す。
+    pub(crate) fn exit_card_grab(&mut self) -> Option<GrabState> {
+        let taken = if let Scene::CardGrab(s) = std::mem::replace(&mut self.scene, Scene::Board) {
             Some(s)
         } else {
             None
@@ -2944,7 +2971,7 @@ mod tests {
         state.mode = ViewMode::Board;
         state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
         assert_eq!(state.mode, ViewMode::CardGrab);
-        assert!(state.grab_state.is_some());
+        assert!(state.grab_state().is_some());
     }
 
     #[test]
@@ -2958,7 +2985,7 @@ mod tests {
 
         state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
         assert_eq!(state.mode, ViewMode::CardGrab);
-        let grab = state.grab_state.as_ref().unwrap();
+        let grab = state.grab_state().unwrap();
         assert_eq!(grab.origin_column, 0);
         assert_eq!(grab.origin_card_index, 0);
         assert_eq!(grab.item_id, "1");
@@ -2973,7 +3000,7 @@ mod tests {
 
         state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
         assert_eq!(state.mode, ViewMode::Board);
-        assert!(state.grab_state.is_none());
+        assert!(state.grab_state().is_none());
     }
 
     #[test]
@@ -2989,7 +3016,7 @@ mod tests {
         // 移動せずに Space で確定 → Command::None
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char(' '))));
         assert_eq!(state.mode, ViewMode::Board);
-        assert!(state.grab_state.is_none());
+        assert!(state.grab_state().is_none());
         assert_eq!(cmd, Command::None);
     }
 

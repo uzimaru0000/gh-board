@@ -111,12 +111,11 @@ impl AppState {
                         .cards[real_idx]
                         .item_id
                         .clone();
-                    self.grab_state = Some(GrabState {
+                    self.enter_card_grab(GrabState {
                         origin_column: self.selected_column,
                         origin_card_index: real_idx,
                         item_id,
                     });
-                    self.mode = ViewMode::CardGrab;
                 }
                 Command::None
             }
@@ -208,12 +207,11 @@ impl AppState {
                         .cards[real_idx]
                         .item_id
                         .clone();
-                    self.grab_state = Some(GrabState {
+                    self.enter_card_grab(GrabState {
                         origin_column: self.selected_column,
                         origin_card_index: real_idx,
                         item_id,
                     });
-                    self.mode = ViewMode::CardGrab;
                 }
                 Command::None
             }
@@ -686,10 +684,12 @@ impl AppState {
     }
 
     pub(super) fn confirm_grab(&mut self) -> Command {
-        self.mode = ViewMode::Board;
-        let grab = match self.grab_state.take() {
+        let grab = match self.exit_card_grab() {
             Some(g) => g,
-            None => return Command::None,
+            None => {
+                self.mode = ViewMode::Board;
+                return Command::None;
+            }
         };
 
         let current_column = self.selected_column;
@@ -822,10 +822,12 @@ impl AppState {
     }
 
     pub(super) fn cancel_grab(&mut self) -> Command {
-        self.mode = ViewMode::Board;
-        let grab = match self.grab_state.take() {
+        let grab = match self.exit_card_grab() {
             Some(g) => g,
-            None => return Command::None,
+            None => {
+                self.mode = ViewMode::Board;
+                return Command::None;
+            }
         };
 
         // カードを元の位置に戻す

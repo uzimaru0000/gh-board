@@ -44,7 +44,7 @@ pub enum Scene {
     CreateCard,
     Detail,
     RepoSelect(RepoSelectState),
-    CardGrab,
+    CardGrab(GrabState),
     EditCard,
     CommentList,
     GroupBySelect(GroupBySelectState),
