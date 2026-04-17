@@ -13,10 +13,14 @@ impl AppState {
                     let return_to = state.return_to;
                     let cmd = match state.action {
                         ConfirmAction::ArchiveCard { item_id } => self.archive_card(&item_id),
+                        ConfirmAction::ArchiveMultipleCards { item_ids } => {
+                            self.archive_multiple_cards(&item_ids)
+                        }
                     };
                     // カードが消える破壊的操作は Detail には留まれない → Board に戻る
                     self.mode = match &cmd {
                         Command::ArchiveCard { .. } => ViewMode::Board,
+                        Command::Batch(_) => ViewMode::Board,
                         _ => return_to,
                     };
                     cmd

@@ -21,6 +21,7 @@ use crate::model::state::{
 use crate::model::state::{SIDEBAR_ASSIGNEES, SIDEBAR_LABELS};
 
 mod board;
+mod bulk;
 mod detail;
 mod filter;
 mod modal;
@@ -65,6 +66,7 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
             debug_assert!(false, "GroupBySelect scene must be entered via enter_group_by_select()");
             Scene::Board
         }
+        ViewMode::BulkSelect => Scene::BulkSelect,
     }
 }
 
@@ -184,6 +186,9 @@ pub struct AppState {
 
     /// 新しい release が GitHub 上に公開されていれば、その tag (v プレフィックス除去済み)。
     pub update_available: Option<String>,
+
+    /// Bulk 選択モード中に選ばれている item_id の集合。
+    pub bulk_selected: std::collections::HashSet<String>,
 }
 
 impl AppState {
@@ -232,6 +237,7 @@ impl AppState {
             scene: Scene::ProjectSelect,
             previous_scene: None,
             update_available: None,
+            bulk_selected: std::collections::HashSet::new(),
         }
     }
 
@@ -987,6 +993,10 @@ impl AppState {
                 self.mode = ViewMode::CreateCard;
                 Some(Command::None)
             }
+            Action::BulkSelectStart => {
+                self.enter_bulk_select();
+                Some(Command::None)
+            }
             _ => None,
         }
     }
@@ -1044,6 +1054,7 @@ impl AppState {
             ViewMode::CommentList => self.handle_comment_list_key(key),
             ViewMode::GroupBySelect => self.handle_group_by_select_key(key),
             ViewMode::ReactionPicker => self.handle_reaction_picker_key(key),
+            ViewMode::BulkSelect => self.handle_bulk_select_key(key),
         }
     }
 
@@ -1617,6 +1628,7 @@ mod tests {
         assert_eq!(confirm.title, "My Card");
         match &confirm.action {
             ConfirmAction::ArchiveCard { item_id } => assert_eq!(item_id, "1"),
+            ConfirmAction::ArchiveMultipleCards { .. } => panic!("unexpected action"),
         }
     }
 

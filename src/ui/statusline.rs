@@ -126,6 +126,27 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             grab_hints,
             Style::default().fg(theme().text_muted),
         ));
+    } else if app.state.mode == ViewMode::BulkSelect {
+        let count = app.state.bulk_selected.len();
+        let hints = format!(
+            " hjkl:move  {}:toggle  {}:all  {}:archive  H/L:move col  {}:exit  ({} selected) ",
+            build_hint_pair(app, KeymapMode::BulkSelect, &[(Action::BulkSelectToggle, "toggle")]),
+            build_hint_pair(app, KeymapMode::BulkSelect, &[(Action::BulkSelectAll, "all")]),
+            build_hint_pair(app, KeymapMode::BulkSelect, &[(Action::BulkArchive, "archive")]),
+            build_hint_pair(app, KeymapMode::BulkSelect, &[(Action::BulkSelectClear, "exit")]),
+            count,
+        );
+        spans.push(Span::styled(
+            " BULK ",
+            Style::default()
+                .fg(theme().text_inverted)
+                .bg(theme().accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            hints,
+            Style::default().fg(theme().text_muted),
+        ));
     } else {
         let mode = match app.state.current_layout {
             LayoutMode::Board => KeymapMode::Board,

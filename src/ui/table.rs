@@ -205,6 +205,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let cols = build_columns(board);
     let constraints: Vec<Constraint> = cols.iter().map(col_constraint).collect();
 
+    let is_bulk = app.state.mode == ViewMode::BulkSelect;
     let rows: Vec<Row> = app
         .state
         .table_rows()
@@ -212,12 +213,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .map(|&(col_idx, card_idx)| {
             let column = &board.columns[col_idx];
             let card = &column.cards[card_idx];
-            Row::new(
+            let mut row = Row::new(
                 cols.iter()
                     .map(|c| cell_for(card, c, &column.name))
                     .collect::<Vec<_>>(),
             )
-            .height(1)
+            .height(1);
+            if is_bulk && app.state.bulk_selected.contains(&card.item_id) {
+                row = row.style(
+                    Style::default()
+                        .fg(theme().accent)
+                        .add_modifier(Modifier::BOLD),
+                );
+            }
+            row
         })
         .collect();
 

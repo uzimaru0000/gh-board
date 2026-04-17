@@ -52,4 +52,13 @@ pub enum Action {
     // Reactions
     OpenReactionPicker,
     ToggleReaction,
+
+    // Bulk selection
+    BulkSelectStart,
+    BulkSelectToggle,
+    BulkSelectAll,
+    BulkSelectClear,
+    BulkArchive,
+    BulkMoveLeft,
+    BulkMoveRight,
 }

@@ -19,14 +19,31 @@ pub struct CardWidget<'a> {
     pub card: &'a Card,
     pub selected: bool,
     pub grabbing: bool,
+    /// Bulk 選択モード中にこのカードが選択済みか。先頭 indicator とボーダー強調に使う。
+    pub bulk_selected: bool,
 }
 
 impl Widget for CardWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // 「色」でカードの選択状態、「ボーダー種別」でカーソル位置を表す。
+        // bulk_selected + selected が重なった場合は太ボーダー + accent 色で
+        // 両方が立っていることが一目で分かるようにする。
         let (border_style, border_type) = if self.grabbing {
             (
                 Style::default().fg(theme().yellow),
                 BorderType::Thick,
+            )
+        } else if self.bulk_selected && self.selected {
+            (
+                Style::default()
+                    .fg(theme().accent)
+                    .add_modifier(Modifier::BOLD),
+                BorderType::Thick,
+            )
+        } else if self.bulk_selected {
+            (
+                Style::default().fg(theme().accent),
+                BorderType::Rounded,
             )
         } else if self.selected {
             (
@@ -61,7 +78,16 @@ impl Widget for CardWidget<'_> {
             .map(|n| format!("#{n} "))
             .unwrap_or_default();
 
-        let mut title_spans = vec![type_indicator];
+        let mut title_spans = Vec::new();
+        if self.bulk_selected {
+            title_spans.push(Span::styled(
+                "✓ ",
+                Style::default()
+                    .fg(theme().accent)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        title_spans.push(type_indicator);
         if matches!(self.card.card_type, CardType::PullRequest { .. })
             && let Some(status) = &self.card.pr_status
         {
@@ -298,7 +324,7 @@ mod tests {
         terminal
             .draw(|f| {
                 f.render_widget(
-                    CardWidget { card, selected, grabbing },
+                    CardWidget { card, selected, grabbing, bulk_selected: false },
                     Rect::new(0, 0, width, CARD_HEIGHT),
                 );
             })

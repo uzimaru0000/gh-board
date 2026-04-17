@@ -20,6 +20,7 @@ pub enum ViewMode {
     CommentList,
     GroupBySelect,
     ReactionPicker,
+    BulkSelect,
 }
 
 /// 現在表示中の「シーン」。Phase B リファクタで段階的にモード固有の state を
@@ -48,6 +49,7 @@ pub enum Scene {
     CommentList(CommentListState),
     GroupBySelect(GroupBySelectState),
     ReactionPicker(ReactionPickerState),
+    BulkSelect,
 }
 
 /// Board の表示レイアウト。Kanban (Board) / Table / Roadmap の 3 種類をサポート。
@@ -147,6 +149,7 @@ pub struct ConfirmState {
 #[derive(Clone, Debug)]
 pub enum ConfirmAction {
     ArchiveCard { item_id: String },
+    ArchiveMultipleCards { item_ids: Vec<String> },
 }
 
 #[derive(Clone, Debug)]
