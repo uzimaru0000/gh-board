@@ -367,7 +367,7 @@ impl AppState {
                 }
 
                 // 複数リポジトリ → セレクタ表示
-                self.repo_select_state = Some(RepoSelectState {
+                self.enter_repo_select(RepoSelectState {
                     selected_index: 0,
                     pending_create: PendingIssueCreate {
                         title,
@@ -375,7 +375,6 @@ impl AppState {
                         initial_status,
                     },
                 });
-                self.mode = ViewMode::RepoSelect;
                 Command::None
             }
         }
@@ -398,13 +397,14 @@ impl AppState {
                 self.should_quit = true;
             }
             Action::MoveDown => {
-                if let Some(rs) = &mut self.repo_select_state
-                    && rs.selected_index + 1 < repo_count {
-                        rs.selected_index += 1;
-                    }
+                if let Some(rs) = self.repo_select_state_mut()
+                    && rs.selected_index + 1 < repo_count
+                {
+                    rs.selected_index += 1;
+                }
             }
             Action::MoveUp => {
-                if let Some(rs) = &mut self.repo_select_state {
+                if let Some(rs) = self.repo_select_state_mut() {
                     rs.selected_index = rs.selected_index.saturating_sub(1);
                 }
             }
@@ -412,8 +412,7 @@ impl AppState {
                 return self.submit_repo_selection();
             }
             Action::Back | Action::Quit => {
-                self.repo_select_state = None;
-                self.mode = ViewMode::Board;
+                self.exit_repo_select();
             }
             _ => {}
         }
@@ -421,7 +420,7 @@ impl AppState {
     }
 
     pub(super) fn submit_repo_selection(&mut self) -> Command {
-        let rs = match self.repo_select_state.take() {
+        let rs = match self.exit_repo_select() {
             Some(rs) => rs,
             None => return Command::None,
         };

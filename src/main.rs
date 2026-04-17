@@ -272,18 +272,16 @@ fn render(frame: &mut Frame, app: &App) {
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
         }
-        Scene::RepoSelect => {
+        Scene::RepoSelect(ref rs) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
-            if let Some(rs) = &app.state.repo_select_state {
-                let repos = app
-                    .state
-                    .board
-                    .as_ref()
-                    .map(|b| b.repositories.as_slice())
-                    .unwrap_or(&[]);
-                ui::repo_select::render(frame, area, repos, rs);
-            }
+            let repos = app
+                .state
+                .board
+                .as_ref()
+                .map(|b| b.repositories.as_slice())
+                .unwrap_or(&[]);
+            ui::repo_select::render(frame, area, repos, rs);
         }
         Scene::EditCard => {
             render_board_with_tabs(frame, main_area, app);

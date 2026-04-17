@@ -36,12 +36,15 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
         ViewMode::Filter => Scene::Filter,
         ViewMode::CreateCard => Scene::CreateCard,
         ViewMode::Detail => Scene::Detail,
-        ViewMode::RepoSelect => Scene::RepoSelect,
         ViewMode::CardGrab => Scene::CardGrab,
         ViewMode::EditCard => Scene::EditCard,
         ViewMode::CommentList => Scene::CommentList,
         ViewMode::Confirm => {
             debug_assert!(false, "Confirm scene must be entered via enter_confirm()");
+            Scene::Board
+        }
+        ViewMode::RepoSelect => {
+            debug_assert!(false, "RepoSelect scene must be entered via enter_repo_select()");
             Scene::Board
         }
         // state を持つバリアントは enter_* 経由でしか対応 ViewMode にならない想定。
@@ -120,9 +123,6 @@ pub struct AppState {
 
     // Create card
     pub create_card_state: CreateCardState,
-
-    // Repo selection
-    pub repo_select_state: Option<RepoSelectState>,
 
     // Detail view
     pub detail_scroll: usize,
@@ -204,7 +204,6 @@ impl AppState {
             filtered_project_indices: Vec::new(),
             filter: FilterState::default(),
             create_card_state: CreateCardState::default(),
-            repo_select_state: None,
             detail_scroll: 0,
             detail_scroll_x: 0,
             detail_max_scroll: std::cell::Cell::new(0),
@@ -369,6 +368,7 @@ impl AppState {
             Scene::GroupBySelect(_) if self.mode == ViewMode::GroupBySelect => return,
             Scene::ArchivedList(_) if self.mode == ViewMode::ArchivedList => return,
             Scene::Confirm(_) if self.mode == ViewMode::Confirm => return,
+            Scene::RepoSelect(_) if self.mode == ViewMode::RepoSelect => return,
             _ => {}
         }
         self.scene = scene_from_mode_tag(&self.mode);
@@ -491,6 +491,42 @@ impl AppState {
             None
         };
         // 呼び出し側で return_to を使って mode を決める想定 (ここでは Board に仮置き)
+        self.mode = ViewMode::Board;
+        self.scene = scene_from_mode_tag(&self.mode);
+        taken
+    }
+
+    /// RepoSelect シーンに入る。
+    pub(crate) fn enter_repo_select(&mut self, state: RepoSelectState) {
+        self.mode = ViewMode::RepoSelect;
+        self.scene = Scene::RepoSelect(state);
+    }
+
+    #[allow(dead_code)]
+    pub fn repo_select_state(&self) -> Option<&RepoSelectState> {
+        if let Scene::RepoSelect(s) = &self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn repo_select_state_mut(&mut self) -> Option<&mut RepoSelectState> {
+        if let Scene::RepoSelect(s) = &mut self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    /// RepoSelect シーンを終了し、Board モードに戻す。state を取り出して返す。
+    pub(crate) fn exit_repo_select(&mut self) -> Option<RepoSelectState> {
+        let taken = if let Scene::RepoSelect(s) = std::mem::replace(&mut self.scene, Scene::Board)
+        {
+            Some(s)
+        } else {
+            None
+        };
         self.mode = ViewMode::Board;
         self.scene = scene_from_mode_tag(&self.mode);
         taken
@@ -2689,8 +2725,8 @@ mod tests {
 
         assert_eq!(cmd, Command::None);
         assert_eq!(state.mode, ViewMode::RepoSelect);
-        assert!(state.repo_select_state.is_some());
-        let rs = state.repo_select_state.as_ref().unwrap();
+        assert!(state.repo_select_state().is_some());
+        let rs = state.repo_select_state().unwrap();
         assert_eq!(rs.selected_index, 0);
         assert_eq!(rs.pending_create.title, "My Issue");
     }
@@ -2784,8 +2820,7 @@ mod tests {
             vec![("repo_1", "owner/repo1"), ("repo_2", "owner/repo2"), ("repo_3", "owner/repo3")],
         );
         let mut state = make_state_with_board(board);
-        state.mode = ViewMode::RepoSelect;
-        state.repo_select_state = Some(RepoSelectState {
+        state.enter_repo_select(RepoSelectState {
             selected_index: 0,
             pending_create: PendingIssueCreate {
                 title: "My Issue".into(),
@@ -2805,18 +2840,18 @@ mod tests {
 
         // j で下に移動
         state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
-        assert_eq!(state.repo_select_state.as_ref().unwrap().selected_index, 1);
+        assert_eq!(state.repo_select_state().unwrap().selected_index, 1);
 
         state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
-        assert_eq!(state.repo_select_state.as_ref().unwrap().selected_index, 2);
+        assert_eq!(state.repo_select_state().unwrap().selected_index, 2);
 
         // 末尾でクランプ
         state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
-        assert_eq!(state.repo_select_state.as_ref().unwrap().selected_index, 2);
+        assert_eq!(state.repo_select_state().unwrap().selected_index, 2);
 
         // k で上に移動
         state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
-        assert_eq!(state.repo_select_state.as_ref().unwrap().selected_index, 1);
+        assert_eq!(state.repo_select_state().unwrap().selected_index, 1);
     }
 
     #[test]
@@ -2841,7 +2876,7 @@ mod tests {
             }
         );
         assert_eq!(state.mode, ViewMode::Board);
-        assert!(state.repo_select_state.is_none());
+        assert!(state.repo_select_state().is_none());
     }
 
     #[test]
@@ -2851,7 +2886,7 @@ mod tests {
         state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
 
         assert_eq!(state.mode, ViewMode::Board);
-        assert!(state.repo_select_state.is_none());
+        assert!(state.repo_select_state().is_none());
     }
 
     // ========== Body: $EDITOR ==========

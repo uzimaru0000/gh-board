@@ -43,7 +43,7 @@ pub enum Scene {
     Confirm(ConfirmState),
     CreateCard,
     Detail,
-    RepoSelect,
+    RepoSelect(RepoSelectState),
     CardGrab,
     EditCard,
     CommentList,
