@@ -45,6 +45,11 @@ impl KeyBind {
             && c.is_ascii_uppercase() {
                 modifiers -= KeyModifiers::SHIFT;
             }
+        // BackTab は定義上 "Shift+Tab" を意味する KeyCode。ターミナルによっては
+        // KeyModifiers::SHIFT が付随して届くが、冗長なので NONE に正規化する。
+        if key.code == KeyCode::BackTab {
+            modifiers -= KeyModifiers::SHIFT;
+        }
         Self {
             code: key.code,
             modifiers,
@@ -771,6 +776,26 @@ mod tests {
     }
 
     // ========== Keymap::resolve tests ==========
+
+    #[test]
+    fn backtab_with_shift_modifier_resolves_same_as_bare_backtab() {
+        // 多くのターミナル (kitty, alacritty, foot など) は Shift+Tab を
+        // KeyCode::BackTab + KeyModifiers::SHIFT として送ってくる。
+        // KeyCode::BackTab 単体と同じ resolve 結果になること。
+        let keymap = Keymap::default_keymap();
+
+        let bare = make_key_event(KeyCode::BackTab, KeyModifiers::NONE);
+        let with_shift = make_key_event(KeyCode::BackTab, KeyModifiers::SHIFT);
+
+        assert_eq!(
+            keymap.resolve(KeymapMode::Board, &bare),
+            Some(Action::PrevTab)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::Board, &with_shift),
+            Some(Action::PrevTab)
+        );
+    }
 
     #[test]
     fn test_resolve_board_navigation() {
