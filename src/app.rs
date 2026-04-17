@@ -27,6 +27,9 @@ impl App {
         let viewer_login = github.viewer_login().to_string();
         let mut state = AppState::new(owner);
         state.viewer_login = viewer_login;
+
+        spawn_update_check(event_tx.clone());
+
         Self {
             state,
             pending_editor: None,
@@ -532,4 +535,15 @@ impl App {
             }
         }
     }
+}
+
+fn spawn_update_check(tx: mpsc::UnboundedSender<AppEvent>) {
+    tokio::spawn(async move {
+        let Some(latest) = crate::github::update_check::fetch_latest_version().await else {
+            return;
+        };
+        if crate::github::update_check::is_newer(&latest, env!("CARGO_PKG_VERSION")) {
+            let _ = tx.send(AppEvent::UpdateAvailable(latest));
+        }
+    });
 }

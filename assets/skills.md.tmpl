@@ -1,11 +1,19 @@
 ---
 name: gh-board
 description: Manage GitHub Projects V2 kanban boards from the CLI. List projects, view boards, create/move/archive cards, manage comments and fields. All commands output JSON.
+version: {{VERSION}}
 ---
 
 # gh-board CLI Skills
 
 gh-board provides CLI subcommands for programmatic access to GitHub Projects V2. All commands output JSON to stdout.
+
+## Keeping this file up to date
+
+This file is shipped with the `gh board` binary and regenerated on every release. Before using any command below, compare the `version` in the frontmatter above with the output of `gh board --version`:
+
+- If they match, proceed normally.
+- If they differ, this file is stale. Regenerate it with `gh board skill > <path to this file>` and reload the skill before continuing. Doing this first avoids calling commands or flags that have since been renamed, added, or removed.
 
 ## Authentication
 

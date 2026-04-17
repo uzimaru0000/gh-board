@@ -166,8 +166,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(line, status_area);
 
     // 右端に loading status (アニメーション付き) を重ねて描画
-    if let Some(loading_line) = build_loading_line(&app.state.loading) {
-        let width = loading_line.width() as u16;
+    // loading が無いときに限り、update 通知を同じ位置に表示する
+    let right_line = build_loading_line(&app.state.loading)
+        .or_else(|| build_update_line(app.state.update_available.as_deref()));
+    if let Some(line) = right_line {
+        let width = line.width() as u16;
         if status_area.width >= width {
             let right_area = Rect {
                 x: status_area.x + status_area.width - width,
@@ -175,7 +178,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 width,
                 height: 1,
             };
-            frame.render_widget(loading_line.alignment(Alignment::Right), right_area);
+            frame.render_widget(line.alignment(Alignment::Right), right_area);
         }
     }
 }
@@ -191,6 +194,15 @@ pub(crate) fn loading_spinner_span(loading: &LoadingState) -> Option<Span<'stati
         }
         _ => None,
     }
+}
+
+fn build_update_line(update_available: Option<&str>) -> Option<Line<'static>> {
+    let v = update_available?;
+    let style = Style::default().fg(theme().text_muted);
+    Some(Line::from(vec![Span::styled(
+        format!("↑ v{v} available "),
+        style,
+    )]))
 }
 
 fn build_loading_line(loading: &LoadingState) -> Option<Line<'static>> {
