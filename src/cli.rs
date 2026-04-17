@@ -233,7 +233,7 @@ pub async fn run(cmd: CliCommand, github: GitHubClient) -> anyhow::Result<()> {
         CliCommand::Assignee { action } => run_assignee(action, &github).await,
         CliCommand::Item { action } => run_item(action, &github).await,
         CliCommand::Skill => {
-            print!("{}", include_str!("../assets/skills.md"));
+            print!("{}", include_str!(concat!(env!("OUT_DIR"), "/skills.md")));
             Ok(())
         }
     }

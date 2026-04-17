@@ -7,6 +7,9 @@ fn main() {
 
     println!("cargo::rerun-if-changed=schema.graphql");
     println!("cargo::rerun-if-changed=Cargo.toml");
+    println!("cargo::rerun-if-changed=assets/skills.md.tmpl");
+
+    generate_skills_md(&manifest_dir);
 
     if schema_path.exists() {
         return;
@@ -52,4 +55,19 @@ fn main() {
         "Downloaded schema.graphql ({} bytes)",
         output.stdout.len()
     );
+}
+
+fn generate_skills_md(manifest_dir: &str) {
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
+    let version = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION not set");
+
+    let tmpl_path = Path::new(manifest_dir).join("assets/skills.md.tmpl");
+    let tmpl = std::fs::read_to_string(&tmpl_path)
+        .unwrap_or_else(|e| panic!("Failed to read {}: {e}", tmpl_path.display()));
+
+    let rendered = tmpl.replace("{{VERSION}}", &version);
+
+    let dest = Path::new(&out_dir).join("skills.md");
+    std::fs::write(&dest, rendered)
+        .unwrap_or_else(|e| panic!("Failed to write {}: {e}", dest.display()));
 }

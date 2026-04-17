@@ -32,7 +32,7 @@ use github::client::GitHubClient;
 use model::state::{LoadingState, Scene, ViewMode};
 
 #[derive(Parser)]
-#[command(name = "gh-board", about = "View GitHub Projects V2 as a kanban board")]
+#[command(name = "gh-board", about = "View GitHub Projects V2 as a kanban board", version)]
 struct Cli {
     #[command(subcommand)]
     command: Option<cli::CliCommand>,
