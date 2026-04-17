@@ -12,7 +12,7 @@ use crate::ui::layout::centered_rect_pct;
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let state = match &app.state.group_by_select_state {
+    let state = match app.state.group_by_select_state() {
         Some(s) => s,
         None => return,
     };

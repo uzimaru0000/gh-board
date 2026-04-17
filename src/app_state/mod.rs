@@ -41,12 +41,14 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
         ViewMode::CardGrab => Scene::CardGrab,
         ViewMode::EditCard => Scene::EditCard,
         ViewMode::CommentList => Scene::CommentList,
-        ViewMode::GroupBySelect => Scene::GroupBySelect,
         ViewMode::ArchivedList => Scene::ArchivedList,
-        // ReactionPicker は state を持つので mode 単独からは生成できない。
-        // enter_reaction_picker() 経由でしか ViewMode::ReactionPicker にならない想定。
+        // state を持つバリアントは enter_* 経由でしか対応 ViewMode にならない想定。
         ViewMode::ReactionPicker => {
             debug_assert!(false, "ReactionPicker scene must be entered via enter_reaction_picker()");
+            Scene::Board
+        }
+        ViewMode::GroupBySelect => {
+            debug_assert!(false, "GroupBySelect scene must be entered via enter_group_by_select()");
             Scene::Board
         }
     }
@@ -144,9 +146,6 @@ pub struct AppState {
     // Comment list
     pub comment_list_state: Option<CommentListState>,
 
-    // Group-by selector
-    pub group_by_select_state: Option<GroupBySelectState>,
-
     // Archived list
     pub archived_list: Option<crate::model::state::ArchivedListState>,
 
@@ -221,7 +220,6 @@ impl AppState {
             edit_card_state: None,
             grab_state: None,
             comment_list_state: None,
-            group_by_select_state: None,
             archived_list: None,
             loading: LoadingState::Idle,
             board_cache: BoardCache::new(8),
@@ -366,14 +364,12 @@ impl AppState {
     /// 既に Scene バリアントに state が取り込まれたモード (ReactionPicker 等) は
     /// このシンクの対象外 (enter_* API 側で scene と mode の両方を直接更新する)。
     pub(crate) fn sync_scene_from_mode(&mut self) {
-        // ReactionPicker は Scene 側が ground truth。mode 側の変化で scene を
-        // 潰さないよう、ここでは派生させない。
-        if matches!(self.scene, Scene::ReactionPicker(_)) {
-            if self.mode != ViewMode::ReactionPicker {
-                // mode が別モードに遷移したら scene も追従 (退出時のセーフティネット)
-                self.scene = scene_from_mode_tag(&self.mode);
-            }
-            return;
+        // state を Scene に取り込み済みのシーンは mode 側の変化で scene を潰さない。
+        // mode が別モードに移ったら scene も追従する (退出時のセーフティネット)。
+        match &self.scene {
+            Scene::ReactionPicker(_) if self.mode == ViewMode::ReactionPicker => return,
+            Scene::GroupBySelect(_) if self.mode == ViewMode::GroupBySelect => return,
+            _ => {}
         }
         self.scene = scene_from_mode_tag(&self.mode);
     }
@@ -407,6 +403,41 @@ impl AppState {
     pub(crate) fn exit_reaction_picker(&mut self, return_to: ViewMode) {
         self.mode = return_to;
         self.scene = scene_from_mode_tag(&self.mode);
+    }
+
+    /// GroupBySelect シーンに入る。Scene に state を直接持たせ、`mode` も同時に更新する。
+    pub(crate) fn enter_group_by_select(&mut self, state: GroupBySelectState) {
+        self.mode = ViewMode::GroupBySelect;
+        self.scene = Scene::GroupBySelect(state);
+    }
+
+    pub fn group_by_select_state(&self) -> Option<&GroupBySelectState> {
+        if let Scene::GroupBySelect(s) = &self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn group_by_select_state_mut(&mut self) -> Option<&mut GroupBySelectState> {
+        if let Scene::GroupBySelect(s) = &mut self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    /// GroupBySelect シーンを終了し、Board モードに戻す。既存の state を取り出して返す。
+    pub(crate) fn exit_group_by_select(&mut self) -> Option<GroupBySelectState> {
+        let taken = if let Scene::GroupBySelect(s) = std::mem::replace(&mut self.scene, Scene::Board)
+        {
+            Some(s)
+        } else {
+            None
+        };
+        self.mode = ViewMode::Board;
+        self.scene = scene_from_mode_tag(&self.mode);
+        taken
     }
 
     fn handle_event_inner(&mut self, event: AppEvent) -> Command {
@@ -5700,7 +5731,7 @@ mod tests {
             KeyModifiers::CONTROL,
         )));
         assert_eq!(state.mode, ViewMode::GroupBySelect);
-        let s = state.group_by_select_state.as_ref().expect("state set");
+        let s = state.group_by_select_state().expect("state set");
         assert_eq!(s.candidates.len(), 2); // Priority + Sprint
     }
 

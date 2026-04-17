@@ -496,8 +496,7 @@ impl AppState {
             .iter()
             .position(|g| g == &board.grouping)
             .unwrap_or(0);
-        self.group_by_select_state = Some(GroupBySelectState { cursor, candidates });
-        self.mode = ViewMode::GroupBySelect;
+        self.enter_group_by_select(GroupBySelectState { cursor, candidates });
     }
 
     pub(super) fn handle_group_by_select_key(&mut self, key: KeyEvent) -> Command {
@@ -507,8 +506,7 @@ impl AppState {
         };
 
         let candidate_count = self
-            .group_by_select_state
-            .as_ref()
+            .group_by_select_state()
             .map(|s| s.candidates.len())
             .unwrap_or(0);
 
@@ -518,12 +516,11 @@ impl AppState {
                 Command::None
             }
             Action::Back | Action::Quit => {
-                self.group_by_select_state = None;
-                self.mode = ViewMode::Board;
+                self.exit_group_by_select();
                 Command::None
             }
             Action::MoveDown => {
-                if let Some(ref mut s) = self.group_by_select_state
+                if let Some(s) = self.group_by_select_state_mut()
                     && candidate_count > 0
                 {
                     s.cursor = (s.cursor + 1).min(candidate_count - 1);
@@ -531,17 +528,15 @@ impl AppState {
                 Command::None
             }
             Action::MoveUp => {
-                if let Some(ref mut s) = self.group_by_select_state {
+                if let Some(s) = self.group_by_select_state_mut() {
                     s.cursor = s.cursor.saturating_sub(1);
                 }
                 Command::None
             }
             Action::Select => {
-                let grouping = match self.group_by_select_state.take() {
-                    Some(s) => s.candidates.into_iter().nth(s.cursor),
-                    None => None,
-                };
-                self.mode = ViewMode::Board;
+                let grouping = self
+                    .exit_group_by_select()
+                    .and_then(|s| s.candidates.into_iter().nth(s.cursor));
                 if let Some(g) = grouping {
                     self.apply_grouping(g);
                 }

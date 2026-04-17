@@ -31,7 +31,9 @@ pub enum ViewMode {
 ///
 /// 未移行バリアントは現状 `mode: ViewMode` + `Option<FooState>` と共存する
 /// 単なるタグで、`AppState::sync_scene_from_mode()` で `mode` から派生させる。
-#[derive(Clone, Debug, PartialEq, Eq)]
+// `Eq` は GroupBySelectState::candidates (Grouping) に `Eq` 実装がないため外す。
+// 現状 Scene::Eq を要求するコードはない (assert_eq! は PartialEq で足りる)。
+#[derive(Clone, Debug, PartialEq)]
 pub enum Scene {
     Board,
     ProjectSelect,
@@ -44,7 +46,7 @@ pub enum Scene {
     CardGrab,
     EditCard,
     CommentList,
-    GroupBySelect,
+    GroupBySelect(GroupBySelectState),
     ReactionPicker(ReactionPickerState),
     ArchivedList,
 }
@@ -214,7 +216,7 @@ pub struct CommentListState {
     pub content_id: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GroupBySelectState {
     pub cursor: usize,
     pub candidates: Vec<super::project::Grouping>,

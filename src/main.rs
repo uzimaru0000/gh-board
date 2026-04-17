@@ -304,7 +304,7 @@ fn render(frame: &mut Frame, app: &App) {
             ui::detail::render(frame, area, app);
             ui::comment_list::render(frame, area, app);
         }
-        Scene::GroupBySelect => {
+        Scene::GroupBySelect(_) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::group_by_select::render(frame, area, app);
