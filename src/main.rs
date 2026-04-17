@@ -142,7 +142,7 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg
                 } else {
                     match app.state.mode {
                         ViewMode::EditCard => {
-                            if let Some(ref mut s) = app.state.edit_card_state {
+                            if let Some(s) = app.state.edit_card_state_mut() {
                                 s.body_input = new_body;
                             }
                         }
@@ -283,12 +283,10 @@ fn render(frame: &mut Frame, app: &App) {
                 .unwrap_or(&[]);
             ui::repo_select::render(frame, area, repos, rs);
         }
-        Scene::EditCard => {
+        Scene::EditCard(ref edit_state) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
-            if let Some(ref edit_state) = app.state.edit_card_state {
-                ui::edit_card::render(frame, area, edit_state);
-            }
+            ui::edit_card::render(frame, area, edit_state);
         }
         Scene::CardGrab(_) => {
             render_board_with_tabs(frame, main_area, app);

@@ -198,7 +198,7 @@ impl AppState {
         let title = card.title.clone();
         let title_cursor = title.len();
         let body = card.body.clone().unwrap_or_default();
-        self.edit_card_state = Some(EditCardState {
+        self.enter_edit_card(EditCardState {
             content_id,
             item_id,
             card_type,
@@ -207,12 +207,11 @@ impl AppState {
             body_input: body,
             focused_field: EditCardField::Title,
         });
-        self.mode = ViewMode::EditCard;
         Command::None
     }
 
     pub(super) fn submit_edit_card(&mut self) -> Command {
-        let edit_state = match &self.edit_card_state {
+        let edit_state = match self.edit_card_state() {
             Some(s) => s,
             None => return Command::None,
         };
@@ -236,8 +235,7 @@ impl AppState {
             }
         }
 
-        self.mode = ViewMode::Detail;
-        self.edit_card_state = None;
+        self.exit_edit_card();
         Command::UpdateCard {
             content_id,
             card_type,
@@ -258,12 +256,11 @@ impl AppState {
                     return self.submit_edit_card();
                 }
                 Action::Back => {
-                    self.mode = ViewMode::Detail;
-                    self.edit_card_state = None;
+                    self.exit_edit_card();
                     return Command::None;
                 }
                 Action::NextField => {
-                    if let Some(ref mut state) = self.edit_card_state {
+                    if let Some(state) = self.edit_card_state_mut() {
                         state.focused_field = match state.focused_field {
                             EditCardField::Title => EditCardField::Body,
                             EditCardField::Body => EditCardField::Title,
@@ -275,14 +272,11 @@ impl AppState {
             }
         }
 
-        let focused = self
-            .edit_card_state
-            .as_ref()
-            .map(|s| s.focused_field.clone());
+        let focused = self.edit_card_state().map(|s| s.focused_field.clone());
         match focused {
             Some(EditCardField::Title) => {
                 // Title: text input (not configurable)
-                let state = match self.edit_card_state.as_mut() {
+                let state = match self.edit_card_state_mut() {
                     Some(s) => s,
                     None => return Command::None,
                 };
@@ -311,8 +305,7 @@ impl AppState {
             Some(EditCardField::Body) => {
                 if let Some(Action::OpenEditor) = self.keymap.resolve(KeymapMode::EditCardBody, &key) {
                     let content = self
-                        .edit_card_state
-                        .as_ref()
+                        .edit_card_state()
                         .map(|s| s.body_input.clone())
                         .unwrap_or_default();
                     Command::OpenEditor { content }

@@ -45,7 +45,7 @@ pub enum Scene {
     Detail,
     RepoSelect(RepoSelectState),
     CardGrab(GrabState),
-    EditCard,
+    EditCard(EditCardState),
     CommentList(CommentListState),
     GroupBySelect(GroupBySelectState),
     ReactionPicker(ReactionPickerState),

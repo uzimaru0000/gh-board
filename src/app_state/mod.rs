@@ -40,7 +40,10 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
             debug_assert!(false, "CardGrab scene must be entered via enter_card_grab()");
             Scene::Board
         }
-        ViewMode::EditCard => Scene::EditCard,
+        ViewMode::EditCard => {
+            debug_assert!(false, "EditCard scene must be entered via enter_edit_card()");
+            Scene::Board
+        }
         ViewMode::CommentList => {
             debug_assert!(false, "CommentList scene must be entered via enter_comment_list()");
             Scene::Board
@@ -146,8 +149,6 @@ pub struct AppState {
     /// FetchIssueDetail 中の判定 (重複発行防止)
     pub detail_loading_id: Option<String>,
 
-    // Edit card
-    pub edit_card_state: Option<EditCardState>,
 
     // Loading
     pub loading: LoadingState,
@@ -219,7 +220,6 @@ impl AppState {
             sidebar_edit: None,
             detail_stack: Vec::new(),
             detail_loading_id: None,
-            edit_card_state: None,
             loading: LoadingState::Idle,
             board_cache: BoardCache::new(8),
             pending_board_queries: None,
@@ -374,6 +374,7 @@ impl AppState {
             Scene::RepoSelect(_) if self.mode == ViewMode::RepoSelect => return,
             Scene::CardGrab(_) if self.mode == ViewMode::CardGrab => return,
             Scene::CommentList(_) if self.mode == ViewMode::CommentList => return,
+            Scene::EditCard(_) if self.mode == ViewMode::EditCard => return,
             _ => {}
         }
         self.scene = scene_from_mode_tag(&self.mode);
@@ -598,6 +599,34 @@ impl AppState {
 
     /// CommentList シーンを終了し、Detail モードに戻す。
     pub(crate) fn exit_comment_list(&mut self) {
+        self.mode = ViewMode::Detail;
+        self.scene = scene_from_mode_tag(&self.mode);
+    }
+
+    /// EditCard シーンに入る。
+    pub(crate) fn enter_edit_card(&mut self, state: EditCardState) {
+        self.mode = ViewMode::EditCard;
+        self.scene = Scene::EditCard(state);
+    }
+
+    pub fn edit_card_state(&self) -> Option<&EditCardState> {
+        if let Scene::EditCard(s) = &self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn edit_card_state_mut(&mut self) -> Option<&mut EditCardState> {
+        if let Scene::EditCard(s) = &mut self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    /// EditCard シーンを終了し、Detail モードに戻す。
+    pub(crate) fn exit_edit_card(&mut self) {
         self.mode = ViewMode::Detail;
         self.scene = scene_from_mode_tag(&self.mode);
     }
@@ -3938,7 +3967,7 @@ mod tests {
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
         assert_eq!(cmd, Command::None);
         assert_eq!(state.mode, ViewMode::EditCard);
-        let edit = state.edit_card_state.as_ref().unwrap();
+        let edit = state.edit_card_state().unwrap();
         assert_eq!(edit.title_input, "Draft Card");
         assert_eq!(edit.body_input, "Draft body");
         assert_eq!(edit.content_id, "draft_1");
@@ -3957,7 +3986,7 @@ mod tests {
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
         assert_eq!(cmd, Command::None);
         assert_eq!(state.mode, ViewMode::EditCard);
-        let edit = state.edit_card_state.as_ref().unwrap();
+        let edit = state.edit_card_state().unwrap();
         assert_eq!(edit.title_input, "Issue Card");
         assert_eq!(edit.body_input, "Issue body");
     }
@@ -3977,7 +4006,7 @@ mod tests {
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
         assert_eq!(cmd, Command::None);
         assert_eq!(state.mode, ViewMode::Detail);
-        assert!(state.edit_card_state.is_none());
+        assert!(state.edit_card_state().is_none());
     }
 
     #[test]
@@ -3994,7 +4023,7 @@ mod tests {
 
         // Title にフォーカスされている状態で文字入力
         state.handle_event(AppEvent::Key(key(KeyCode::Char('X'))));
-        let edit = state.edit_card_state.as_ref().unwrap();
+        let edit = state.edit_card_state().unwrap();
         assert_eq!(edit.title_input, "OldX");
         assert_eq!(edit.title_cursor, 4);
     }
@@ -4012,7 +4041,7 @@ mod tests {
         state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
 
         state.handle_event(AppEvent::Key(key(KeyCode::Backspace)));
-        let edit = state.edit_card_state.as_ref().unwrap();
+        let edit = state.edit_card_state().unwrap();
         assert_eq!(edit.title_input, "AB");
         assert_eq!(edit.title_cursor, 2);
     }
@@ -4030,19 +4059,19 @@ mod tests {
         state.handle_event(AppEvent::Key(key(KeyCode::Char('e'))));
 
         assert_eq!(
-            state.edit_card_state.as_ref().unwrap().focused_field,
+            state.edit_card_state().unwrap().focused_field,
             EditCardField::Title
         );
 
         state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
         assert_eq!(
-            state.edit_card_state.as_ref().unwrap().focused_field,
+            state.edit_card_state().unwrap().focused_field,
             EditCardField::Body
         );
 
         state.handle_event(AppEvent::Key(key(KeyCode::Tab)));
         assert_eq!(
-            state.edit_card_state.as_ref().unwrap().focused_field,
+            state.edit_card_state().unwrap().focused_field,
             EditCardField::Title
         );
     }
@@ -4102,7 +4131,7 @@ mod tests {
         );
         // Detail に戻る
         assert_eq!(state.mode, ViewMode::Detail);
-        assert!(state.edit_card_state.is_none());
+        assert!(state.edit_card_state().is_none());
         // 楽観的更新
         let card = &state.board.as_ref().unwrap().columns[0].cards[0];
         assert_eq!(card.title, "Old Title!");
@@ -4150,7 +4179,7 @@ mod tests {
         state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
 
         assert_eq!(state.mode, ViewMode::Detail);
-        assert!(state.edit_card_state.is_none());
+        assert!(state.edit_card_state().is_none());
         // ボードは変更なし
         let card = &state.board.as_ref().unwrap().columns[0].cards[0];
         assert_eq!(card.title, "Original");
