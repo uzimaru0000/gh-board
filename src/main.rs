@@ -309,16 +309,14 @@ fn render(frame: &mut Frame, app: &App) {
             ui::statusline::render(frame, area, app);
             ui::group_by_select::render(frame, area, app);
         }
-        Scene::ReactionPicker => {
+        Scene::ReactionPicker(ref picker) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
-            if let Some(ref picker) = app.state.reaction_picker_state {
-                if matches!(picker.return_to, ViewMode::CommentList) {
-                    ui::comment_list::render(frame, area, app);
-                }
-                ui::reaction_picker::render(frame, area, picker, app);
+            if matches!(picker.return_to, ViewMode::CommentList) {
+                ui::comment_list::render(frame, area, app);
             }
+            ui::reaction_picker::render(frame, area, picker, app);
         }
         Scene::ArchivedList => {
             ui::archived_list::render(frame, main_area, app);

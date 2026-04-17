@@ -598,12 +598,11 @@ impl AppState {
             None => return Command::None,
         };
         let return_to = self.mode.clone();
-        self.reaction_picker_state = Some(ReactionPickerState {
+        self.enter_reaction_picker(ReactionPickerState {
             target: ReactionTarget::CardBody { content_id },
             cursor: 0,
             return_to,
         });
-        self.mode = ViewMode::ReactionPicker;
         Command::None
     }
 
@@ -623,7 +622,7 @@ impl AppState {
         let content_id = cls.content_id.clone();
         let comment_id = comment.id.clone();
         let return_to = self.mode.clone();
-        self.reaction_picker_state = Some(ReactionPickerState {
+        self.enter_reaction_picker(ReactionPickerState {
             target: ReactionTarget::Comment {
                 comment_id,
                 content_id,
@@ -631,7 +630,6 @@ impl AppState {
             cursor: 0,
             return_to,
         });
-        self.mode = ViewMode::ReactionPicker;
         Command::None
     }
 
@@ -649,23 +647,21 @@ impl AppState {
             }
             Action::Back | Action::Quit => {
                 let prev = self
-                    .reaction_picker_state
-                    .as_ref()
+                    .reaction_picker_state()
                     .map(|s| s.return_to.clone())
                     .unwrap_or(ViewMode::Detail);
-                self.reaction_picker_state = None;
-                self.mode = prev;
+                self.exit_reaction_picker(prev);
                 Command::None
             }
             Action::MoveLeft => {
-                if let Some(ref mut st) = self.reaction_picker_state {
+                if let Some(st) = self.reaction_picker_state_mut() {
                     let len = ReactionContent::all().len();
                     st.cursor = if st.cursor == 0 { len - 1 } else { st.cursor - 1 };
                 }
                 Command::None
             }
             Action::MoveRight => {
-                if let Some(ref mut st) = self.reaction_picker_state {
+                if let Some(st) = self.reaction_picker_state_mut() {
                     let len = ReactionContent::all().len();
                     st.cursor = (st.cursor + 1) % len;
                 }
@@ -679,7 +675,7 @@ impl AppState {
     /// リアクションを楽観的に toggle し、AddReaction/RemoveReaction コマンドを返す
     pub(super) fn toggle_selected_reaction(&mut self) -> Command {
         use crate::model::project::{apply_reaction_toggle, ReactionContent};
-        let (target, cursor) = match &self.reaction_picker_state {
+        let (target, cursor) = match self.reaction_picker_state() {
             Some(s) => (s.target.clone(), s.cursor),
             None => return Command::None,
         };
