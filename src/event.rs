@@ -48,6 +48,8 @@ pub enum AppEvent {
     CommentsLoaded(Result<(String, Vec<Comment>), String>),
     SubIssuesLoaded(Result<(String, Vec<SubIssueRef>), String>),
     IssueDetailLoaded(Result<Box<Card>, String>),
+    /// 新しい release が GitHub 上にある場合の通知。値は最新バージョン (v プレフィックス除去済み)。
+    UpdateAvailable(String),
 }
 
 pub struct BoardPageData {

@@ -181,6 +181,9 @@ pub struct AppState {
     /// overlay シーン (ReactionPicker など) に入る際、元の Scene を退避する先。
     /// exit_* 時に復元する。
     pub(crate) previous_scene: Option<Box<Scene>>,
+
+    /// 新しい release が GitHub 上に公開されていれば、その tag (v プレフィックス除去済み)。
+    pub update_available: Option<String>,
 }
 
 impl AppState {
@@ -228,6 +231,7 @@ impl AppState {
             keymap: Keymap::default_keymap(),
             scene: Scene::ProjectSelect,
             previous_scene: None,
+            update_available: None,
         }
     }
 
@@ -929,6 +933,10 @@ impl AppState {
             }
             AppEvent::CardDetailLoaded(Err(e)) => {
                 self.loading = LoadingState::Error(e);
+                Command::None
+            }
+            AppEvent::UpdateAvailable(version) => {
+                self.update_available = Some(version);
                 Command::None
             }
             AppEvent::Tick | AppEvent::Resize(_, _) => Command::None,
@@ -6588,5 +6596,14 @@ mod tests {
         let before = state.board_generation;
         state.start_loading_board("proj_1");
         assert_eq!(state.board_generation, before + 1);
+    }
+
+    #[test]
+    fn update_available_event_stores_version() {
+        let mut state = AppState::new(None);
+        assert_eq!(state.update_available, None);
+        let cmd = state.handle_event(AppEvent::UpdateAvailable("1.2.0".into()));
+        assert_eq!(state.update_available, Some("1.2.0".into()));
+        assert_eq!(cmd, Command::None);
     }
 }
