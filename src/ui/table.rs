@@ -7,9 +7,10 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::color::parse_hex_color;
 use crate::model::project::{Board, Card, CardType, CustomFieldValue, FieldDefinition};
 use crate::model::state::ViewMode;
-use crate::ui::card::{column_color_to_tui, parse_hex_color};
+use crate::ui::card::column_color_to_tui;
 use crate::ui::statusline::loading_spinner_span;
 use crate::ui::theme::theme;
 

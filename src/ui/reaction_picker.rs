@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
@@ -9,10 +9,11 @@ use ratatui::{
 use crate::app::App;
 use crate::model::project::{ReactionContent, ReactionSummary};
 use crate::model::state::{ReactionPickerState, ReactionTarget};
+use crate::ui::layout::centered_rect_fixed;
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &ReactionPickerState, app: &App) {
-    let popup = centered_rect(48, 7, area);
+    let popup = centered_rect_fixed(48, 7, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -127,11 +128,3 @@ fn current_reactions(state: &ReactionPickerState, app: &App) -> Vec<ReactionSumm
     }
 }
 
-fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([Constraint::Length(height)])
-        .flex(Flex::Center)
-        .split(area);
-    Layout::horizontal([Constraint::Percentage(percent_x)])
-        .flex(Flex::Center)
-        .split(vertical[0])[0]
-}

@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
@@ -7,10 +7,11 @@ use ratatui::{
 };
 
 use crate::model::state::{ConfirmAction, ConfirmState};
+use crate::ui::layout::centered_rect_fixed;
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &ConfirmState) {
-    let popup = centered_rect(50, 7, area);
+    let popup = centered_rect_fixed(50, 7, area);
     frame.render_widget(Clear, popup);
 
     let accent = match state.action {
@@ -54,13 +55,4 @@ pub fn render(frame: &mut Frame, area: Rect, state: &ConfirmState) {
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, popup);
-}
-
-fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([Constraint::Length(height)])
-        .flex(Flex::Center)
-        .split(area);
-    Layout::horizontal([Constraint::Percentage(percent_x)])
-        .flex(Flex::Center)
-        .split(vertical[0])[0]
 }

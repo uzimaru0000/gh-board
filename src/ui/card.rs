@@ -6,6 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget},
 };
 
+use crate::color::parse_hex_color;
 use crate::model::project::{
     Card, CardType, CiStatus, ColumnColor, CustomFieldValue, IssueState, PrState, PrStatus,
     ReviewDecision,
@@ -256,24 +257,104 @@ pub fn pr_status_spans(status: &PrStatus) -> Vec<Span<'static>> {
     out
 }
 
-
-pub fn parse_hex_color(hex: &str) -> Option<Color> {
-    let hex = hex.strip_prefix('#').unwrap_or(hex);
-    if hex.len() != 6 {
-        return None;
-    }
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    Some(Color::Rgb(r, g, b))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::project::{Label, ParentIssueRef, SubIssuesSummary};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
 
     fn span_content(spans: &[Span<'_>]) -> String {
         spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    fn make_draft_card(title: &str) -> Card {
+        Card {
+            item_id: "1".into(),
+            content_id: None,
+            title: title.into(),
+            number: None,
+            card_type: CardType::DraftIssue,
+            assignees: vec![],
+            labels: vec![],
+            url: None,
+            body: None,
+            comments: vec![],
+            milestone: None,
+            custom_fields: vec![],
+            pr_status: None,
+            linked_prs: vec![],
+            reactions: vec![],
+            archived: false,
+            parent_issue: None,
+            sub_issues_summary: None,
+            sub_issues: vec![],
+        }
+    }
+
+    fn render_card_widget(card: &Card, selected: bool, grabbing: bool, width: u16) -> String {
+        let backend = TestBackend::new(width, CARD_HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                f.render_widget(
+                    CardWidget { card, selected, grabbing },
+                    Rect::new(0, 0, width, CARD_HEIGHT),
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..CARD_HEIGHT {
+            for x in 0..width {
+                out.push_str(buffer[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn card_widget_renders_title() {
+        let card = make_draft_card("Hello world");
+        let text = render_card_widget(&card, false, false, 30);
+        assert!(text.contains("Hello world"), "buffer:\n{text}");
+    }
+
+    #[test]
+    fn card_widget_shows_parent_indicator() {
+        let mut card = make_draft_card("Child task");
+        card.parent_issue = Some(ParentIssueRef {
+            id: "parent".into(),
+            number: 1,
+            title: "Parent".into(),
+            url: None,
+        });
+        let text = render_card_widget(&card, false, false, 30);
+        assert!(text.contains("↳"), "buffer:\n{text}");
+    }
+
+    #[test]
+    fn card_widget_shows_sub_issue_progress() {
+        let mut card = make_draft_card("Parent task");
+        card.sub_issues_summary = Some(SubIssuesSummary {
+            completed: 2,
+            total: 5,
+        });
+        let text = render_card_widget(&card, false, false, 30);
+        assert!(text.contains("[2/5]"), "buffer:\n{text}");
+    }
+
+    #[test]
+    fn card_widget_shows_label_name() {
+        let mut card = make_draft_card("With label");
+        card.labels = vec![Label {
+            id: "label-bug".into(),
+            name: "bug".into(),
+            color: "ff0000".into(),
+        }];
+        let text = render_card_widget(&card, false, false, 30);
+        assert!(text.contains("bug"), "buffer:\n{text}");
     }
 
     #[test]

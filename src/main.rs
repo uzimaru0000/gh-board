@@ -2,6 +2,7 @@ mod action;
 mod app;
 mod app_state;
 mod cli;
+mod color;
 mod command;
 mod config;
 mod event;

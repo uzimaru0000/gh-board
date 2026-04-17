@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
@@ -8,11 +8,12 @@ use ratatui::{
 
 use crate::app::App;
 use crate::app_state::AppState;
+use crate::ui::layout::centered_rect_pct;
 use crate::ui::scroll_fade::{draw_bottom_arrow, draw_top_arrow};
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let popup_area = centered_rect(60, 60, area);
+    let popup_area = centered_rect_pct(60, 60, area);
 
     frame.render_widget(Clear, popup_area);
 
@@ -152,13 +153,4 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, query: &str) {
 
     let paragraph = Paragraph::new(content).block(block);
     frame.render_widget(paragraph, area);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([Constraint::Percentage(percent_y)])
-        .flex(Flex::Center)
-        .split(area);
-    Layout::horizontal([Constraint::Percentage(percent_x)])
-        .flex(Flex::Center)
-        .split(vertical[0])[0]
 }

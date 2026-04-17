@@ -9,6 +9,7 @@ pub mod edit_card;
 pub mod filter_bar;
 pub mod group_by_select;
 pub mod help;
+pub mod layout;
 pub mod project_list;
 pub mod reaction_picker;
 pub mod repo_select;

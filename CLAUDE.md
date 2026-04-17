@@ -45,7 +45,8 @@ src/
     state.rs                # ViewMode, LoadingState, FilterState, ConfirmState, CreateCardState
   ui/
     board.rs                # カンバンボード描画 (フィルタ適用含む)
-    card.rs                 # カードウィジェット (parse_hex_color は pub で detail.rs からも利用)
+    card.rs                 # カードウィジェット
+  color.rs                  # 色パース (parse_hex_color): UI/config 共通
     comment_list.rs         # コメント一覧オーバーレイ (選択・編集)
     confirm.rs              # 削除確認ダイアログ
     detail.rs               # カード詳細モーダル (Markdown + テーブル + コメント)
