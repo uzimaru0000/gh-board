@@ -7,11 +7,11 @@ use ratatui::{
 };
 
 use crate::model::state::{EditCardField, EditCardState};
-use crate::ui::layout::centered_rect_fixed;
+use crate::ui::layout::modal_area_fixed;
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &EditCardState) {
-    let popup = centered_rect_fixed(60, 14, area);
+    let popup = modal_area_fixed(60, 14, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()

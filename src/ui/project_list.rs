@@ -8,12 +8,12 @@ use ratatui::{
 
 use crate::app::App;
 use crate::app_state::AppState;
-use crate::ui::layout::centered_rect_pct;
+use crate::ui::layout::modal_area_pct;
 use crate::ui::scroll_fade::{draw_bottom_arrow, draw_top_arrow};
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let popup_area = centered_rect_pct(60, 60, area);
+    let popup_area = modal_area_pct(60, 60, area);
 
     frame.render_widget(Clear, popup_area);
 

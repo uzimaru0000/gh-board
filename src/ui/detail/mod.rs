@@ -19,7 +19,7 @@ use crate::app::App;
 use crate::app_state::AppState;
 use crate::model::project::{Card, CardType, IssueState, PrState, ReactionSummary};
 use crate::model::state::DetailPane;
-use crate::ui::layout::centered_rect_pct;
+use crate::ui::layout::modal_area_pct;
 use crate::ui::scroll_fade::{draw_bottom_arrow, draw_left_arrow, draw_right_arrow, draw_top_arrow};
 use crate::ui::theme::theme;
 
@@ -29,7 +29,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         None => return,
     };
 
-    let popup = centered_rect_pct(80, 80, area);
+    let popup = modal_area_pct(80, 80, area);
     frame.render_widget(Clear, popup);
 
     // Fix: ポップアップ左境界をまたぐ全角文字をクリア

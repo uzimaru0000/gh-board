@@ -50,9 +50,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let end = (scroll_x + visible_cols).min(num_cols);
     let render_count = end - scroll_x;
 
-    let constraints: Vec<Constraint> = (0..render_count)
-        .map(|_| Constraint::Length(COLUMN_WIDTH))
-        .collect();
+    let constraints = column_constraints(render_count, area.width);
 
     let col_areas = Layout::horizontal(constraints).split(area);
 
@@ -207,6 +205,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
+/// 描画するカラム数と利用可能幅から horizontal Layout 用の Constraint 配列を返す。
+/// 表示可能カラムが 1 つだけの場合は全幅を埋めるように伸ばす (小さい端末向けレスポンシブ対応)。
+fn column_constraints(render_count: usize, total_width: u16) -> Vec<Constraint> {
+    if render_count == 1 {
+        vec![Constraint::Length(total_width)]
+    } else {
+        (0..render_count)
+            .map(|_| Constraint::Length(COLUMN_WIDTH))
+            .collect()
+    }
+}
+
 fn render_shadow(buf: &mut Buffer, card_area: Rect) {
     // 既存セルの文字を残しつつ色を暗くして透過風の影にする
     let shadow_fg = theme().shadow_fg;
@@ -229,5 +239,42 @@ fn render_shadow(buf: &mut Buffer, card_area: Rect) {
     let shadow_y = card_area.y + card_area.height;
     for dx in 1..=card_area.width {
         dim(buf, card_area.x + dx, shadow_y);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_constraints_single_column_uses_full_width() {
+        let cs = column_constraints(1, 120);
+        assert_eq!(cs, vec![Constraint::Length(120)]);
+    }
+
+    #[test]
+    fn column_constraints_single_column_on_narrow_screen() {
+        // 画面幅が COLUMN_WIDTH より狭くても、唯一のカラムは全幅を埋める
+        let cs = column_constraints(1, 20);
+        assert_eq!(cs, vec![Constraint::Length(20)]);
+    }
+
+    #[test]
+    fn column_constraints_multi_column_keeps_fixed_width() {
+        let cs = column_constraints(3, 200);
+        assert_eq!(
+            cs,
+            vec![
+                Constraint::Length(COLUMN_WIDTH),
+                Constraint::Length(COLUMN_WIDTH),
+                Constraint::Length(COLUMN_WIDTH),
+            ]
+        );
+    }
+
+    #[test]
+    fn column_constraints_zero_columns_is_empty() {
+        let cs = column_constraints(0, 120);
+        assert!(cs.is_empty());
     }
 }

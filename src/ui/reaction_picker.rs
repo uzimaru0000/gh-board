@@ -9,11 +9,11 @@ use ratatui::{
 use crate::app::App;
 use crate::model::project::{ReactionContent, ReactionSummary};
 use crate::model::state::{ReactionPickerState, ReactionTarget};
-use crate::ui::layout::centered_rect_fixed;
+use crate::ui::layout::modal_area_fixed;
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &ReactionPickerState, app: &App) {
-    let popup = centered_rect_fixed(48, 7, area);
+    let popup = modal_area_fixed(48, 7, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
