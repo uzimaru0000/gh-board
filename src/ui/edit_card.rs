@@ -59,15 +59,19 @@ pub fn render(frame: &mut Frame, area: Rect, state: &EditCardState) {
         label_style
     };
 
+    // 縦ラインを他フィールドと揃えるため外側に 1 col の余白を取る
+    let title_outer = Block::default().padding(Padding::horizontal(1));
+    let title_area = title_outer.inner(chunks[0]);
+    frame.render_widget(title_outer, chunks[0]);
+
     let title_block = Block::default()
         .title(Span::styled(" Title ", title_label_style))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(title_border_style)
-        .padding(Padding::horizontal(1));
+        .border_style(title_border_style);
 
-    let title_inner = title_block.inner(chunks[0]);
-    frame.render_widget(title_block, chunks[0]);
+    let title_inner = title_block.inner(title_area);
+    frame.render_widget(title_block, title_area);
 
     let title_line = render_title_content(
         &state.title_input,
