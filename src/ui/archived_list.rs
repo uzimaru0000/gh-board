@@ -22,7 +22,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme().yellow));
 
-    let state = match app.state.archived_list.as_ref() {
+    let state = match app.state.archived_list_state() {
         Some(s) => s,
         None => {
             frame.render_widget(block, area);

@@ -318,7 +318,7 @@ fn render(frame: &mut Frame, app: &App) {
             }
             ui::reaction_picker::render(frame, area, picker, app);
         }
-        Scene::ArchivedList => {
+        Scene::ArchivedList(_) => {
             ui::archived_list::render(frame, main_area, app);
             ui::statusline::render(frame, area, app);
         }

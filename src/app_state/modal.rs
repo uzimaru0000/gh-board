@@ -212,13 +212,12 @@ impl AppState {
             Some(p) => p.id.clone(),
             None => return Command::None,
         };
-        self.archived_list = Some(crate::model::state::ArchivedListState {
+        self.enter_archived_list(crate::model::state::ArchivedListState {
             cards: Vec::new(),
             selected: 0,
             loading: true,
             error: None,
         });
-        self.mode = ViewMode::ArchivedList;
         Command::LoadArchivedItems { project_id }
     }
 
@@ -229,11 +228,11 @@ impl AppState {
         };
         match action {
             Action::Back => {
-                self.mode = ViewMode::Board;
+                self.exit_archived_list();
                 Command::None
             }
             Action::MoveDown => {
-                if let Some(state) = self.archived_list.as_mut()
+                if let Some(state) = self.archived_list_state_mut()
                     && !state.cards.is_empty()
                 {
                     state.selected = (state.selected + 1).min(state.cards.len() - 1);
@@ -241,7 +240,7 @@ impl AppState {
                 Command::None
             }
             Action::MoveUp => {
-                if let Some(state) = self.archived_list.as_mut() {
+                if let Some(state) = self.archived_list_state_mut() {
                     state.selected = state.selected.saturating_sub(1);
                 }
                 Command::None
@@ -250,7 +249,7 @@ impl AppState {
             Action::OpenDetail => {
                 // 現状の Detail は board のカードを参照する設計のため、
                 // ここではブラウザで開く代替動作にとどめる。
-                if let Some(state) = self.archived_list.as_ref()
+                if let Some(state) = self.archived_list_state()
                     && let Some(card) = state.cards.get(state.selected)
                     && let Some(url) = card.url.clone()
                 {
@@ -272,7 +271,7 @@ impl AppState {
             Some(p) => p.id.clone(),
             None => return Command::None,
         };
-        let state = match self.archived_list.as_mut() {
+        let state = match self.archived_list_state_mut() {
             Some(s) => s,
             None => return Command::None,
         };

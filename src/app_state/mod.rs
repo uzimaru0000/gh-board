@@ -11,7 +11,7 @@ use crate::model::project::{
     Board, Card, CardType, CustomFieldValue, FieldDefinition, ProjectSummary,
 };
 use crate::model::state::{
-    ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
+    ActiveFilter, ArchivedListState, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
     CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
     GroupBySelectState, LayoutMode, LoadingState, NewCardType, PendingIssueCreate,
     ReactionPickerState, ReactionTarget, RepoSelectState, Scene, SidebarEditMode, SidebarSection,
@@ -41,7 +41,6 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
         ViewMode::CardGrab => Scene::CardGrab,
         ViewMode::EditCard => Scene::EditCard,
         ViewMode::CommentList => Scene::CommentList,
-        ViewMode::ArchivedList => Scene::ArchivedList,
         // state を持つバリアントは enter_* 経由でしか対応 ViewMode にならない想定。
         ViewMode::ReactionPicker => {
             debug_assert!(false, "ReactionPicker scene must be entered via enter_reaction_picker()");
@@ -49,6 +48,10 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
         }
         ViewMode::GroupBySelect => {
             debug_assert!(false, "GroupBySelect scene must be entered via enter_group_by_select()");
+            Scene::Board
+        }
+        ViewMode::ArchivedList => {
+            debug_assert!(false, "ArchivedList scene must be entered via enter_archived_list()");
             Scene::Board
         }
     }
@@ -146,9 +149,6 @@ pub struct AppState {
     // Comment list
     pub comment_list_state: Option<CommentListState>,
 
-    // Archived list
-    pub archived_list: Option<crate::model::state::ArchivedListState>,
-
     // Loading
     pub loading: LoadingState,
 
@@ -220,7 +220,6 @@ impl AppState {
             edit_card_state: None,
             grab_state: None,
             comment_list_state: None,
-            archived_list: None,
             loading: LoadingState::Idle,
             board_cache: BoardCache::new(8),
             pending_board_queries: None,
@@ -369,6 +368,7 @@ impl AppState {
         match &self.scene {
             Scene::ReactionPicker(_) if self.mode == ViewMode::ReactionPicker => return,
             Scene::GroupBySelect(_) if self.mode == ViewMode::GroupBySelect => return,
+            Scene::ArchivedList(_) if self.mode == ViewMode::ArchivedList => return,
             _ => {}
         }
         self.scene = scene_from_mode_tag(&self.mode);
@@ -438,6 +438,34 @@ impl AppState {
         self.mode = ViewMode::Board;
         self.scene = scene_from_mode_tag(&self.mode);
         taken
+    }
+
+    /// ArchivedList シーンに入る。Scene に state を直接持たせ、`mode` も同時に更新する。
+    pub(crate) fn enter_archived_list(&mut self, state: ArchivedListState) {
+        self.mode = ViewMode::ArchivedList;
+        self.scene = Scene::ArchivedList(state);
+    }
+
+    pub fn archived_list_state(&self) -> Option<&ArchivedListState> {
+        if let Scene::ArchivedList(s) = &self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn archived_list_state_mut(&mut self) -> Option<&mut ArchivedListState> {
+        if let Scene::ArchivedList(s) = &mut self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    /// ArchivedList シーンを終了し、Board モードに戻す。
+    pub(crate) fn exit_archived_list(&mut self) {
+        self.mode = ViewMode::Board;
+        self.scene = scene_from_mode_tag(&self.mode);
     }
 
     fn handle_event_inner(&mut self, event: AppEvent) -> Command {
@@ -581,13 +609,13 @@ impl AppState {
             }
             AppEvent::CardUnarchived(Err(e)) => {
                 self.loading = LoadingState::Error(e.clone());
-                if let Some(state) = self.archived_list.as_mut() {
+                if let Some(state) = self.archived_list_state_mut() {
                     state.error = Some(e);
                 }
                 Command::None
             }
             AppEvent::ArchivedItemsLoaded(Ok(cards)) => {
-                if let Some(state) = self.archived_list.as_mut() {
+                if let Some(state) = self.archived_list_state_mut() {
                     state.cards = cards;
                     state.loading = false;
                     state.error = None;
@@ -598,7 +626,7 @@ impl AppState {
                 Command::None
             }
             AppEvent::ArchivedItemsLoaded(Err(e)) => {
-                if let Some(state) = self.archived_list.as_mut() {
+                if let Some(state) = self.archived_list_state_mut() {
                     state.loading = false;
                     state.error = Some(e);
                 }
@@ -1571,7 +1599,7 @@ mod tests {
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('v'))));
 
         assert_eq!(state.mode, ViewMode::ArchivedList);
-        assert!(state.archived_list.as_ref().unwrap().loading);
+        assert!(state.archived_list_state().unwrap().loading);
         assert_eq!(
             cmd,
             Command::LoadArchivedItems {
@@ -1589,7 +1617,7 @@ mod tests {
         let archived = vec![make_card("a1", "Archived A"), make_card("a2", "Archived B")];
         state.handle_event(AppEvent::ArchivedItemsLoaded(Ok(archived)));
 
-        let s = state.archived_list.as_ref().unwrap();
+        let s = state.archived_list_state().unwrap();
         assert!(!s.loading);
         assert_eq!(s.cards.len(), 2);
         assert_eq!(s.selected, 0);
@@ -1607,7 +1635,7 @@ mod tests {
 
         // j で次のカード
         state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
-        assert_eq!(state.archived_list.as_ref().unwrap().selected, 1);
+        assert_eq!(state.archived_list_state().unwrap().selected, 1);
 
         // u で UnarchiveCard コマンド + リストから除去
         let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('u'))));
@@ -1618,7 +1646,7 @@ mod tests {
                 item_id: "a2".into()
             }
         );
-        assert_eq!(state.archived_list.as_ref().unwrap().cards.len(), 1);
+        assert_eq!(state.archived_list_state().unwrap().cards.len(), 1);
     }
 
     #[test]

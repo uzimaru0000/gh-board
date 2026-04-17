@@ -31,9 +31,10 @@ pub enum ViewMode {
 ///
 /// 未移行バリアントは現状 `mode: ViewMode` + `Option<FooState>` と共存する
 /// 単なるタグで、`AppState::sync_scene_from_mode()` で `mode` から派生させる。
-// `Eq` は GroupBySelectState::candidates (Grouping) に `Eq` 実装がないため外す。
-// 現状 Scene::Eq を要求するコードはない (assert_eq! は PartialEq で足りる)。
-#[derive(Clone, Debug, PartialEq)]
+// Scene バリアントが持つ state (例: ArchivedListState の Card) には PartialEq が
+// 未実装なので、Scene 全体でも PartialEq/Eq は derive しない。Scene の比較が
+// 必要な場合は `matches!` やパターンマッチで明示的に扱う。
+#[derive(Clone, Debug)]
 pub enum Scene {
     Board,
     ProjectSelect,
@@ -48,7 +49,7 @@ pub enum Scene {
     CommentList,
     GroupBySelect(GroupBySelectState),
     ReactionPicker(ReactionPickerState),
-    ArchivedList,
+    ArchivedList(ArchivedListState),
 }
 
 /// Board の表示レイアウト。Kanban (Board) / Table / Roadmap の 3 種類をサポート。
