@@ -67,14 +67,19 @@ pub fn render(frame: &mut Frame, area: Rect, state: &CreateCardState) {
     };
     let title_label_style = if title_is_active { active_label } else { label_style };
 
+    // Submit ボタンと同じく外側に 1 col の余白を取り、縦ラインを揃える
+    let title_outer = Block::default().padding(Padding::horizontal(1));
+    let title_area = title_outer.inner(chunks[2]);
+    frame.render_widget(title_outer, chunks[2]);
+
     let title_block = Block::default()
         .title(Span::styled(" Title ", title_label_style))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(title_border_style);
 
-    let title_inner = title_block.inner(chunks[2]);
-    frame.render_widget(title_block, chunks[2]);
+    let title_inner = title_block.inner(title_area);
+    frame.render_widget(title_block, title_area);
 
     let title_line = render_title_content(&state.title_input, state.title_cursor, title_is_active, input_style);
     frame.render_widget(Paragraph::new(title_line), title_inner);
