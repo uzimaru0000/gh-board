@@ -169,6 +169,7 @@ pub enum KeymapMode {
     FilterStructural,
     CreateCardGlobal,
     EditCardGlobal,
+    BulkSelect,
 }
 
 pub struct Keymap {
@@ -218,7 +219,8 @@ impl Keymap {
         board.insert(KeyBind::char('/'), Action::StartFilter);
         board.insert(KeyBind::ctrl('u'), Action::ClearFilter);
         board.insert(KeyBind::char('a'), Action::ArchiveCard);
-        board.insert(KeyBind::char('v'), Action::ShowArchivedList);
+        board.insert(KeyBind::char('A'), Action::ShowArchivedList);
+        board.insert(KeyBind::char('v'), Action::BulkSelectStart);
         board.insert(KeyBind::char('n'), Action::NewCard);
         board.insert(KeyBind::char(' '), Action::GrabCard);
         board.insert(KeyBind::ctrl('g'), Action::ChangeGrouping);
@@ -242,7 +244,8 @@ impl Keymap {
         table.insert(KeyBind::char('/'), Action::StartFilter);
         table.insert(KeyBind::ctrl('u'), Action::ClearFilter);
         table.insert(KeyBind::char('a'), Action::ArchiveCard);
-        table.insert(KeyBind::char('v'), Action::ShowArchivedList);
+        table.insert(KeyBind::char('A'), Action::ShowArchivedList);
+        table.insert(KeyBind::char('v'), Action::BulkSelectStart);
         table.insert(KeyBind::char('n'), Action::NewCard);
         table.insert(KeyBind::char(' '), Action::GrabCard);
         table.insert(KeyBind::ctrl('g'), Action::ChangeGrouping);
@@ -266,7 +269,7 @@ impl Keymap {
         roadmap.insert(KeyBind::char('/'), Action::StartFilter);
         roadmap.insert(KeyBind::ctrl('u'), Action::ClearFilter);
         roadmap.insert(KeyBind::char('a'), Action::ArchiveCard);
-        roadmap.insert(KeyBind::char('v'), Action::ShowArchivedList);
+        roadmap.insert(KeyBind::char('A'), Action::ShowArchivedList);
         roadmap.insert(KeyBind::char('n'), Action::NewCard);
         roadmap.insert(KeyBind::ctrl('g'), Action::ChangeGrouping);
         roadmap.insert(KeyBind::char('t'), Action::ToggleLayout);
@@ -459,6 +462,26 @@ impl Keymap {
         edit_card_body.insert(KeyBind::key(KeyCode::Enter), Action::OpenEditor);
         keymap.modes.insert(KeymapMode::EditCardBody, edit_card_body);
 
+        // BulkSelect mode
+        let mut bulk_select = HashMap::new();
+        bulk_select.insert(KeyBind::char('j'), Action::MoveDown);
+        bulk_select.insert(KeyBind::key(KeyCode::Down), Action::MoveDown);
+        bulk_select.insert(KeyBind::char('k'), Action::MoveUp);
+        bulk_select.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
+        bulk_select.insert(KeyBind::char('h'), Action::MoveLeft);
+        bulk_select.insert(KeyBind::key(KeyCode::Left), Action::MoveLeft);
+        bulk_select.insert(KeyBind::char('l'), Action::MoveRight);
+        bulk_select.insert(KeyBind::key(KeyCode::Right), Action::MoveRight);
+        bulk_select.insert(KeyBind::char(' '), Action::BulkSelectToggle);
+        bulk_select.insert(KeyBind::char('*'), Action::BulkSelectAll);
+        bulk_select.insert(KeyBind::char('a'), Action::BulkArchive);
+        bulk_select.insert(KeyBind::char('H'), Action::BulkMoveLeft);
+        bulk_select.insert(KeyBind::char('L'), Action::BulkMoveRight);
+        bulk_select.insert(KeyBind::char('v'), Action::BulkSelectClear);
+        bulk_select.insert(KeyBind::char('q'), Action::BulkSelectClear);
+        bulk_select.insert(KeyBind::key(KeyCode::Esc), Action::BulkSelectClear);
+        keymap.modes.insert(KeymapMode::BulkSelect, bulk_select);
+
         keymap
     }
 
@@ -489,6 +512,7 @@ impl Keymap {
             ("filter", KeymapMode::FilterStructural),
             ("create_card", KeymapMode::CreateCardGlobal),
             ("edit_card", KeymapMode::EditCardGlobal),
+            ("bulk_select", KeymapMode::BulkSelect),
         ];
 
         for (config_key, mode) in mode_configs {
@@ -625,6 +649,13 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "toggle_item" => Some(Action::ToggleItem),
         "open_reaction_picker" => Some(Action::OpenReactionPicker),
         "toggle_reaction" => Some(Action::ToggleReaction),
+        "bulk_select_start" => Some(Action::BulkSelectStart),
+        "bulk_select_toggle" => Some(Action::BulkSelectToggle),
+        "bulk_select_all" => Some(Action::BulkSelectAll),
+        "bulk_select_clear" => Some(Action::BulkSelectClear),
+        "bulk_archive" => Some(Action::BulkArchive),
+        "bulk_move_left" => Some(Action::BulkMoveLeft),
+        "bulk_move_right" => Some(Action::BulkMoveRight),
         _ => None,
     }
 }
@@ -674,6 +705,13 @@ pub fn action_name(action: Action) -> &'static str {
         Action::ToggleItem => "toggle_item",
         Action::OpenReactionPicker => "open_reaction_picker",
         Action::ToggleReaction => "toggle_reaction",
+        Action::BulkSelectStart => "bulk_select_start",
+        Action::BulkSelectToggle => "bulk_select_toggle",
+        Action::BulkSelectAll => "bulk_select_all",
+        Action::BulkSelectClear => "bulk_select_clear",
+        Action::BulkArchive => "bulk_archive",
+        Action::BulkMoveLeft => "bulk_move_left",
+        Action::BulkMoveRight => "bulk_move_right",
     }
 }
 
@@ -809,6 +847,10 @@ mod tests {
         );
         assert_eq!(
             keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('v'), KeyModifiers::NONE)),
+            Some(Action::BulkSelectStart)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('A'), KeyModifiers::NONE)),
             Some(Action::ShowArchivedList)
         );
         assert_eq!(
@@ -877,6 +919,35 @@ mod tests {
         assert_eq!(
             keymap.resolve(KeymapMode::CardGrab, &make_key_event(KeyCode::Esc, KeyModifiers::NONE)),
             Some(Action::CancelGrab)
+        );
+    }
+
+    #[test]
+    fn test_resolve_bulk_select() {
+        let keymap = Keymap::default_keymap();
+        assert_eq!(
+            keymap.resolve(KeymapMode::BulkSelect, &make_key_event(KeyCode::Char(' '), KeyModifiers::NONE)),
+            Some(Action::BulkSelectToggle)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::BulkSelect, &make_key_event(KeyCode::Char('a'), KeyModifiers::NONE)),
+            Some(Action::BulkArchive)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::BulkSelect, &make_key_event(KeyCode::Char('H'), KeyModifiers::NONE)),
+            Some(Action::BulkMoveLeft)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::BulkSelect, &make_key_event(KeyCode::Char('L'), KeyModifiers::NONE)),
+            Some(Action::BulkMoveRight)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::BulkSelect, &make_key_event(KeyCode::Char('v'), KeyModifiers::NONE)),
+            Some(Action::BulkSelectClear)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::BulkSelect, &make_key_event(KeyCode::Esc, KeyModifiers::NONE)),
+            Some(Action::BulkSelectClear)
         );
     }
 

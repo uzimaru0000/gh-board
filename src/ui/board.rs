@@ -161,12 +161,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
             let selected = is_selected_col && display_idx == app.state.selected_card;
             let grabbing = app.state.mode == ViewMode::CardGrab && selected;
+            let card = &column.cards[card_idx];
+            let bulk_selected = app.state.mode == ViewMode::BulkSelect
+                && app.state.bulk_selected.contains(&card.item_id);
 
             frame.render_widget(
                 CardWidget {
-                    card: &column.cards[card_idx],
+                    card,
                     selected,
                     grabbing,
+                    bulk_selected,
                 },
                 card_area,
             );

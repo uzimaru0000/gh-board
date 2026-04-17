@@ -15,7 +15,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &ConfirmState) {
     frame.render_widget(Clear, popup);
 
     let accent = match state.action {
-        ConfirmAction::ArchiveCard { .. } => theme().yellow,
+        ConfirmAction::ArchiveCard { .. } | ConfirmAction::ArchiveMultipleCards { .. } => {
+            theme().yellow
+        }
     };
 
     let block = Block::default()
@@ -33,8 +35,11 @@ pub fn render(frame: &mut Frame, area: Rect, state: &ConfirmState) {
         .fg(theme().yellow)
         .add_modifier(Modifier::BOLD);
 
-    let message = match state.action {
+    let message = match &state.action {
         ConfirmAction::ArchiveCard { .. } => format!("  Archive \"{}\"?", state.title),
+        ConfirmAction::ArchiveMultipleCards { item_ids } => {
+            format!("  Archive {} selected cards?", item_ids.len())
+        }
     };
 
     let lines = vec![
