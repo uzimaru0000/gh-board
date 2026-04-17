@@ -177,11 +177,10 @@ impl AppState {
             Some(id) => id.clone(),
             None => return Command::None,
         };
-        self.comment_list_state = Some(CommentListState {
+        self.enter_comment_list(CommentListState {
             cursor: 0,
             content_id,
         });
-        self.mode = ViewMode::CommentList;
         Command::None
     }
 
@@ -604,25 +603,25 @@ impl AppState {
                 Command::None
             }
             Action::Back | Action::Quit => {
-                self.comment_list_state = None;
-                self.mode = ViewMode::Detail;
+                self.exit_comment_list();
                 Command::None
             }
             Action::MoveDown => {
-                if let Some(ref mut cls) = self.comment_list_state
-                    && comment_count > 0 {
-                        cls.cursor = (cls.cursor + 1).min(comment_count - 1);
-                    }
+                if let Some(cls) = self.comment_list_state_mut()
+                    && comment_count > 0
+                {
+                    cls.cursor = (cls.cursor + 1).min(comment_count - 1);
+                }
                 Command::None
             }
             Action::MoveUp => {
-                if let Some(ref mut cls) = self.comment_list_state {
+                if let Some(cls) = self.comment_list_state_mut() {
                     cls.cursor = cls.cursor.saturating_sub(1);
                 }
                 Command::None
             }
             Action::EditComment => {
-                let cls = match &self.comment_list_state {
+                let cls = match self.comment_list_state() {
                     Some(s) => s,
                     None => return Command::None,
                 };
@@ -647,7 +646,7 @@ impl AppState {
                 }
             }
             Action::NewComment => {
-                let content_id = match &self.comment_list_state {
+                let content_id = match self.comment_list_state() {
                     Some(s) => s.content_id.clone(),
                     None => return Command::None,
                 };

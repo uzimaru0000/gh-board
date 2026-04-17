@@ -41,7 +41,10 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
             Scene::Board
         }
         ViewMode::EditCard => Scene::EditCard,
-        ViewMode::CommentList => Scene::CommentList,
+        ViewMode::CommentList => {
+            debug_assert!(false, "CommentList scene must be entered via enter_comment_list()");
+            Scene::Board
+        }
         ViewMode::Confirm => {
             debug_assert!(false, "Confirm scene must be entered via enter_confirm()");
             Scene::Board
@@ -146,9 +149,6 @@ pub struct AppState {
     // Edit card
     pub edit_card_state: Option<EditCardState>,
 
-    // Comment list
-    pub comment_list_state: Option<CommentListState>,
-
     // Loading
     pub loading: LoadingState,
 
@@ -177,9 +177,13 @@ pub struct AppState {
     // Keymap
     pub keymap: Keymap,
 
-    /// 現在表示中の Scene (Phase B リファクタ中の shim。mode + Option<FooState> から
-    /// `sync_scene_from_mode` で派生するだけの add-only フィールド)。
+    /// 現在表示中の Scene。state を自前で持つバリアント (例: Scene::ReactionPicker)
+    /// が ground truth。state を持たないバリアントは mode から派生。
     pub scene: Scene,
+
+    /// overlay シーン (ReactionPicker など) に入る際、元の Scene を退避する先。
+    /// exit_* 時に復元する。
+    pub(crate) previous_scene: Option<Box<Scene>>,
 }
 
 impl AppState {
@@ -216,7 +220,6 @@ impl AppState {
             detail_stack: Vec::new(),
             detail_loading_id: None,
             edit_card_state: None,
-            comment_list_state: None,
             loading: LoadingState::Idle,
             board_cache: BoardCache::new(8),
             pending_board_queries: None,
@@ -228,6 +231,7 @@ impl AppState {
             preferred_grouping_field_name: None,
             keymap: Keymap::default_keymap(),
             scene: Scene::ProjectSelect,
+            previous_scene: None,
         }
     }
 
@@ -369,6 +373,7 @@ impl AppState {
             Scene::Confirm(_) if self.mode == ViewMode::Confirm => return,
             Scene::RepoSelect(_) if self.mode == ViewMode::RepoSelect => return,
             Scene::CardGrab(_) if self.mode == ViewMode::CardGrab => return,
+            Scene::CommentList(_) if self.mode == ViewMode::CommentList => return,
             _ => {}
         }
         self.scene = scene_from_mode_tag(&self.mode);
@@ -376,7 +381,11 @@ impl AppState {
 
     /// ReactionPicker シーンに入る。Scene に state を直接持たせ、
     /// 同時に従来の `mode`/return_to 互換のため `ViewMode::ReactionPicker` も立てる。
+    /// 戻り先 Scene の state (例: CommentList の content_id/cursor) を保持するため
+    /// 旧 Scene を `previous_scene` に退避する。
     pub(crate) fn enter_reaction_picker(&mut self, state: ReactionPickerState) {
+        let previous = std::mem::replace(&mut self.scene, Scene::Board);
+        self.previous_scene = Some(Box::new(previous));
         self.mode = ViewMode::ReactionPicker;
         self.scene = Scene::ReactionPicker(state);
     }
@@ -400,9 +409,15 @@ impl AppState {
     }
 
     /// ReactionPicker シーンを終了し、mode を return_to に戻す。
+    /// 戻り先 Scene に state がある場合 (例: CommentList) は `previous_scene` から
+    /// 復元する。無ければ mode から派生。
     pub(crate) fn exit_reaction_picker(&mut self, return_to: ViewMode) {
         self.mode = return_to;
-        self.scene = scene_from_mode_tag(&self.mode);
+        if let Some(prev) = self.previous_scene.take() {
+            self.scene = *prev;
+        } else {
+            self.scene = scene_from_mode_tag(&self.mode);
+        }
     }
 
     /// GroupBySelect シーンに入る。Scene に state を直接持たせ、`mode` も同時に更新する。
@@ -557,6 +572,34 @@ impl AppState {
         self.mode = ViewMode::Board;
         self.scene = scene_from_mode_tag(&self.mode);
         taken
+    }
+
+    /// CommentList シーンに入る。
+    pub(crate) fn enter_comment_list(&mut self, state: CommentListState) {
+        self.mode = ViewMode::CommentList;
+        self.scene = Scene::CommentList(state);
+    }
+
+    pub fn comment_list_state(&self) -> Option<&CommentListState> {
+        if let Scene::CommentList(s) = &self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn comment_list_state_mut(&mut self) -> Option<&mut CommentListState> {
+        if let Scene::CommentList(s) = &mut self.scene {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    /// CommentList シーンを終了し、Detail モードに戻す。
+    pub(crate) fn exit_comment_list(&mut self) {
+        self.mode = ViewMode::Detail;
+        self.scene = scene_from_mode_tag(&self.mode);
     }
 
     fn handle_event_inner(&mut self, event: AppEvent) -> Command {
@@ -4224,8 +4267,8 @@ mod tests {
             KeyModifiers::SHIFT,
         )));
         assert_eq!(state.mode, ViewMode::CommentList);
-        assert!(state.comment_list_state.is_some());
-        assert_eq!(state.comment_list_state.as_ref().unwrap().cursor, 0);
+        assert!(state.comment_list_state().is_some());
+        assert_eq!(state.comment_list_state().unwrap().cursor, 0);
         assert_eq!(cmd, Command::None);
     }
 
@@ -4249,19 +4292,19 @@ mod tests {
 
         // j で下に移動
         let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
-        assert_eq!(state.comment_list_state.as_ref().unwrap().cursor, 1);
+        assert_eq!(state.comment_list_state().unwrap().cursor, 1);
 
         // もう一度 j
         let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
-        assert_eq!(state.comment_list_state.as_ref().unwrap().cursor, 2);
+        assert_eq!(state.comment_list_state().unwrap().cursor, 2);
 
         // 末尾を超えない
         let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
-        assert_eq!(state.comment_list_state.as_ref().unwrap().cursor, 2);
+        assert_eq!(state.comment_list_state().unwrap().cursor, 2);
 
         // k で上に移動
         let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('k'))));
-        assert_eq!(state.comment_list_state.as_ref().unwrap().cursor, 1);
+        assert_eq!(state.comment_list_state().unwrap().cursor, 1);
     }
 
     #[test]
@@ -4349,7 +4392,7 @@ mod tests {
 
         let _ = state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
         assert_eq!(state.mode, ViewMode::Detail);
-        assert!(state.comment_list_state.is_none());
+        assert!(state.comment_list_state().is_none());
     }
 
     #[test]

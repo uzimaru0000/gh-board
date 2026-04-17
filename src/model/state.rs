@@ -46,7 +46,7 @@ pub enum Scene {
     RepoSelect(RepoSelectState),
     CardGrab(GrabState),
     EditCard,
-    CommentList,
+    CommentList(CommentListState),
     GroupBySelect(GroupBySelectState),
     ReactionPicker(ReactionPickerState),
     ArchivedList(ArchivedListState),
@@ -223,7 +223,7 @@ pub struct GroupBySelectState {
     pub candidates: Vec<super::project::Grouping>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct ReactionPickerState {
     pub target: ReactionTarget,
     pub cursor: usize,

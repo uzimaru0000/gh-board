@@ -294,7 +294,7 @@ fn render(frame: &mut Frame, app: &App) {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
         }
-        Scene::CommentList => {
+        Scene::CommentList(_) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);

@@ -18,7 +18,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         None => return,
     };
 
-    let cls = match &app.state.comment_list_state {
+    let cls = match app.state.comment_list_state() {
         Some(s) => s,
         None => return,
     };

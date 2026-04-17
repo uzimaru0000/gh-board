@@ -597,7 +597,7 @@ impl AppState {
     }
 
     pub(super) fn open_reaction_picker_for_comment(&mut self) -> Command {
-        let cls = match &self.comment_list_state {
+        let cls = match self.comment_list_state() {
             Some(s) => s,
             None => return Command::None,
         };
