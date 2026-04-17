@@ -49,7 +49,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let after_span = Span::styled(rest, Style::default().fg(theme().text));
 
     let hint = Span::styled(
-        " (Enter:apply  Esc:cancel  label:  assignee:  milestone:  |:OR)",
+        " (Enter:apply  Esc:cancel  label:  assignee:  milestone:  no:  is:  -:NOT  |:OR)",
         Style::default().fg(theme().text_muted),
     );
 
