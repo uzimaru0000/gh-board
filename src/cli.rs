@@ -82,14 +82,6 @@ pub enum BoardAction {
         #[arg(long)]
         group_by: Option<String>,
     },
-    /// List archived cards
-    Archived {
-        /// Project number
-        number: i32,
-        /// Login of the owner
-        #[arg(long)]
-        owner: Option<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -119,13 +111,6 @@ pub enum CardAction {
     },
     /// Archive a card
     Archive {
-        /// Project node ID
-        project_id: String,
-        /// Item node ID
-        item_id: String,
-    },
-    /// Unarchive a card
-    Unarchive {
         /// Project node ID
         project_id: String,
         /// Item node ID
@@ -312,11 +297,6 @@ async fn run_board(action: BoardAction, github: &GitHubClient) -> anyhow::Result
                 .await?;
             print_json(&board)
         }
-        BoardAction::Archived { number, owner } => {
-            let project = resolve_project(github, number, owner.as_deref()).await?;
-            let cards = github.get_archived_items(&project.id).await?;
-            print_json(&cards)
-        }
     }
 }
 
@@ -392,13 +372,6 @@ async fn run_card(action: CardAction, github: &GitHubClient) -> anyhow::Result<(
             item_id,
         } => {
             github.archive_card(&project_id, &item_id).await?;
-            print_json(&serde_json::json!({ "ok": true }))
-        }
-        CardAction::Unarchive {
-            project_id,
-            item_id,
-        } => {
-            github.unarchive_card(&project_id, &item_id).await?;
             print_json(&serde_json::json!({ "ok": true }))
         }
         CardAction::Move {

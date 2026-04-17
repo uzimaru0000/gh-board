@@ -1,4 +1,3 @@
-pub mod archived_list;
 pub mod board;
 pub mod card;
 pub mod comment_list;
@@ -9,6 +8,7 @@ pub mod edit_card;
 pub mod filter_bar;
 pub mod group_by_select;
 pub mod help;
+pub mod layout;
 pub mod project_list;
 pub mod reaction_picker;
 pub mod repo_select;

@@ -20,7 +20,6 @@ pub enum Action {
     GrabCard,
     NewCard,
     ArchiveCard,
-    UnarchiveCard,
     ShowArchivedList,
     StartFilter,
     ClearFilter,

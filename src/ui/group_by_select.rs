@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
@@ -8,17 +8,18 @@ use ratatui::{
 
 use crate::app::App;
 use crate::model::project::Grouping;
+use crate::ui::layout::centered_rect_pct;
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let state = match &app.state.group_by_select_state {
+    let state = match app.state.group_by_select_state() {
         Some(s) => s,
         None => return,
     };
 
     let current = app.state.board.as_ref().map(|b| &b.grouping);
 
-    let popup = centered_rect(50, 60, area);
+    let popup = centered_rect_pct(50, 60, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -87,13 +88,4 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(":close", desc_style),
     ]);
     frame.render_widget(footer, vert[1]);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([Constraint::Percentage(percent_y)])
-        .flex(Flex::Center)
-        .split(area);
-    Layout::horizontal([Constraint::Percentage(percent_x)])
-        .flex(Flex::Center)
-        .split(vertical[0])[0]
 }

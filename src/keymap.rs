@@ -45,6 +45,11 @@ impl KeyBind {
             && c.is_ascii_uppercase() {
                 modifiers -= KeyModifiers::SHIFT;
             }
+        // BackTab は定義上 "Shift+Tab" を意味する KeyCode。ターミナルによっては
+        // KeyModifiers::SHIFT が付随して届くが、冗長なので NONE に正規化する。
+        if key.code == KeyCode::BackTab {
+            modifiers -= KeyModifiers::SHIFT;
+        }
         Self {
             code: key.code,
             modifiers,
@@ -156,7 +161,6 @@ pub enum KeymapMode {
     CommentList,
     GroupBySelect,
     ReactionPicker,
-    ArchivedList,
     CreateCardType,
     CreateCardBody,
     CreateCardSubmit,
@@ -442,19 +446,6 @@ impl Keymap {
         reaction_picker.insert(KeyBind::char(' '), Action::ToggleReaction);
         keymap.modes.insert(KeymapMode::ReactionPicker, reaction_picker);
 
-        // ArchivedList mode
-        let mut archived_list = HashMap::new();
-        archived_list.insert(KeyBind::key(KeyCode::Esc), Action::Back);
-        archived_list.insert(KeyBind::char('q'), Action::Back);
-        archived_list.insert(KeyBind::char('j'), Action::MoveDown);
-        archived_list.insert(KeyBind::key(KeyCode::Down), Action::MoveDown);
-        archived_list.insert(KeyBind::char('k'), Action::MoveUp);
-        archived_list.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
-        archived_list.insert(KeyBind::key(KeyCode::Enter), Action::OpenDetail);
-        archived_list.insert(KeyBind::char('u'), Action::UnarchiveCard);
-        archived_list.insert(KeyBind::char('r'), Action::Refresh);
-        keymap.modes.insert(KeymapMode::ArchivedList, archived_list);
-
         // EditCard global keys
         let mut edit_card_global = HashMap::new();
         edit_card_global.insert(KeyBind::ctrl('s'), Action::Submit);
@@ -492,7 +483,6 @@ impl Keymap {
             ("comment_list", KeymapMode::CommentList),
             ("group_by_select", KeymapMode::GroupBySelect),
             ("reaction_picker", KeymapMode::ReactionPicker),
-            ("archived_list", KeymapMode::ArchivedList),
             ("create_card_type", KeymapMode::CreateCardType),
             ("create_card_body", KeymapMode::CreateCardBody),
             ("edit_card_body", KeymapMode::EditCardBody),
@@ -609,7 +599,6 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "grab_card" => Some(Action::GrabCard),
         "new_card" => Some(Action::NewCard),
         "archive_card" => Some(Action::ArchiveCard),
-        "unarchive_card" => Some(Action::UnarchiveCard),
         "show_archived_list" => Some(Action::ShowArchivedList),
         "start_filter" => Some(Action::StartFilter),
         "clear_filter" => Some(Action::ClearFilter),
@@ -659,7 +648,6 @@ pub fn action_name(action: Action) -> &'static str {
         Action::GrabCard => "grab_card",
         Action::NewCard => "new_card",
         Action::ArchiveCard => "archive_card",
-        Action::UnarchiveCard => "unarchive_card",
         Action::ShowArchivedList => "show_archived_list",
         Action::StartFilter => "start_filter",
         Action::ClearFilter => "clear_filter",
@@ -771,6 +759,26 @@ mod tests {
     }
 
     // ========== Keymap::resolve tests ==========
+
+    #[test]
+    fn backtab_with_shift_modifier_resolves_same_as_bare_backtab() {
+        // 多くのターミナル (kitty, alacritty, foot など) は Shift+Tab を
+        // KeyCode::BackTab + KeyModifiers::SHIFT として送ってくる。
+        // KeyCode::BackTab 単体と同じ resolve 結果になること。
+        let keymap = Keymap::default_keymap();
+
+        let bare = make_key_event(KeyCode::BackTab, KeyModifiers::NONE);
+        let with_shift = make_key_event(KeyCode::BackTab, KeyModifiers::SHIFT);
+
+        assert_eq!(
+            keymap.resolve(KeymapMode::Board, &bare),
+            Some(Action::PrevTab)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::Board, &with_shift),
+            Some(Action::PrevTab)
+        );
+    }
 
     #[test]
     fn test_resolve_board_navigation() {

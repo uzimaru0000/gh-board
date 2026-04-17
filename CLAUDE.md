@@ -45,7 +45,8 @@ src/
     state.rs                # ViewMode, LoadingState, FilterState, ConfirmState, CreateCardState
   ui/
     board.rs                # カンバンボード描画 (フィルタ適用含む)
-    card.rs                 # カードウィジェット (parse_hex_color は pub で detail.rs からも利用)
+    card.rs                 # カードウィジェット
+  color.rs                  # 色パース (parse_hex_color): UI/config 共通
     comment_list.rs         # コメント一覧オーバーレイ (選択・編集)
     confirm.rs              # 削除確認ダイアログ
     detail.rs               # カード詳細モーダル (Markdown + テーブル + コメント)
@@ -101,14 +102,8 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
   - 選択中は黄色太線ボーダー + 透過影で浮いた見た目
 - n: ドラフトIssue作成 (addProjectV2DraftIssue + ステータス設定の2段階)
 - a: カードアーカイブ (確認ダイアログ付き、archiveProjectV2Item mutation)。詳細ビューのサイドバー末尾「Archive」ボタンからも実行可能
-- v: アーカイブ済み一覧 (ViewMode::ArchivedList) を開く
+- v: アーカイブ画面をブラウザで開く (`<project-url>/archive`)。GitHub Projects V2 の GraphQL/REST API では archived items を取得する手段が存在しないため、TUI 上では一覧表示せず Web UI に委譲する
 - 楽観的UI更新パターン: API呼び出し前にローカル状態を変更、エラー時はボードリフレッシュ
-
-### アーカイブ済み一覧 (ViewMode::ArchivedList)
-- v でフラットなリスト表示。`is:archived` クエリで別途取得 (ProjectBoard query を再利用)
-- j/k: カード間移動、Enter: ブラウザで開く、r: 再ロード、Esc/q: ボードに戻る
-- u: 復元 (unarchiveProjectV2Item mutation)。リストから楽観的に除去し、戻った先のボードはリフレッシュして復元カードを表示
-- 削除 (deleteProjectV2Item) 機能は archive を主操作にする方針で削除済み。物理削除が必要な場合は GitHub Web UI を使う
 
 ### Sub-issue (親子関係) の表示
 - Issue.parent / Issue.subIssuesSummary はボード取得時 (ProjectBoard query) に一緒に取得

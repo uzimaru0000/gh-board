@@ -5,6 +5,7 @@ query ViewerProjectByNumber($number: Int!) {
       title
       number
       shortDescription
+      url
     }
   }
 }

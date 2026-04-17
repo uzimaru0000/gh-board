@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::action::Action;
 use crate::keymap::{KeyBind, Keymap, KeymapMode};
+use crate::ui::layout::centered_rect_pct;
 use crate::ui::theme::theme;
 
 /// Format a list of KeyBinds into a display string like "j ↓"
@@ -39,7 +40,7 @@ struct HelpEntry {
 }
 
 pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
-    let popup = centered_rect(50, 70, area);
+    let popup = centered_rect_pct(50, 70, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -80,7 +81,7 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         HelpEntry { action: Action::GrabCard, description: "Grab card (move mode)" },
         HelpEntry { action: Action::NewCard, description: "New card (draft/issue)" },
         HelpEntry { action: Action::ArchiveCard, description: "Archive card" },
-        HelpEntry { action: Action::ShowArchivedList, description: "Show archived items" },
+        HelpEntry { action: Action::ShowArchivedList, description: "Open archive page in browser" },
         HelpEntry { action: Action::OpenDetail, description: "View card detail" },
         HelpEntry { action: Action::SwitchProject, description: "Switch project" },
         HelpEntry { action: Action::ChangeGrouping, description: "Change grouping field" },
@@ -174,15 +175,6 @@ fn add_section_lines(
             Span::styled(entry.description, desc_style),
         ]));
     }
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([Constraint::Percentage(percent_y)])
-        .flex(Flex::Center)
-        .split(area);
-    Layout::horizontal([Constraint::Percentage(percent_x)])
-        .flex(Flex::Center)
-        .split(vertical[0])[0]
 }
 
 #[cfg(test)]

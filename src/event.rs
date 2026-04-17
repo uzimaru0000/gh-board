@@ -9,6 +9,24 @@ use crate::model::project::{
     Board, Card, CardDetail, Comment, Label, PaginationState, ProjectSummary, SubIssueRef,
 };
 
+
+/// `Result<(), String>` を返すだけの mutation 結果は `AppEvent::Mutated` で
+/// 種別 (MutationKind) と結果を一本化する。handle_event_inner の match arms を
+/// 楽観的更新系 (Ok は no-op、Err はエラー表示 or ボードリロード) のルールで
+/// 1 箇所に集約できる。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MutationKind {
+    CardMoved,
+    CardArchived,
+    CardReordered,
+    LabelToggled,
+    AssigneeToggled,
+    CardUpdated,
+    CustomFieldUpdated,
+    ReactionToggled,
+    CardCreated,
+}
+
 pub enum AppEvent {
     Key(KeyEvent),
     #[allow(dead_code)]
@@ -19,17 +37,10 @@ pub enum AppEvent {
     BoardLoaded(Result<Board, String>),
     /// プログレッシブレンダリング: 追加ページのカード
     BoardPageLoaded(Result<BoardPageData, String>),
-    CardMoved(Result<(), String>),
-    CardArchived(Result<(), String>),
-    CardUnarchived(Result<String, String>),
-    ArchivedItemsLoaded(Result<Vec<Card>, String>),
-    CardCreated(Result<(), String>),
-    CardReordered(Result<(), String>),
+    /// `Result<(), String>` を返す mutation 結果を 1 本化したバリアント。
+    Mutated(MutationKind, Result<(), String>),
     LabelsLoaded(Result<Vec<Label>, String>),
     AssigneesLoaded(Result<Vec<(String, String)>, String>),
-    LabelToggled(Result<(), String>),
-    AssigneeToggled(Result<(), String>),
-    CardUpdated(Result<(), String>),
     CommentAdded(Result<Comment, String>),
     CommentUpdated(Result<Comment, String>),
     /// Detail ビュー用の遅延取得結果 (item_id, detail)
@@ -37,8 +48,6 @@ pub enum AppEvent {
     CommentsLoaded(Result<(String, Vec<Comment>), String>),
     SubIssuesLoaded(Result<(String, Vec<SubIssueRef>), String>),
     IssueDetailLoaded(Result<Box<Card>, String>),
-    CustomFieldUpdated(Result<(), String>),
-    ReactionToggled(Result<(), String>),
 }
 
 pub struct BoardPageData {

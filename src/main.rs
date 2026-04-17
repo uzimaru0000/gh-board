@@ -2,6 +2,7 @@ mod action;
 mod app;
 mod app_state;
 mod cli;
+mod color;
 mod command;
 mod config;
 mod event;
@@ -28,7 +29,7 @@ use ui::theme::theme;
 use app::App;
 use event::EventHandler;
 use github::client::GitHubClient;
-use model::state::{LoadingState, ViewMode};
+use model::state::{LoadingState, Scene, ViewMode};
 
 #[derive(Parser)]
 #[command(name = "gh-board", about = "View GitHub Projects V2 as a kanban board")]
@@ -141,7 +142,7 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg
                 } else {
                     match app.state.mode {
                         ViewMode::EditCard => {
-                            if let Some(ref mut s) = app.state.edit_card_state {
+                            if let Some(s) = app.state.edit_card_state_mut() {
                                 s.body_input = new_body;
                             }
                         }
@@ -235,93 +236,81 @@ fn render(frame: &mut Frame, app: &App) {
         height: area.height.saturating_sub(1),
     };
 
-    match app.state.mode {
-        ViewMode::Board => {
+    match app.state.scene {
+        Scene::Board => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
         }
-        ViewMode::ProjectSelect => {
+        Scene::ProjectSelect => {
             if app.state.board.is_some() {
                 render_board_with_tabs(frame, main_area, app);
                 ui::statusline::render(frame, area, app);
             }
             ui::project_list::render(frame, area, app);
         }
-        ViewMode::Help => {
+        Scene::Help => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::help::render(frame, area, &app.state.keymap);
         }
-        ViewMode::Filter => {
+        Scene::Filter => {
             render_board_with_tabs(frame, main_area, app);
             ui::filter_bar::render(frame, area, app);
         }
-        ViewMode::Confirm => {
+        Scene::Confirm(ref state) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
-            if let Some(state) = &app.state.confirm_state {
-                ui::confirm::render(frame, area, state);
-            }
+            ui::confirm::render(frame, area, state);
         }
-        ViewMode::CreateCard => {
+        Scene::CreateCard => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::create_card::render(frame, area, &app.state.create_card_state);
         }
-        ViewMode::Detail => {
+        Scene::Detail => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
         }
-        ViewMode::RepoSelect => {
+        Scene::RepoSelect(ref rs) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
-            if let Some(rs) = &app.state.repo_select_state {
-                let repos = app
-                    .state
-                    .board
-                    .as_ref()
-                    .map(|b| b.repositories.as_slice())
-                    .unwrap_or(&[]);
-                ui::repo_select::render(frame, area, repos, rs);
-            }
+            let repos = app
+                .state
+                .board
+                .as_ref()
+                .map(|b| b.repositories.as_slice())
+                .unwrap_or(&[]);
+            ui::repo_select::render(frame, area, repos, rs);
         }
-        ViewMode::EditCard => {
+        Scene::EditCard(ref edit_state) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
-            if let Some(ref edit_state) = app.state.edit_card_state {
-                ui::edit_card::render(frame, area, edit_state);
-            }
+            ui::edit_card::render(frame, area, edit_state);
         }
-        ViewMode::CardGrab => {
+        Scene::CardGrab(_) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
         }
-        ViewMode::CommentList => {
+        Scene::CommentList(_) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
             ui::comment_list::render(frame, area, app);
         }
-        ViewMode::GroupBySelect => {
+        Scene::GroupBySelect(_) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::group_by_select::render(frame, area, app);
         }
-        ViewMode::ReactionPicker => {
+        Scene::ReactionPicker(ref picker) => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
-            if let Some(ref picker) = app.state.reaction_picker_state {
-                if matches!(picker.return_to, ViewMode::CommentList) {
-                    ui::comment_list::render(frame, area, app);
-                }
-                ui::reaction_picker::render(frame, area, picker, app);
+            if matches!(picker.return_to, ViewMode::CommentList) {
+                ui::comment_list::render(frame, area, app);
             }
-        }
-        ViewMode::ArchivedList => {
-            ui::archived_list::render(frame, main_area, app);
-            ui::statusline::render(frame, area, app);
+            ui::reaction_picker::render(frame, area, picker, app);
         }
     }
 

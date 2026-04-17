@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
@@ -7,10 +7,11 @@ use ratatui::{
 };
 
 use crate::model::state::{CreateCardField, CreateCardState, NewCardType};
+use crate::ui::layout::centered_rect_fixed;
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &CreateCardState) {
-    let popup = centered_rect(60, 21, area);
+    let popup = centered_rect_fixed(60, 21, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -266,11 +267,3 @@ fn render_submit_button(frame: &mut Frame, area: Rect, is_focused: bool, is_enab
     }
 }
 
-fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([Constraint::Length(height)])
-        .flex(Flex::Center)
-        .split(area);
-    Layout::horizontal([Constraint::Percentage(percent_x)])
-        .flex(Flex::Center)
-        .split(vertical[0])[0]
-}

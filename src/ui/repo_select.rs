@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
@@ -8,11 +8,12 @@ use ratatui::{
 
 use crate::model::project::Repository;
 use crate::model::state::RepoSelectState;
+use crate::ui::layout::centered_rect_fixed;
 use crate::ui::theme::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, repos: &[Repository], state: &RepoSelectState) {
     let height = (repos.len() as u16 + 4).min(20);
-    let popup = centered_rect(50, height, area);
+    let popup = centered_rect_fixed(50, height, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -67,13 +68,4 @@ pub fn render(frame: &mut Frame, area: Rect, repos: &[Repository], state: &RepoS
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
-}
-
-fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([Constraint::Length(height)])
-        .flex(Flex::Center)
-        .split(area);
-    Layout::horizontal([Constraint::Percentage(percent_x)])
-        .flex(Flex::Center)
-        .split(vertical[0])[0]
 }

@@ -5,6 +5,7 @@ query UserProjectByNumber($login: String!, $number: Int!) {
       title
       number
       shortDescription
+      url
     }
   }
 }

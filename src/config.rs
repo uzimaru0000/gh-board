@@ -6,6 +6,8 @@ use ratatui::style::Color;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::Deserialize;
 
+use crate::color::parse_hex_color;
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum LayoutModeConfig {
@@ -181,17 +183,6 @@ impl<'de> Visitor<'de> for ColorValueVisitor {
             .ok_or_else(|| de::Error::invalid_length(2, &"3 elements for RGB"))?;
         Ok(ColorValue(Color::Rgb(r, g, b)))
     }
-}
-
-fn parse_hex_color(hex: &str) -> Option<Color> {
-    let hex = hex.strip_prefix('#').unwrap_or(hex);
-    if hex.len() != 6 {
-        return None;
-    }
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    Some(Color::Rgb(r, g, b))
 }
 
 fn parse_color_str(s: &str) -> Option<Color> {

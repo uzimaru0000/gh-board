@@ -2,7 +2,7 @@ use tokio::sync::mpsc;
 
 use crate::app_state::AppState;
 use crate::command::Command;
-use crate::event::AppEvent;
+use crate::event::{AppEvent, MutationKind};
 use crate::github::client::GitHubClient;
 
 pub struct CommentEditorContext {
@@ -184,7 +184,10 @@ impl App {
                     let result = client
                         .update_custom_field(&project_id, &item_id, &field_id, &value)
                         .await;
-                    let _ = tx.send(AppEvent::CardMoved(result.map_err(|e| e.to_string())));
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::CardMoved,
+                        result.map_err(|e| e.to_string()),
+                    ));
                 });
             }
             Command::ArchiveCard {
@@ -195,29 +198,8 @@ impl App {
                 let tx = self.event_tx.clone();
                 tokio::spawn(async move {
                     let result = client.archive_card(&project_id, &item_id).await;
-                    let _ = tx.send(AppEvent::CardArchived(result.map_err(|e| e.to_string())));
-                });
-            }
-            Command::UnarchiveCard {
-                project_id,
-                item_id,
-            } => {
-                let client = self.github.clone();
-                let tx = self.event_tx.clone();
-                let returned_id = item_id.clone();
-                tokio::spawn(async move {
-                    let result = client.unarchive_card(&project_id, &item_id).await;
-                    let _ = tx.send(AppEvent::CardUnarchived(
-                        result.map(|_| returned_id).map_err(|e| e.to_string()),
-                    ));
-                });
-            }
-            Command::LoadArchivedItems { project_id } => {
-                let client = self.github.clone();
-                let tx = self.event_tx.clone();
-                tokio::spawn(async move {
-                    let result = client.get_archived_items(&project_id).await;
-                    let _ = tx.send(AppEvent::ArchivedItemsLoaded(
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::CardArchived,
                         result.map_err(|e| e.to_string()),
                     ));
                 });
@@ -253,7 +235,7 @@ impl App {
                         Ok(())
                     }
                     .await;
-                    let _ = tx.send(AppEvent::CardCreated(result));
+                    let _ = tx.send(AppEvent::Mutated(MutationKind::CardCreated, result));
                 });
             }
             Command::CreateIssue {
@@ -292,7 +274,7 @@ impl App {
                         Ok(())
                     }
                     .await;
-                    let _ = tx.send(AppEvent::CardCreated(result));
+                    let _ = tx.send(AppEvent::Mutated(MutationKind::CardCreated, result));
                 });
             }
             Command::ReorderCard {
@@ -306,7 +288,10 @@ impl App {
                     let result = client
                         .reorder_card(&project_id, &item_id, after_id.as_deref())
                         .await;
-                    let _ = tx.send(AppEvent::CardReordered(result.map_err(|e| e.to_string())));
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::CardReordered,
+                        result.map_err(|e| e.to_string()),
+                    ));
                 });
             }
             Command::FetchLabels { owner, repo } => {
@@ -342,7 +327,8 @@ impl App {
                     } else {
                         client.remove_labels(&content_id, vec![label_id]).await
                     };
-                    let _ = tx.send(AppEvent::LabelToggled(
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::LabelToggled,
                         result.map_err(|e| e.to_string()),
                     ));
                 });
@@ -360,7 +346,8 @@ impl App {
                     } else {
                         client.remove_assignees(&content_id, vec![user_id]).await
                     };
-                    let _ = tx.send(AppEvent::AssigneeToggled(
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::AssigneeToggled,
                         result.map_err(|e| e.to_string()),
                     ));
                 });
@@ -385,7 +372,10 @@ impl App {
                             client.update_pull_request(&content_id, &title, &body).await
                         }
                     };
-                    let _ = tx.send(AppEvent::CardUpdated(result.map_err(|e| e.to_string())));
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::CardUpdated,
+                        result.map_err(|e| e.to_string()),
+                    ));
                 });
             }
             Command::AddComment {
@@ -477,7 +467,8 @@ impl App {
                 let tx = self.event_tx.clone();
                 tokio::spawn(async move {
                     let result = client.add_reaction(&subject_id, content).await;
-                    let _ = tx.send(AppEvent::ReactionToggled(
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::ReactionToggled,
                         result.map_err(|e| e.to_string()),
                     ));
                 });
@@ -490,7 +481,8 @@ impl App {
                 let tx = self.event_tx.clone();
                 tokio::spawn(async move {
                     let result = client.remove_reaction(&subject_id, content).await;
-                    let _ = tx.send(AppEvent::ReactionToggled(
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::ReactionToggled,
                         result.map_err(|e| e.to_string()),
                     ));
                 });
@@ -510,7 +502,8 @@ impl App {
                     let result = client
                         .update_custom_field(&project_id, &item_id, &field_id, &value)
                         .await;
-                    let _ = tx.send(AppEvent::CustomFieldUpdated(
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::CustomFieldUpdated,
                         result.map_err(|e| e.to_string()),
                     ));
                 });
@@ -526,7 +519,8 @@ impl App {
                     let result = client
                         .clear_custom_field(&project_id, &item_id, &field_id)
                         .await;
-                    let _ = tx.send(AppEvent::CustomFieldUpdated(
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::CustomFieldUpdated,
                         result.map_err(|e| e.to_string()),
                     ));
                 });

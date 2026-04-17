@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::app_state::AppState;
+use crate::ui::layout::centered_rect_pct;
 use crate::ui::scroll_fade::{draw_bottom_arrow, draw_top_arrow};
 use crate::ui::theme::theme;
 
@@ -17,12 +18,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         None => return,
     };
 
-    let cls = match &app.state.comment_list_state {
+    let cls = match app.state.comment_list_state() {
         Some(s) => s,
         None => return,
     };
 
-    let popup = centered_rect(60, 70, area);
+    let popup = centered_rect_pct(60, 70, area);
     frame.render_widget(Clear, popup);
 
     let total_comments = card.comments.len();
@@ -178,13 +179,4 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(":close", desc_style),
     ]);
     frame.render_widget(footer, vert[1]);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([Constraint::Percentage(percent_y)])
-        .flex(Flex::Center)
-        .split(area);
-    Layout::horizontal([Constraint::Percentage(percent_x)])
-        .flex(Flex::Center)
-        .split(vertical[0])[0]
 }
