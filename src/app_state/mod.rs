@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crate::action::Action;
 use crate::command::Command;
 use crate::config::{LayoutModeConfig, ViewConfig};
-use crate::event::AppEvent;
+use crate::event::{AppEvent, MutationKind};
 use crate::keymap::{Keymap, KeymapMode};
 use crate::command::CustomFieldValueInput;
 use crate::model::board_cache::BoardCache;
@@ -348,6 +348,48 @@ impl AppState {
             | Command::UpdateCard { .. } => true,
             Command::Batch(cmds) => cmds.iter().any(Self::command_mutates_board),
             _ => false,
+        }
+    }
+
+    /// mutation 結果の共通処理。楽観的更新前提で、Ok は基本 no-op、
+    /// Err はエラー表示 + 種別に応じてボードリロード。
+    fn handle_mutation_result(
+        &mut self,
+        kind: MutationKind,
+        result: Result<(), String>,
+    ) -> Command {
+        match (kind, result) {
+            // CardCreated の Ok は新しいカードを反映するためリロード
+            (MutationKind::CardCreated, Ok(())) => {
+                if let Some(project) = &self.current_project {
+                    let id = project.id.clone();
+                    self.start_loading_board(&id)
+                } else {
+                    Command::None
+                }
+            }
+            // 他の mutation の Ok は楽観的更新済み
+            (_, Ok(())) => Command::None,
+            (kind, Err(e)) => {
+                self.loading = LoadingState::Error(e);
+                // エラー時にボードリロードする mutation 群
+                let needs_reload = matches!(
+                    kind,
+                    MutationKind::CardArchived
+                        | MutationKind::CardReordered
+                        | MutationKind::LabelToggled
+                        | MutationKind::AssigneeToggled
+                        | MutationKind::CardUpdated
+                        | MutationKind::ReactionToggled
+                );
+                if needs_reload
+                    && let Some(project) = &self.current_project
+                {
+                    let id = project.id.clone();
+                    return self.start_loading_board(&id);
+                }
+                Command::None
+            }
         }
     }
 
@@ -738,29 +780,7 @@ impl AppState {
                 self.loading = LoadingState::Error(e);
                 Command::None
             }
-            AppEvent::CardMoved(Ok(())) => {
-                // 楽観的更新済みなので何もしない
-                Command::None
-            }
-            AppEvent::CardMoved(Err(e)) => {
-                // エラーは画面に残す (自動リロードしない)。
-                // 楽観的にローカル状態は変わっているが、次の `r` で同期できる。
-                self.loading = LoadingState::Error(e);
-                Command::None
-            }
-            AppEvent::CardArchived(Ok(())) => {
-                // 楽観的更新済み
-                Command::None
-            }
-            AppEvent::CardArchived(Err(e)) => {
-                self.loading = LoadingState::Error(e);
-                if let Some(project) = &self.current_project {
-                    let id = project.id.clone();
-                    self.start_loading_board(&id)
-                } else {
-                    Command::None
-                }
-            }
+            AppEvent::Mutated(kind, result) => self.handle_mutation_result(kind, result),
             AppEvent::CardUnarchived(Ok(_item_id)) => {
                 // archived リストからは楽観的に除去済み。ボードをリフレッシュして復元カードを反映。
                 if let Some(project) = &self.current_project {
@@ -794,32 +814,6 @@ impl AppState {
                     state.error = Some(e);
                 }
                 Command::None
-            }
-            AppEvent::CardCreated(Ok(())) => {
-                // 作成成功: ボードをリフレッシュして新しいカードを表示
-                if let Some(project) = &self.current_project {
-                    let id = project.id.clone();
-                    self.start_loading_board(&id)
-                } else {
-                    Command::None
-                }
-            }
-            AppEvent::CardCreated(Err(e)) => {
-                self.loading = LoadingState::Error(e);
-                Command::None
-            }
-            AppEvent::CardReordered(Ok(())) => {
-                // 楽観的更新済みなので何もしない
-                Command::None
-            }
-            AppEvent::CardReordered(Err(e)) => {
-                self.loading = LoadingState::Error(e);
-                if let Some(project) = &self.current_project {
-                    let id = project.id.clone();
-                    self.start_loading_board(&id)
-                } else {
-                    Command::None
-                }
             }
             AppEvent::LabelsLoaded(Ok(labels)) => {
                 // カードの現在のラベルと照合して applied を設定
@@ -867,33 +861,6 @@ impl AppState {
                 self.loading = LoadingState::Error(e);
                 self.sidebar_edit = None;
                 Command::None
-            }
-            AppEvent::LabelToggled(Ok(())) | AppEvent::AssigneeToggled(Ok(())) => {
-                // 楽観的更新済み
-                Command::None
-            }
-            AppEvent::LabelToggled(Err(e)) | AppEvent::AssigneeToggled(Err(e)) => {
-                self.loading = LoadingState::Error(e);
-                // エラー時はボードをリロード
-                if let Some(project) = &self.current_project {
-                    let id = project.id.clone();
-                    self.start_loading_board(&id)
-                } else {
-                    Command::None
-                }
-            }
-            AppEvent::CardUpdated(Ok(())) => {
-                // 楽観的更新済み
-                Command::None
-            }
-            AppEvent::CardUpdated(Err(e)) => {
-                self.loading = LoadingState::Error(e);
-                if let Some(project) = &self.current_project {
-                    let id = project.id.clone();
-                    self.start_loading_board(&id)
-                } else {
-                    Command::None
-                }
             }
             AppEvent::CommentAdded(Ok(comment)) => {
                 // 楽観的更新: コメントをカードに追加
@@ -983,28 +950,6 @@ impl AppState {
             }
             AppEvent::IssueDetailLoaded(Err(e)) => {
                 self.detail_loading_id = None;
-                self.loading = LoadingState::Error(e);
-                Command::None
-            }
-            AppEvent::ReactionToggled(Ok(())) => {
-                // 楽観的更新済み
-                Command::None
-            }
-            AppEvent::ReactionToggled(Err(e)) => {
-                self.loading = LoadingState::Error(e);
-                if let Some(project) = &self.current_project {
-                    let id = project.id.clone();
-                    self.start_loading_board(&id)
-                } else {
-                    Command::None
-                }
-            }
-            AppEvent::CustomFieldUpdated(Ok(())) => {
-                // 楽観的更新済み
-                Command::None
-            }
-            AppEvent::CustomFieldUpdated(Err(e)) => {
-                // エラーは画面に残す (自動リロードしない)。
                 self.loading = LoadingState::Error(e);
                 Command::None
             }
@@ -2171,7 +2116,10 @@ mod tests {
         let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
         let mut state = make_state_with_board(board);
 
-        let cmd = state.handle_event(AppEvent::CardMoved(Err("API error".into())));
+        let cmd = state.handle_event(AppEvent::Mutated(
+            MutationKind::CardMoved,
+            Err("API error".into()),
+        ));
 
         // エラーは画面に残し、自動リロードはしない (ユーザーが `r` で手動リフレッシュ)
         assert!(matches!(state.loading, LoadingState::Error(ref m) if m == "API error"));
@@ -3468,7 +3416,10 @@ mod tests {
         ]);
         let mut state = make_state_with_board(board);
 
-        let cmd = state.handle_event(AppEvent::CardReordered(Err("API error".into())));
+        let cmd = state.handle_event(AppEvent::Mutated(
+            MutationKind::CardReordered,
+            Err("API error".into()),
+        ));
 
         // エラー後にリロードが発動するので Refreshing 状態になる (既存ボードあり)
         assert!(matches!(state.loading, LoadingState::Refreshing));
@@ -4194,7 +4145,10 @@ mod tests {
         )]);
         let mut state = make_state_with_board(board);
 
-        let cmd = state.handle_event(AppEvent::CardUpdated(Err("API error".into())));
+        let cmd = state.handle_event(AppEvent::Mutated(
+            MutationKind::CardUpdated,
+            Err("API error".into()),
+        ));
         // start_loading_board が Loading に上書きするのでリロードが走ることを確認
         assert!(matches!(cmd, Command::LoadBoard { .. }));
     }
@@ -4892,7 +4846,10 @@ mod tests {
             description: None,
         });
 
-        let cmd = state.handle_event(AppEvent::ReactionToggled(Err("API err".into())));
+        let cmd = state.handle_event(AppEvent::Mutated(
+            MutationKind::ReactionToggled,
+            Err("API err".into()),
+        ));
         // エラー時はボードリロード (Loading で上書きされる)
         assert!(matches!(cmd, Command::LoadBoard { .. }));
     }
