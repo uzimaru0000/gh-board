@@ -29,7 +29,7 @@ use ui::theme::theme;
 use app::App;
 use event::EventHandler;
 use github::client::GitHubClient;
-use model::state::{LoadingState, ViewMode};
+use model::state::{LoadingState, Scene, ViewMode};
 
 #[derive(Parser)]
 #[command(name = "gh-board", about = "View GitHub Projects V2 as a kanban board")]
@@ -236,45 +236,45 @@ fn render(frame: &mut Frame, app: &App) {
         height: area.height.saturating_sub(1),
     };
 
-    match app.state.mode {
-        ViewMode::Board => {
+    match app.state.scene {
+        Scene::Board => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
         }
-        ViewMode::ProjectSelect => {
+        Scene::ProjectSelect => {
             if app.state.board.is_some() {
                 render_board_with_tabs(frame, main_area, app);
                 ui::statusline::render(frame, area, app);
             }
             ui::project_list::render(frame, area, app);
         }
-        ViewMode::Help => {
+        Scene::Help => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::help::render(frame, area, &app.state.keymap);
         }
-        ViewMode::Filter => {
+        Scene::Filter => {
             render_board_with_tabs(frame, main_area, app);
             ui::filter_bar::render(frame, area, app);
         }
-        ViewMode::Confirm => {
+        Scene::Confirm => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             if let Some(state) = &app.state.confirm_state {
                 ui::confirm::render(frame, area, state);
             }
         }
-        ViewMode::CreateCard => {
+        Scene::CreateCard => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::create_card::render(frame, area, &app.state.create_card_state);
         }
-        ViewMode::Detail => {
+        Scene::Detail => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
         }
-        ViewMode::RepoSelect => {
+        Scene::RepoSelect => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             if let Some(rs) = &app.state.repo_select_state {
@@ -287,29 +287,29 @@ fn render(frame: &mut Frame, app: &App) {
                 ui::repo_select::render(frame, area, repos, rs);
             }
         }
-        ViewMode::EditCard => {
+        Scene::EditCard => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             if let Some(ref edit_state) = app.state.edit_card_state {
                 ui::edit_card::render(frame, area, edit_state);
             }
         }
-        ViewMode::CardGrab => {
+        Scene::CardGrab => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
         }
-        ViewMode::CommentList => {
+        Scene::CommentList => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
             ui::comment_list::render(frame, area, app);
         }
-        ViewMode::GroupBySelect => {
+        Scene::GroupBySelect => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::group_by_select::render(frame, area, app);
         }
-        ViewMode::ReactionPicker => {
+        Scene::ReactionPicker => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
             ui::detail::render(frame, area, app);
@@ -320,7 +320,7 @@ fn render(frame: &mut Frame, app: &App) {
                 ui::reaction_picker::render(frame, area, picker, app);
             }
         }
-        ViewMode::ArchivedList => {
+        Scene::ArchivedList => {
             ui::archived_list::render(frame, main_area, app);
             ui::statusline::render(frame, area, app);
         }

@@ -14,7 +14,7 @@ use crate::model::state::{
     ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
     CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
     GroupBySelectState, LayoutMode, LoadingState, NewCardType, PendingIssueCreate,
-    ReactionPickerState, ReactionTarget, RepoSelectState, SidebarEditMode, SidebarSection,
+    ReactionPickerState, ReactionTarget, RepoSelectState, Scene, SidebarEditMode, SidebarSection,
     ViewMode,
 };
 #[cfg(test)]
@@ -153,6 +153,10 @@ pub struct AppState {
 
     // Keymap
     pub keymap: Keymap,
+
+    /// 現在表示中の Scene (Phase B リファクタ中の shim。mode + Option<FooState> から
+    /// `sync_scene_from_mode` で派生するだけの add-only フィールド)。
+    pub scene: Scene,
 }
 
 impl AppState {
@@ -206,6 +210,7 @@ impl AppState {
             viewer_login: String::new(),
             preferred_grouping_field_name: None,
             keymap: Keymap::default_keymap(),
+            scene: Scene::ProjectSelect,
         }
     }
 
@@ -330,7 +335,15 @@ impl AppState {
         if Self::command_mutates_board(&cmd) {
             self.invalidate_board_cache();
         }
+        self.sync_scene_from_mode();
         cmd
+    }
+
+    /// `mode` + `Option<FooState>` から `scene` を派生させる shim。
+    /// Phase B のリファクタが完了し各 Scene バリアントが自前で state を持つように
+    /// なった時点で撤去する。
+    pub(crate) fn sync_scene_from_mode(&mut self) {
+        self.scene = Scene::from(&self.mode);
     }
 
     fn handle_event_inner(&mut self, event: AppEvent) -> Command {

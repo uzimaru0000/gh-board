@@ -23,6 +23,53 @@ pub enum ViewMode {
     ArchivedList,
 }
 
+/// 現在表示中の「シーン」。Phase B リファクタの第一歩として `ViewMode` と
+/// 1:1 対応の enum を追加している。将来的に Scene バリアントにモード固有の
+/// state (例: `ReactionPicker(ReactionPickerState)`) を取り込み、
+/// `Option<FooState>` 幽霊状態をコンパイル時に排除する予定。
+///
+/// 現状は `AppState::sync_scene_from_mode` で `mode` から派生させるだけの
+/// 「add-only shim」。既存の `mode: ViewMode` と `Option<FooState>` は従来通り
+/// 真実の状態として使う。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Scene {
+    Board,
+    ProjectSelect,
+    Help,
+    Filter,
+    Confirm,
+    CreateCard,
+    Detail,
+    RepoSelect,
+    CardGrab,
+    EditCard,
+    CommentList,
+    GroupBySelect,
+    ReactionPicker,
+    ArchivedList,
+}
+
+impl From<&ViewMode> for Scene {
+    fn from(mode: &ViewMode) -> Self {
+        match mode {
+            ViewMode::Board => Scene::Board,
+            ViewMode::ProjectSelect => Scene::ProjectSelect,
+            ViewMode::Help => Scene::Help,
+            ViewMode::Filter => Scene::Filter,
+            ViewMode::Confirm => Scene::Confirm,
+            ViewMode::CreateCard => Scene::CreateCard,
+            ViewMode::Detail => Scene::Detail,
+            ViewMode::RepoSelect => Scene::RepoSelect,
+            ViewMode::CardGrab => Scene::CardGrab,
+            ViewMode::EditCard => Scene::EditCard,
+            ViewMode::CommentList => Scene::CommentList,
+            ViewMode::GroupBySelect => Scene::GroupBySelect,
+            ViewMode::ReactionPicker => Scene::ReactionPicker,
+            ViewMode::ArchivedList => Scene::ArchivedList,
+        }
+    }
+}
+
 /// Board の表示レイアウト。Kanban (Board) / Table / Roadmap の 3 種類をサポート。
 /// `ViewMode::Board` のサブモードとして扱い、Detail/Filter/CardGrab 等の既存モーダルは
 /// どのレイアウトからも開ける。
