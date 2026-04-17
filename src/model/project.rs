@@ -11,6 +11,7 @@ pub struct ProjectSummary {
     pub title: String,
     pub number: i32,
     pub description: Option<String>,
+    pub url: String,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]

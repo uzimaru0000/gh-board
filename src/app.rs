@@ -204,30 +204,6 @@ impl App {
                     ));
                 });
             }
-            Command::UnarchiveCard {
-                project_id,
-                item_id,
-            } => {
-                let client = self.github.clone();
-                let tx = self.event_tx.clone();
-                let returned_id = item_id.clone();
-                tokio::spawn(async move {
-                    let result = client.unarchive_card(&project_id, &item_id).await;
-                    let _ = tx.send(AppEvent::CardUnarchived(
-                        result.map(|_| returned_id).map_err(|e| e.to_string()),
-                    ));
-                });
-            }
-            Command::LoadArchivedItems { project_id } => {
-                let client = self.github.clone();
-                let tx = self.event_tx.clone();
-                tokio::spawn(async move {
-                    let result = client.get_archived_items(&project_id).await;
-                    let _ = tx.send(AppEvent::ArchivedItemsLoaded(
-                        result.map_err(|e| e.to_string()),
-                    ));
-                });
-            }
             Command::CreateCard {
                 project_id,
                 title,

@@ -32,6 +32,7 @@ impl GitHubClient {
                 title: p.title,
                 number: p.number as i32,
                 description: p.short_description,
+                url: p.url,
             })
             .collect())
     }
@@ -56,6 +57,7 @@ impl GitHubClient {
                         title: p.title,
                         number: p.number as i32,
                         description: p.short_description,
+                        url: p.url,
                     })
                     .collect())
             }
@@ -81,6 +83,7 @@ impl GitHubClient {
                         title: p.title,
                         number: p.number as i32,
                         description: p.short_description,
+                        url: p.url,
                     })
                     .collect())
             }
@@ -104,6 +107,7 @@ impl GitHubClient {
             title: project.title,
             number: project.number as i32,
             description: project.short_description,
+            url: project.url,
         })
     }
 
@@ -127,6 +131,7 @@ impl GitHubClient {
                     title: project.title,
                     number: project.number as i32,
                     description: project.short_description,
+                    url: project.url,
                 })
             }
             Err(_) => {
@@ -147,25 +152,10 @@ impl GitHubClient {
                     title: project.title,
                     number: project.number as i32,
                     description: project.short_description,
+                    url: project.url,
                 })
             }
         }
-    }
-
-    /// archived 済みアイテムだけを取得し、平坦な Vec<Card> を返す。
-    /// Projects V2 items() の `query` 引数は archive フラグを安定して解釈しないため、
-    /// 全件取得してクライアント側で `card.archived == true` のものだけを残す。
-    pub async fn get_archived_items(&self, project_id: &str) -> anyhow::Result<Vec<Card>> {
-        let board = self.get_board_raw(project_id, &[], None).await?;
-        let mut cards: Vec<Card> = Vec::new();
-        for col in board.columns {
-            for card in col.cards {
-                if card.archived {
-                    cards.push(card);
-                }
-            }
-        }
-        Ok(cards)
     }
 
     pub async fn get_repo_labels(
@@ -378,7 +368,7 @@ impl GitHubClient {
         Ok((all_cards, remaining))
     }
 
-    /// アーカイブを含む全アイテムを返す内部 API。`get_archived_items` から再利用する。
+    /// アーカイブを含む全アイテムを返す内部 API。`get_board` のベースとなる。
     async fn get_board_raw(
         &self,
         project_id: &str,

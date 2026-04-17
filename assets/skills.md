@@ -35,9 +35,6 @@ gh board project view <NUMBER> [--owner <LOGIN>]
 ```bash
 # Get full board as JSON (columns, cards, fields)
 gh board board view <NUMBER> [--owner <LOGIN>] [--group-by <FIELD_NAME>]
-
-# List archived cards
-gh board board archived <NUMBER> [--owner <LOGIN>]
 ```
 
 ### Item
@@ -67,9 +64,8 @@ gh board card edit <CONTENT_ID> --type <draft|issue|pr> --title <TITLE> [--body 
 # Move a card (update a field value)
 gh board card move <PROJECT_ID> <ITEM_ID> --field-id <FIELD_ID> --value <VALUE> [--value-type <single_select|iteration|text|number|date>]
 
-# Archive / unarchive a card
+# Archive a card
 gh board card archive <PROJECT_ID> <ITEM_ID>
-gh board card unarchive <PROJECT_ID> <ITEM_ID>
 ```
 
 ### Comment

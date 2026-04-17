@@ -9,6 +9,7 @@ use crate::model::project::{
     Board, Card, CardDetail, Comment, Label, PaginationState, ProjectSummary, SubIssueRef,
 };
 
+
 /// `Result<(), String>` を返すだけの mutation 結果は `AppEvent::Mutated` で
 /// 種別 (MutationKind) と結果を一本化する。handle_event_inner の match arms を
 /// 楽観的更新系 (Ok は no-op、Err はエラー表示 or ボードリロード) のルールで
@@ -38,8 +39,6 @@ pub enum AppEvent {
     BoardPageLoaded(Result<BoardPageData, String>),
     /// `Result<(), String>` を返す mutation 結果を 1 本化したバリアント。
     Mutated(MutationKind, Result<(), String>),
-    CardUnarchived(Result<String, String>),
-    ArchivedItemsLoaded(Result<Vec<Card>, String>),
     LabelsLoaded(Result<Vec<Label>, String>),
     AssigneesLoaded(Result<Vec<(String, String)>, String>),
     CommentAdded(Result<Comment, String>),

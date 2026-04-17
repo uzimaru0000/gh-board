@@ -5,6 +5,7 @@ query OrgProjectByNumber($login: String!, $number: Int!) {
       title
       number
       shortDescription
+      url
     }
   }
 }

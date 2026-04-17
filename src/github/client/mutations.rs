@@ -33,15 +33,6 @@ impl GitHubClient {
         Ok(())
     }
 
-    pub async fn unarchive_card(&self, project_id: &str, item_id: &str) -> anyhow::Result<()> {
-        let vars = unarchive_card::Variables {
-            project_id: project_id.to_string(),
-            item_id: item_id.to_string(),
-        };
-        self.query::<UnarchiveCard>(vars).await?;
-        Ok(())
-    }
-
     pub async fn update_custom_field(
         &self,
         project_id: &str,

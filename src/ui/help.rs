@@ -81,7 +81,7 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         HelpEntry { action: Action::GrabCard, description: "Grab card (move mode)" },
         HelpEntry { action: Action::NewCard, description: "New card (draft/issue)" },
         HelpEntry { action: Action::ArchiveCard, description: "Archive card" },
-        HelpEntry { action: Action::ShowArchivedList, description: "Show archived items" },
+        HelpEntry { action: Action::ShowArchivedList, description: "Open archive page in browser" },
         HelpEntry { action: Action::OpenDetail, description: "View card detail" },
         HelpEntry { action: Action::SwitchProject, description: "Switch project" },
         HelpEntry { action: Action::ChangeGrouping, description: "Change grouping field" },

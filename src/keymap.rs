@@ -161,7 +161,6 @@ pub enum KeymapMode {
     CommentList,
     GroupBySelect,
     ReactionPicker,
-    ArchivedList,
     CreateCardType,
     CreateCardBody,
     CreateCardSubmit,
@@ -447,19 +446,6 @@ impl Keymap {
         reaction_picker.insert(KeyBind::char(' '), Action::ToggleReaction);
         keymap.modes.insert(KeymapMode::ReactionPicker, reaction_picker);
 
-        // ArchivedList mode
-        let mut archived_list = HashMap::new();
-        archived_list.insert(KeyBind::key(KeyCode::Esc), Action::Back);
-        archived_list.insert(KeyBind::char('q'), Action::Back);
-        archived_list.insert(KeyBind::char('j'), Action::MoveDown);
-        archived_list.insert(KeyBind::key(KeyCode::Down), Action::MoveDown);
-        archived_list.insert(KeyBind::char('k'), Action::MoveUp);
-        archived_list.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
-        archived_list.insert(KeyBind::key(KeyCode::Enter), Action::OpenDetail);
-        archived_list.insert(KeyBind::char('u'), Action::UnarchiveCard);
-        archived_list.insert(KeyBind::char('r'), Action::Refresh);
-        keymap.modes.insert(KeymapMode::ArchivedList, archived_list);
-
         // EditCard global keys
         let mut edit_card_global = HashMap::new();
         edit_card_global.insert(KeyBind::ctrl('s'), Action::Submit);
@@ -497,7 +483,6 @@ impl Keymap {
             ("comment_list", KeymapMode::CommentList),
             ("group_by_select", KeymapMode::GroupBySelect),
             ("reaction_picker", KeymapMode::ReactionPicker),
-            ("archived_list", KeymapMode::ArchivedList),
             ("create_card_type", KeymapMode::CreateCardType),
             ("create_card_body", KeymapMode::CreateCardBody),
             ("edit_card_body", KeymapMode::EditCardBody),
@@ -614,7 +599,6 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "grab_card" => Some(Action::GrabCard),
         "new_card" => Some(Action::NewCard),
         "archive_card" => Some(Action::ArchiveCard),
-        "unarchive_card" => Some(Action::UnarchiveCard),
         "show_archived_list" => Some(Action::ShowArchivedList),
         "start_filter" => Some(Action::StartFilter),
         "clear_filter" => Some(Action::ClearFilter),
@@ -664,7 +648,6 @@ pub fn action_name(action: Action) -> &'static str {
         Action::GrabCard => "grab_card",
         Action::NewCard => "new_card",
         Action::ArchiveCard => "archive_card",
-        Action::UnarchiveCard => "unarchive_card",
         Action::ShowArchivedList => "show_archived_list",
         Action::StartFilter => "start_filter",
         Action::ClearFilter => "clear_filter",

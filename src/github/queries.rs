@@ -72,14 +72,6 @@ pub struct ArchiveCard;
 #[derive(GraphQLQuery)]
 #[graphql(
     schema_path = "schema.graphql",
-    query_path = "src/github/graphql/unarchive_card.graphql",
-    response_derives = "Debug"
-)]
-pub struct UnarchiveCard;
-
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "schema.graphql",
     query_path = "src/github/graphql/create_draft_issue.graphql",
     response_derives = "Debug"
 )]

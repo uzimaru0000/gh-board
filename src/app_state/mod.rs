@@ -11,7 +11,7 @@ use crate::model::project::{
     Board, Card, CardType, CustomFieldValue, FieldDefinition, ProjectSummary,
 };
 use crate::model::state::{
-    ActiveFilter, ArchivedListState, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
+    ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
     CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
     GroupBySelectState, LayoutMode, LoadingState, NewCardType, PendingIssueCreate,
     ReactionPickerState, ReactionTarget, RepoSelectState, Scene, SidebarEditMode, SidebarSection,
@@ -63,10 +63,6 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
         }
         ViewMode::GroupBySelect => {
             debug_assert!(false, "GroupBySelect scene must be entered via enter_group_by_select()");
-            Scene::Board
-        }
-        ViewMode::ArchivedList => {
-            debug_assert!(false, "ArchivedList scene must be entered via enter_archived_list()");
             Scene::Board
         }
     }
@@ -339,7 +335,6 @@ impl AppState {
         match cmd {
             Command::MoveCard { .. }
             | Command::ArchiveCard { .. }
-            | Command::UnarchiveCard { .. }
             | Command::CreateCard { .. }
             | Command::CreateIssue { .. }
             | Command::ReorderCard { .. }
@@ -411,7 +406,6 @@ impl AppState {
         match &self.scene {
             Scene::ReactionPicker(_) if self.mode == ViewMode::ReactionPicker => return,
             Scene::GroupBySelect(_) if self.mode == ViewMode::GroupBySelect => return,
-            Scene::ArchivedList(_) if self.mode == ViewMode::ArchivedList => return,
             Scene::Confirm(_) if self.mode == ViewMode::Confirm => return,
             Scene::RepoSelect(_) if self.mode == ViewMode::RepoSelect => return,
             Scene::CardGrab(_) if self.mode == ViewMode::CardGrab => return,
@@ -496,34 +490,6 @@ impl AppState {
         self.mode = ViewMode::Board;
         self.scene = scene_from_mode_tag(&self.mode);
         taken
-    }
-
-    /// ArchivedList シーンに入る。Scene に state を直接持たせ、`mode` も同時に更新する。
-    pub(crate) fn enter_archived_list(&mut self, state: ArchivedListState) {
-        self.mode = ViewMode::ArchivedList;
-        self.scene = Scene::ArchivedList(state);
-    }
-
-    pub fn archived_list_state(&self) -> Option<&ArchivedListState> {
-        if let Scene::ArchivedList(s) = &self.scene {
-            Some(s)
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn archived_list_state_mut(&mut self) -> Option<&mut ArchivedListState> {
-        if let Scene::ArchivedList(s) = &mut self.scene {
-            Some(s)
-        } else {
-            None
-        }
-    }
-
-    /// ArchivedList シーンを終了し、Board モードに戻す。
-    pub(crate) fn exit_archived_list(&mut self) {
-        self.mode = ViewMode::Board;
-        self.scene = scene_from_mode_tag(&self.mode);
     }
 
     /// Confirm シーンに入る。Scene に state を直接持たせ、`mode` も同時に更新する。
@@ -781,40 +747,6 @@ impl AppState {
                 Command::None
             }
             AppEvent::Mutated(kind, result) => self.handle_mutation_result(kind, result),
-            AppEvent::CardUnarchived(Ok(_item_id)) => {
-                // archived リストからは楽観的に除去済み。ボードをリフレッシュして復元カードを反映。
-                if let Some(project) = &self.current_project {
-                    let id = project.id.clone();
-                    self.start_loading_board(&id)
-                } else {
-                    Command::None
-                }
-            }
-            AppEvent::CardUnarchived(Err(e)) => {
-                self.loading = LoadingState::Error(e.clone());
-                if let Some(state) = self.archived_list_state_mut() {
-                    state.error = Some(e);
-                }
-                Command::None
-            }
-            AppEvent::ArchivedItemsLoaded(Ok(cards)) => {
-                if let Some(state) = self.archived_list_state_mut() {
-                    state.cards = cards;
-                    state.loading = false;
-                    state.error = None;
-                    if state.selected >= state.cards.len() {
-                        state.selected = state.cards.len().saturating_sub(1);
-                    }
-                }
-                Command::None
-            }
-            AppEvent::ArchivedItemsLoaded(Err(e)) => {
-                if let Some(state) = self.archived_list_state_mut() {
-                    state.loading = false;
-                    state.error = Some(e);
-                }
-                Command::None
-            }
             AppEvent::LabelsLoaded(Ok(labels)) => {
                 // カードの現在のラベルと照合して applied を設定
                 let card_labels: Vec<String> = self
@@ -1104,7 +1036,6 @@ impl AppState {
             ViewMode::CommentList => self.handle_comment_list_key(key),
             ViewMode::GroupBySelect => self.handle_group_by_select_key(key),
             ViewMode::ReactionPicker => self.handle_reaction_picker_key(key),
-            ViewMode::ArchivedList => self.handle_archived_list_key(key),
         }
     }
 
@@ -1359,6 +1290,7 @@ mod tests {
             title: "Test".into(),
             number: 1,
             description: None,
+            url: String::new(),
         });
         state.rebuild_table_order();
         state
@@ -1697,76 +1629,6 @@ mod tests {
         assert_eq!(state.board.as_ref().unwrap().columns[0].cards.len(), 1);
     }
 
-    // ========== ArchivedList ビュー ==========
-
-    #[test]
-    fn test_show_archived_list_starts_loading() {
-        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
-        let mut state = make_state_with_board(board);
-
-        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('v'))));
-
-        assert_eq!(state.mode, ViewMode::ArchivedList);
-        assert!(state.archived_list_state().unwrap().loading);
-        assert_eq!(
-            cmd,
-            Command::LoadArchivedItems {
-                project_id: "proj_1".into()
-            }
-        );
-    }
-
-    #[test]
-    fn test_archived_items_loaded_populates_state() {
-        let board = make_board(vec![("Todo", "opt_1", vec![])]);
-        let mut state = make_state_with_board(board);
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('v'))));
-
-        let archived = vec![make_card("a1", "Archived A"), make_card("a2", "Archived B")];
-        state.handle_event(AppEvent::ArchivedItemsLoaded(Ok(archived)));
-
-        let s = state.archived_list_state().unwrap();
-        assert!(!s.loading);
-        assert_eq!(s.cards.len(), 2);
-        assert_eq!(s.selected, 0);
-    }
-
-    #[test]
-    fn test_archived_list_navigation_and_unarchive() {
-        let board = make_board(vec![("Todo", "opt_1", vec![])]);
-        let mut state = make_state_with_board(board);
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('v'))));
-        state.handle_event(AppEvent::ArchivedItemsLoaded(Ok(vec![
-            make_card("a1", "A"),
-            make_card("a2", "B"),
-        ])));
-
-        // j で次のカード
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
-        assert_eq!(state.archived_list_state().unwrap().selected, 1);
-
-        // u で UnarchiveCard コマンド + リストから除去
-        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('u'))));
-        assert_eq!(
-            cmd,
-            Command::UnarchiveCard {
-                project_id: "proj_1".into(),
-                item_id: "a2".into()
-            }
-        );
-        assert_eq!(state.archived_list_state().unwrap().cards.len(), 1);
-    }
-
-    #[test]
-    fn test_archived_list_back_returns_to_board() {
-        let board = make_board(vec![("Todo", "opt_1", vec![])]);
-        let mut state = make_state_with_board(board);
-        state.handle_event(AppEvent::Key(key(KeyCode::Char('v'))));
-
-        state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
-        assert_eq!(state.mode, ViewMode::Board);
-    }
-
     // ========== カード作成 ==========
 
     #[test]
@@ -1810,12 +1672,14 @@ mod tests {
                 title: "Project 1".into(),
                 number: 1,
                 description: None,
+                url: String::new(),
             },
             ProjectSummary {
                 id: "p2".into(),
                 title: "Project 2".into(),
                 number: 2,
                 description: None,
+                url: String::new(),
             },
         ];
 
@@ -1834,18 +1698,21 @@ mod tests {
                 title: "Alpha Board".into(),
                 number: 1,
                 description: Some("team alpha".into()),
+                url: String::new(),
             },
             ProjectSummary {
                 id: "p2".into(),
                 title: "Beta Roadmap".into(),
                 number: 2,
                 description: None,
+                url: String::new(),
             },
             ProjectSummary {
                 id: "p3".into(),
                 title: "Kanban Proto".into(),
                 number: 3,
                 description: Some("alpha experiment".into()),
+                url: String::new(),
             },
         ]
     }
@@ -2077,6 +1944,7 @@ mod tests {
             title: "Project 1".into(),
             number: 1,
             description: None,
+            url: String::new(),
         }];
 
         let cmd = state.handle_event(AppEvent::ProjectsLoaded(Ok(projects)));
@@ -4844,6 +4712,7 @@ mod tests {
             title: "Proj".into(),
             number: 1,
             description: None,
+            url: String::new(),
         });
 
         let cmd = state.handle_event(AppEvent::Mutated(
@@ -5116,6 +4985,7 @@ mod tests {
             title: "My Project".into(),
             number: 5,
             description: None,
+            url: String::new(),
         };
         let cmd = state.handle_event(AppEvent::ProjectLoaded(Ok(project)));
 
@@ -6650,6 +6520,7 @@ mod tests {
             title: "Test".into(),
             number: 1,
             description: None,
+            url: String::new(),
         });
         let current_gen = state.board_generation;
 
@@ -6712,6 +6583,7 @@ mod tests {
             title: "Test".into(),
             number: 1,
             description: None,
+            url: String::new(),
         });
         let before = state.board_generation;
         state.start_loading_board("proj_1");

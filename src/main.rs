@@ -312,10 +312,6 @@ fn render(frame: &mut Frame, app: &App) {
             }
             ui::reaction_picker::render(frame, area, picker, app);
         }
-        Scene::ArchivedList(_) => {
-            ui::archived_list::render(frame, main_area, app);
-            ui::statusline::render(frame, area, app);
-        }
     }
 
     // Loading/error overlay (Refreshing は statusline 側で控えめに表示)

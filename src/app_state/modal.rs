@@ -205,88 +205,14 @@ impl AppState {
     }
 
     pub(super) fn show_archived_list(&mut self) -> Command {
-        let project_id = match &self.current_project {
-            Some(p) => p.id.clone(),
+        // GitHub Projects V2 の GraphQL API では archived item を取得する手段が
+        // 存在しない (items() の query 引数では `is:archived` が効かず、未指定時も
+        // archived は除外される)。ブラウザで Web UI の archive 画面を開く。
+        let url = match &self.current_project {
+            Some(p) => format!("{}/archive", p.url),
             None => return Command::None,
         };
-        self.enter_archived_list(crate::model::state::ArchivedListState {
-            cards: Vec::new(),
-            selected: 0,
-            loading: true,
-            error: None,
-        });
-        Command::LoadArchivedItems { project_id }
-    }
-
-    pub(super) fn handle_archived_list_key(&mut self, key: KeyEvent) -> Command {
-        let action = match self.keymap.resolve(KeymapMode::ArchivedList, &key) {
-            Some(a) => a,
-            None => return Command::None,
-        };
-        match action {
-            Action::Back => {
-                self.exit_archived_list();
-                Command::None
-            }
-            Action::MoveDown => {
-                if let Some(state) = self.archived_list_state_mut()
-                    && !state.cards.is_empty()
-                {
-                    state.selected = (state.selected + 1).min(state.cards.len() - 1);
-                }
-                Command::None
-            }
-            Action::MoveUp => {
-                if let Some(state) = self.archived_list_state_mut() {
-                    state.selected = state.selected.saturating_sub(1);
-                }
-                Command::None
-            }
-            Action::UnarchiveCard => self.unarchive_selected_in_list(),
-            Action::OpenDetail => {
-                // 現状の Detail は board のカードを参照する設計のため、
-                // ここではブラウザで開く代替動作にとどめる。
-                if let Some(state) = self.archived_list_state()
-                    && let Some(card) = state.cards.get(state.selected)
-                    && let Some(url) = card.url.clone()
-                {
-                    return Command::OpenUrl(url);
-                }
-                Command::None
-            }
-            Action::Refresh => self.show_archived_list(),
-            Action::ForceQuit => {
-                self.should_quit = true;
-                Command::None
-            }
-            _ => Command::None,
-        }
-    }
-
-    pub(super) fn unarchive_selected_in_list(&mut self) -> Command {
-        let project_id = match &self.current_project {
-            Some(p) => p.id.clone(),
-            None => return Command::None,
-        };
-        let state = match self.archived_list_state_mut() {
-            Some(s) => s,
-            None => return Command::None,
-        };
-        if state.cards.is_empty() {
-            return Command::None;
-        }
-        let idx = state.selected.min(state.cards.len() - 1);
-        let item_id = state.cards[idx].item_id.clone();
-        state.cards.remove(idx);
-        if state.cards.is_empty() {
-            state.selected = 0;
-        } else if state.selected >= state.cards.len() {
-            state.selected = state.cards.len() - 1;
-        }
-        Command::UnarchiveCard {
-            project_id,
-            item_id,
-        }
+        Command::OpenUrl(url)
     }
 
     pub fn can_submit_create_card(&self) -> bool {

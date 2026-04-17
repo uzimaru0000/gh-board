@@ -20,7 +20,6 @@ pub enum ViewMode {
     CommentList,
     GroupBySelect,
     ReactionPicker,
-    ArchivedList,
 }
 
 /// 現在表示中の「シーン」。Phase B リファクタで段階的にモード固有の state を
@@ -31,9 +30,9 @@ pub enum ViewMode {
 ///
 /// 未移行バリアントは現状 `mode: ViewMode` + `Option<FooState>` と共存する
 /// 単なるタグで、`AppState::sync_scene_from_mode()` で `mode` から派生させる。
-// Scene バリアントが持つ state (例: ArchivedListState の Card) には PartialEq が
-// 未実装なので、Scene 全体でも PartialEq/Eq は derive しない。Scene の比較が
-// 必要な場合は `matches!` やパターンマッチで明示的に扱う。
+// Scene バリアントが持つ state には PartialEq が未実装なので、Scene 全体でも
+// PartialEq/Eq は derive しない。Scene の比較が必要な場合は `matches!` や
+// パターンマッチで明示的に扱う。
 #[derive(Clone, Debug)]
 pub enum Scene {
     Board,
@@ -49,7 +48,6 @@ pub enum Scene {
     CommentList(CommentListState),
     GroupBySelect(GroupBySelectState),
     ReactionPicker(ReactionPickerState),
-    ArchivedList(ArchivedListState),
 }
 
 /// Board の表示レイアウト。Kanban (Board) / Table / Roadmap の 3 種類をサポート。
@@ -149,14 +147,6 @@ pub struct ConfirmState {
 #[derive(Clone, Debug)]
 pub enum ConfirmAction {
     ArchiveCard { item_id: String },
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct ArchivedListState {
-    pub cards: Vec<super::project::Card>,
-    pub selected: usize,
-    pub loading: bool,
-    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
