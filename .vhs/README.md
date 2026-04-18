@@ -1,6 +1,12 @@
 # Demo recording
 
-The README image (`assets/demo.gif`) is generated from `demo.tape` with [vhs](https://github.com/charmbracelet/vhs).
+GIFs under `assets/` are generated from the `*.tape` files in this directory with [vhs](https://github.com/charmbracelet/vhs).
+
+| Tape | Output | Purpose |
+|------|--------|---------|
+| `demo.tape` | `assets/demo.gif` | Headline demo embedded in the README |
+| `views.tape` | `assets/demo-views.gif` | Showcases `~/.config/gh-board/config.toml` views and `1` / `2` switching |
+| `bulk-archive.tape` | `assets/demo-bulk-archive.gif` | Bulk-select the Done column and archive in one action |
 
 ## Prerequisites
 
@@ -29,15 +35,19 @@ The README image (`assets/demo.gif`) is generated from `demo.tape` with [vhs](ht
 
    `setup.sh` is idempotent — it reuses a project titled `gh-board demo` if it already exists, and seeds draft issues across `Todo` / `In Progress` / `Done` the first time.
 
-2. From the repository root, run:
+2. From the repository root, render the tape you want:
 
    ```
-   vhs .vhs/demo.tape
+   vhs .vhs/demo.tape           # main demo
+   vhs .vhs/views.tape          # config + view switching
+   vhs .vhs/bulk-archive.tape   # bulk archive of the Done column
    ```
 
    (vhs itself spawns bash internally via `Set Shell "bash"` in the tape, so the recorded commands work regardless of your login shell.)
 
-3. Verify `assets/demo.gif` looks right, then commit it.
+3. Verify the generated GIF under `assets/` looks right, then commit it.
+
+> **Note**: `views.tape` and `bulk-archive.tape` hardcode `gh board --owner @me 2`. Adjust the project number if your demo project lives elsewhere. The bulk-archive tape mutates the project (cards in `Done` get archived), so re-run `setup.sh` to reseed before re-recording.
 
 If the file grows too large for GitHub to render, adjust `Set Width` / `Set Height` or `Set PlaybackSpeed` in `demo.tape` and regenerate.
 
