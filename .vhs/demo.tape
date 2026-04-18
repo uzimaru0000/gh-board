@@ -28,10 +28,13 @@ Sleep 500ms
 Enter
 Sleep 3s
 
-# Navigate cards and columns
+# Navigate cards and columns — finish on Todo so the rest of the demo
+# (filter / grab) starts from a populated column instead of "No Status"
+Type "l"
+Sleep 300ms
 Type "j"
 Sleep 200ms
-Type "j"
+Type "k"
 Sleep 200ms
 Type "l"
 Sleep 300ms
@@ -75,9 +78,7 @@ Space
 Sleep 1s
 
 # Bulk archive the Done column: jump there, select all, archive in one shot
-# (after grab we are on Todo; Done is two columns to the right)
-Tab
-Sleep 300ms
+# (after grab we are on In Progress; Done is one column to the right)
 Tab
 Sleep 500ms
 Type "v"
