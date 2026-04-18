@@ -1,0 +1,31 @@
+name: ✨ Feature request
+description: Suggest a new feature or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the friction or missing capability you ran into.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How might gh-board address this? UI sketches and key bindings welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered (optional)
+      description: Workarounds you've tried, or how other tools solve it.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context (optional)
+      description: Links, screenshots, or anything else.

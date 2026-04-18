@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Question / Discussion
+    url: https://github.com/uzimaru0000/gh-board/discussions
+    about: Ask a question or share usage tips here instead of opening an issue.
