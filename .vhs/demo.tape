@@ -28,8 +28,8 @@ Sleep 500ms
 Enter
 Sleep 3s
 
-# Navigate cards and columns — finish on Todo so the rest of the demo
-# (filter / grab) starts from a populated column instead of "No Status"
+# Navigate cards and columns — sweep across Todo / In Progress / Done,
+# then return to Todo as the launch pad for the rest of the demo
 Type "l"
 Sleep 300ms
 Type "j"
@@ -41,6 +41,8 @@ Sleep 300ms
 Type "j"
 Sleep 200ms
 Type "k"
+Sleep 200ms
+Type "h"
 Sleep 200ms
 Type "h"
 Sleep 500ms
@@ -87,7 +89,7 @@ Type "*"
 Sleep 1s
 Type "a"
 Sleep 1200ms
-Enter
+Type "y"
 Sleep 1500ms
 
 # Help overlay
