@@ -8,6 +8,7 @@ fn main() {
     println!("cargo::rerun-if-changed=schema.graphql");
     println!("cargo::rerun-if-changed=Cargo.toml");
     println!("cargo::rerun-if-changed=assets/skills.md.tmpl");
+    println!("cargo::rerun-if-changed=locales");
 
     generate_skills_md(&manifest_dir);
 

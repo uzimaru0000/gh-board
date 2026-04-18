@@ -30,8 +30,12 @@ cargo run -- --owner <org> <number>
 ```
 build.rs                    # ビルドスクリプト (schema.graphql の自動ダウンロード)
 schema.graphql              # GitHub GraphQL スキーマ (自動生成、git管理外)
+locales/
+  en.yml                    # ヘルプ画面の英語翻訳 (デフォルト)
+  ja.yml                    # ヘルプ画面の日本語翻訳
 src/
-  main.rs                   # エントリポイント、CLI引数、レンダリング
+  main.rs                   # エントリポイント、CLI引数、レンダリング、rust_i18n::i18n!
+  i18n.rs                   # ロケール判定 (LC_ALL/LC_MESSAGES/LANG → ja or en)
   app.rs                    # App: 薄いシェル (AppState + GitHubClient + execute(Command))
   app_state.rs              # AppState: 純粋ロジック (状態遷移、ナビゲーション、フィルタ、楽観的更新) + テスト
   command.rs                # Command enum: 副作用を値として表現
@@ -191,6 +195,15 @@ assert_eq!(cmd, Command::MoveCard { ... });
 - `AppState` のメソッドは副作用を直接実行せず、必ず `Command` を返すこと
 - `cargo test` で全テストが通ることを確認してからコミットする
 - 実装完了後は `cargo clippy -- -D warnings` も実行し、警告がないことを確認する (CI で同じチェックが走る)
+
+## i18n (ヘルプ画面のみ)
+
+- `rust-i18n` v3 でコンパイル時に `locales/*.yml` を埋め込み、`src/ui/help.rs` でのみ `t!("key")` を使う
+- `src/main.rs` のクレートルートで `rust_i18n::i18n!("locales", fallback = "en");` を 1 度だけ宣言
+- ロケール判定 (`src/i18n.rs::detect_locale`) は `LC_ALL` → `LC_MESSAGES` → `LANG` の順に評価し、`ja*` なら `ja`、それ以外は `en`。TUI 起動時に `i18n::init()` を呼ぶ
+- YAML は v1 ネスト形式 (`_version` キーは書かない)。キーはドット区切りで参照
+- 現状 i18n 対象は **ヘルプ画面のみ**。他の UI テキストは英語のまま
+- `locales/` の変更で再ビルドが走るよう `build.rs` に `cargo::rerun-if-changed=locales` を設定済み
 
 ## 設計上の注意点
 
