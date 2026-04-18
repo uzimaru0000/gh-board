@@ -1,6 +1,7 @@
 mod action;
 mod app;
 mod app_state;
+mod cache;
 mod cli;
 mod color;
 mod command;
@@ -46,6 +47,10 @@ struct Cli {
     /// Login of the owner. Use "@me" for the current user.
     #[arg(long)]
     owner: Option<String>,
+
+    /// Disable the local board cache for this run.
+    #[arg(long)]
+    no_cache: bool,
 }
 
 #[tokio::main]
@@ -91,7 +96,12 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg
     // "@me" means the current viewer (same as no owner)
     let owner = cli.owner.filter(|o| o != "@me");
 
-    let mut app = App::new(github, event_tx, owner.clone());
+    let cache = if cli.no_cache {
+        cache::DiskCache::disabled()
+    } else {
+        cache::DiskCache::new()
+    };
+    let mut app = App::new(github, event_tx, owner.clone(), cache);
     app.state.set_views(cfg.view);
     app.state.preferred_grouping_field_name = cfg.board.group_by.clone();
 

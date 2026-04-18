@@ -1,6 +1,7 @@
 use tokio::sync::mpsc;
 
 use crate::app_state::AppState;
+use crate::cache::{CacheKey, DiskCache};
 use crate::command::Command;
 use crate::event::{AppEvent, MutationKind};
 use crate::github::client::GitHubClient;
@@ -16,6 +17,10 @@ pub struct App {
     pub pending_comment_editor: Option<CommentEditorContext>,
     github: GitHubClient,
     event_tx: mpsc::UnboundedSender<AppEvent>,
+    cache: DiskCache,
+    /// 現在表示中のプロジェクトに対応するディスクキャッシュキー。
+    /// `load_project_by_number` で確定し、BoardLoaded 受信時の `put` に使う。
+    cache_key: Option<CacheKey>,
 }
 
 impl App {
@@ -23,6 +28,7 @@ impl App {
         github: GitHubClient,
         event_tx: mpsc::UnboundedSender<AppEvent>,
         owner: Option<String>,
+        cache: DiskCache,
     ) -> Self {
         let viewer_login = github.viewer_login().to_string();
         let mut state = AppState::new(owner);
@@ -36,6 +42,8 @@ impl App {
             pending_comment_editor: None,
             github,
             event_tx,
+            cache,
+            cache_key: None,
         }
     }
 
@@ -45,13 +53,53 @@ impl App {
     }
 
     pub fn load_project_by_number(&mut self, owner: Option<String>, number: i32) {
+        // キャッシュキーを確定: --owner 未指定なら viewer_login で正規化
+        let owner_key = owner
+            .clone()
+            .unwrap_or_else(|| self.state.viewer_login.clone());
+        let key = CacheKey::new(
+            owner_key,
+            number,
+            self.state.preferred_grouping_field_name.clone(),
+        );
+        self.cache_key = Some(key.clone());
+
+        // ヒット時はまずキャッシュを描画してから API を叩く (stale-while-revalidate)
+        if let Some(cached) = self.cache.get(&key) {
+            let _ = self
+                .event_tx
+                .send(AppEvent::ProjectLoaded(Ok(cached.project)));
+            let _ = self.event_tx.send(AppEvent::BoardLoaded(Ok(cached.board)));
+            return;
+        }
+
         let cmd = self.state.start_loading_project_by_number(owner, number);
         self.execute(cmd);
     }
 
     pub fn handle_event(&mut self, event: AppEvent) {
+        let post = post_process_for(&event);
         let cmd = self.state.handle_event(event);
+        self.run_cache_post(post);
         self.execute(cmd);
+    }
+
+    fn run_cache_post(&self, action: CachePostAction) {
+        match action {
+            CachePostAction::None => {}
+            CachePostAction::PutBoard => {
+                if let (Some(key), Some(project), Some(board)) = (
+                    self.cache_key.as_ref(),
+                    self.state.current_project.as_ref(),
+                    self.state.board.as_ref(),
+                ) {
+                    self.cache.put(key, project, board);
+                }
+            }
+            CachePostAction::InvalidateAll => {
+                self.cache.invalidate_all();
+            }
+        }
     }
 
     pub fn execute_cmd(&mut self, cmd: Command) {
@@ -534,6 +582,24 @@ impl App {
                 }
             }
         }
+    }
+}
+
+/// AppState 処理後に App が行うキャッシュ操作。`handle_event` で event を消費する前に
+/// 種別だけ抜き出しておき、AppState 更新後に副作用を実行する。
+enum CachePostAction {
+    None,
+    /// 取得直後の Board をディスクへ保存。
+    PutBoard,
+    /// mutation 成功時、stale 化したキャッシュを破棄。
+    InvalidateAll,
+}
+
+fn post_process_for(event: &AppEvent) -> CachePostAction {
+    match event {
+        AppEvent::BoardLoaded(Ok(_)) => CachePostAction::PutBoard,
+        AppEvent::Mutated(_, Ok(())) => CachePostAction::InvalidateAll,
+        _ => CachePostAction::None,
     }
 }
 
