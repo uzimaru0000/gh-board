@@ -18,6 +18,8 @@ A [gh](https://cli.github.com/) CLI extension to manage GitHub Projects V2 as a 
 - **Comments** — post new comments and edit your own (`$EDITOR` integration)
 - **Filter** — free text, `label:`, `assignee:`, `milestone:`, compound `AND`/`OR`
 - **Fuzzy project selection** — quickly find projects with fuzzy matching
+- **Local board cache** — XDG-compliant on-disk cache with stale-while-revalidate for instant startup
+- **i18n** — help screen available in English and Japanese (auto-detects from `LANG` / `LC_ALL`)
 - **Configurable key bindings & theme** — customize via `config.toml` / `theme.toml`
 
 ## Installation
@@ -33,6 +35,17 @@ gh board --owner <org-or-user> <number>
 ```
 
 Running without arguments lets you choose from your accessible projects.
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--owner <LOGIN>` | Owner login (org or user). Use `@me` for the current viewer. |
+| `--no-cache` | Skip the local board cache for this run (forces a fresh fetch). |
+
+### Cache
+
+Board responses are cached at `$XDG_CACHE_HOME/gh-board/board/` (e.g. `~/.cache/gh-board/board/` on Linux, `~/Library/Caches/gh-board/board/` on macOS). On startup, a cached board is rendered immediately while the latest data is fetched in the background. Mutations (move, archive, etc.) invalidate the cache automatically. Cache entries expire after 24 hours. Pass `--no-cache` to bypass this for a single run.
 
 ## Key Bindings
 
