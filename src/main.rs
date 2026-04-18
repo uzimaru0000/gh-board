@@ -8,9 +8,12 @@ mod command;
 mod config;
 mod event;
 mod github;
+mod i18n;
 mod keymap;
 mod model;
 mod ui;
+
+rust_i18n::i18n!("locales", fallback = "en");
 
 use std::time::Duration;
 
@@ -66,6 +69,7 @@ async fn main() -> Result<()> {
     }
 
     // TUI mode
+    i18n::init();
     let cfg = config::load_config().unwrap_or_else(|e| {
         eprintln!("Warning: failed to load config: {e}");
         config::Config::default()
