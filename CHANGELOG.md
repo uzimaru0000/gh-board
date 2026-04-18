@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-04-18
+
+### Added
+
+- Local disk cache for board API responses, with stale-while-revalidate on startup (#60)
+- `--no-cache` flag to disable the local board cache for one run (#60)
+- Internationalized help screen with English and Japanese locales (#70)
+
 ## [1.1.0] - 2026-04-17
 
 ### Added
@@ -111,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Wide character bleeding through detail modal left border
 
+[1.2.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.2.0
 [1.1.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.1.0
 [1.0.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.0.0
 [0.4.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v0.4.0
