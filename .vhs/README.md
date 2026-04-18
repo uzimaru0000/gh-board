@@ -4,9 +4,8 @@ GIFs under `assets/` are generated from the `*.tape` files in this directory wit
 
 | Tape | Output | Purpose |
 |------|--------|---------|
-| `demo.tape` | `assets/demo.gif` | Headline demo embedded in the README |
+| `demo.tape` | `assets/demo.gif` | Headline demo embedded in the README. Includes navigation, detail view, filter, grab, and bulk-archiving the Done column |
 | `views.tape` | `assets/demo-views.gif` | Showcases `~/.config/gh-board/config.toml` views and `1` / `2` switching |
-| `bulk-archive.tape` | `assets/demo-bulk-archive.gif` | Bulk-select the Done column and archive in one action |
 
 ## Prerequisites
 
@@ -38,16 +37,15 @@ GIFs under `assets/` are generated from the `*.tape` files in this directory wit
 2. From the repository root, render the tape you want:
 
    ```
-   vhs .vhs/demo.tape           # main demo
-   vhs .vhs/views.tape          # config + view switching
-   vhs .vhs/bulk-archive.tape   # bulk archive of the Done column
+   vhs .vhs/demo.tape    # main demo (includes the bulk-archive sequence)
+   vhs .vhs/views.tape   # config + view switching
    ```
 
    (vhs itself spawns bash internally via `Set Shell "bash"` in the tape, so the recorded commands work regardless of your login shell.)
 
 3. Verify the generated GIF under `assets/` looks right, then commit it.
 
-> **Note**: `views.tape` and `bulk-archive.tape` hardcode `gh board --owner @me 2`. Adjust the project number if your demo project lives elsewhere. The bulk-archive tape mutates the project (cards in `Done` get archived), so re-run `setup.sh` to reseed before re-recording.
+> **Note**: both tapes hardcode `gh board --owner @me 2`. Adjust the project number if your demo project lives elsewhere. `demo.tape` mutates the project — cards in `Done` get archived in the bulk sequence — so re-run `setup.sh` to reseed before re-recording.
 
 If the file grows too large for GitHub to render, adjust `Set Width` / `Set Height` or `Set PlaybackSpeed` in `demo.tape` and regenerate.
 

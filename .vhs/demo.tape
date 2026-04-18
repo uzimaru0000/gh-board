@@ -74,6 +74,18 @@ Sleep 400ms
 Space
 Sleep 1s
 
+# Bulk archive the Done column: jump there, select all, archive in one shot
+Tab
+Sleep 400ms
+Type "v"
+Sleep 800ms
+Type "*"
+Sleep 1s
+Type "a"
+Sleep 1200ms
+Enter
+Sleep 1500ms
+
 # Help overlay
 Type "?"
 Sleep 2500ms
