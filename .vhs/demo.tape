@@ -75,8 +75,11 @@ Space
 Sleep 1s
 
 # Bulk archive the Done column: jump there, select all, archive in one shot
+# (after grab we are on Todo; Done is two columns to the right)
 Tab
-Sleep 400ms
+Sleep 300ms
+Tab
+Sleep 500ms
 Type "v"
 Sleep 800ms
 Type "*"
