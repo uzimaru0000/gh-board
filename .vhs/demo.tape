@@ -23,16 +23,7 @@ Set TypingSpeed 60ms
 Env LANG "en_US.UTF-8"
 Env LC_ALL "en_US.UTF-8"
 
-Env GH_BOARD_DEMO_OWNER "@me"
-
-Hide
-Type `clear`
-Enter
-Type `: ${GH_BOARD_DEMO_PROJECT:?set GH_BOARD_DEMO_PROJECT to the demo project number}`
-Enter
-Show
-
-Type `gh board --owner "$GH_BOARD_DEMO_OWNER" "$GH_BOARD_DEMO_PROJECT"`
+Type `gh board --owner @me 2`
 Sleep 500ms
 Enter
 Sleep 3s
