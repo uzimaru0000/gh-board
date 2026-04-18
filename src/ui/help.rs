@@ -5,6 +5,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
     Frame,
 };
+use rust_i18n::t;
 
 use crate::action::Action;
 use crate::keymap::{KeyBind, Keymap, KeymapMode};
@@ -36,7 +37,14 @@ fn format_key_display(bind: &KeyBind) -> String {
 
 struct HelpEntry {
     action: Action,
-    description: &'static str,
+    description: String,
+}
+
+fn entry(action: Action, key: &str) -> HelpEntry {
+    HelpEntry {
+        action,
+        description: t!(key).to_string(),
+    }
 }
 
 pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
@@ -44,7 +52,7 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
-        .title(" Help ")
+        .title(format!(" {} ", t!("help.title")))
         .title_style(Style::default().fg(theme().accent).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -62,93 +70,111 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
 
     // Navigation section (from Board mode)
     let nav_entries = vec![
-        HelpEntry { action: Action::MoveDown, description: "Next card" },
-        HelpEntry { action: Action::MoveUp, description: "Previous card" },
-        HelpEntry { action: Action::MoveLeft, description: "Previous column" },
-        HelpEntry { action: Action::MoveRight, description: "Next column" },
-        HelpEntry { action: Action::FirstItem, description: "First card" },
-        HelpEntry { action: Action::LastItem, description: "Last card" },
-        HelpEntry { action: Action::NextTab, description: "Next column (wrap)" },
+        entry(Action::MoveDown, "help.entries.move_down"),
+        entry(Action::MoveUp, "help.entries.move_up"),
+        entry(Action::MoveLeft, "help.entries.move_left"),
+        entry(Action::MoveRight, "help.entries.move_right"),
+        entry(Action::FirstItem, "help.entries.first_item"),
+        entry(Action::LastItem, "help.entries.last_item"),
+        entry(Action::NextTab, "help.entries.next_tab"),
     ];
 
-    lines.push(Line::from(Span::styled(" Navigation", section_style)));
+    lines.push(Line::from(Span::styled(
+        format!(" {}", t!("help.sections.navigation")),
+        section_style,
+    )));
     add_section_lines(&mut lines, keymap, KeymapMode::Board, &nav_entries, key_style, desc_style);
 
     // Actions section (from Board mode)
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(" Actions", section_style)));
+    lines.push(Line::from(Span::styled(
+        format!(" {}", t!("help.sections.actions")),
+        section_style,
+    )));
     let action_entries = vec![
-        HelpEntry { action: Action::GrabCard, description: "Grab card (move mode)" },
-        HelpEntry { action: Action::NewCard, description: "New card (draft/issue)" },
-        HelpEntry { action: Action::ArchiveCard, description: "Archive card" },
-        HelpEntry { action: Action::ShowArchivedList, description: "Open archive page in browser" },
-        HelpEntry { action: Action::BulkSelectStart, description: "Bulk select mode (Space:toggle *:all a:archive H/L:move)" },
-        HelpEntry { action: Action::OpenDetail, description: "View card detail" },
-        HelpEntry { action: Action::SwitchProject, description: "Switch project" },
-        HelpEntry { action: Action::ChangeGrouping, description: "Change grouping field" },
-        HelpEntry { action: Action::ToggleLayout, description: "Toggle layout (Board/Table/Roadmap)" },
-        HelpEntry { action: Action::StartFilter, description: "Filter (label: assignee: milestone: no: is: -:NOT |:OR)" },
-        HelpEntry { action: Action::ClearFilter, description: "Clear filter / view" },
-        HelpEntry { action: Action::Refresh, description: "Refresh" },
-        HelpEntry { action: Action::ShowHelp, description: "Toggle help" },
-        HelpEntry { action: Action::Quit, description: "Quit" },
+        entry(Action::GrabCard, "help.entries.grab_card"),
+        entry(Action::NewCard, "help.entries.new_card"),
+        entry(Action::ArchiveCard, "help.entries.archive_card"),
+        entry(Action::ShowArchivedList, "help.entries.show_archived_list"),
+        entry(Action::BulkSelectStart, "help.entries.bulk_select"),
+        entry(Action::OpenDetail, "help.entries.open_detail"),
+        entry(Action::SwitchProject, "help.entries.switch_project"),
+        entry(Action::ChangeGrouping, "help.entries.change_grouping"),
+        entry(Action::ToggleLayout, "help.entries.toggle_layout"),
+        entry(Action::StartFilter, "help.entries.start_filter"),
+        entry(Action::ClearFilter, "help.entries.clear_filter"),
+        entry(Action::Refresh, "help.entries.refresh"),
+        entry(Action::ShowHelp, "help.entries.show_help"),
+        entry(Action::Quit, "help.entries.quit"),
     ];
     add_section_lines(&mut lines, keymap, KeymapMode::Board, &action_entries, key_style, desc_style);
 
     // Detail View (Content) section
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(" Detail View (Content)", section_style)));
+    lines.push(Line::from(Span::styled(
+        format!(" {}", t!("help.sections.detail_content")),
+        section_style,
+    )));
     let detail_entries = vec![
-        HelpEntry { action: Action::MoveDown, description: "Scroll" },
-        HelpEntry { action: Action::MoveLeft, description: "Table scroll" },
-        HelpEntry { action: Action::NextTab, description: "Switch to sidebar" },
-        HelpEntry { action: Action::OpenInBrowser, description: "Open in browser" },
-        HelpEntry { action: Action::EditCard, description: "Edit card" },
-        HelpEntry { action: Action::NewComment, description: "New comment" },
-        HelpEntry { action: Action::OpenCommentList, description: "Comment list" },
-        HelpEntry { action: Action::OpenReactionPicker, description: "Toggle reaction" },
+        entry(Action::MoveDown, "help.entries.detail_scroll"),
+        entry(Action::MoveLeft, "help.entries.detail_table_scroll"),
+        entry(Action::NextTab, "help.entries.detail_switch_sidebar"),
+        entry(Action::OpenInBrowser, "help.entries.open_in_browser"),
+        entry(Action::EditCard, "help.entries.edit_card"),
+        entry(Action::NewComment, "help.entries.new_comment"),
+        entry(Action::OpenCommentList, "help.entries.open_comment_list"),
+        entry(Action::OpenReactionPicker, "help.entries.toggle_reaction"),
     ];
     add_section_lines(&mut lines, keymap, KeymapMode::DetailContent, &detail_entries, key_style, desc_style);
 
     // Comment List section
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(" Comment List", section_style)));
+    lines.push(Line::from(Span::styled(
+        format!(" {}", t!("help.sections.comment_list")),
+        section_style,
+    )));
     let comment_list_entries = vec![
-        HelpEntry { action: Action::MoveDown, description: "Next comment" },
-        HelpEntry { action: Action::MoveUp, description: "Previous comment" },
-        HelpEntry { action: Action::EditComment, description: "Edit own comment" },
-        HelpEntry { action: Action::NewComment, description: "New comment" },
-        HelpEntry { action: Action::OpenReactionPicker, description: "Toggle reaction on selected" },
-        HelpEntry { action: Action::Back, description: "Back to detail" },
+        entry(Action::MoveDown, "help.entries.comment_next"),
+        entry(Action::MoveUp, "help.entries.comment_prev"),
+        entry(Action::EditComment, "help.entries.edit_own_comment"),
+        entry(Action::NewComment, "help.entries.new_comment"),
+        entry(Action::OpenReactionPicker, "help.entries.toggle_reaction_selected"),
+        entry(Action::Back, "help.entries.back_to_detail"),
     ];
     add_section_lines(&mut lines, keymap, KeymapMode::CommentList, &comment_list_entries, key_style, desc_style);
 
     // Detail View (Sidebar) section
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(" Detail View (Sidebar)", section_style)));
+    lines.push(Line::from(Span::styled(
+        format!(" {}", t!("help.sections.detail_sidebar")),
+        section_style,
+    )));
     let sidebar_entries = vec![
-        HelpEntry { action: Action::MoveDown, description: "Navigate sections (incl. custom fields)" },
-        HelpEntry { action: Action::Select, description: "Edit / Select" },
-        HelpEntry { action: Action::ArchiveCard, description: "Archive card" },
-        HelpEntry { action: Action::NextTab, description: "Switch to content" },
-        HelpEntry { action: Action::Back, description: "Back to content" },
+        entry(Action::MoveDown, "help.entries.sidebar_nav"),
+        entry(Action::Select, "help.entries.sidebar_select"),
+        entry(Action::ArchiveCard, "help.entries.archive_card"),
+        entry(Action::NextTab, "help.entries.sidebar_switch_content"),
+        entry(Action::Back, "help.entries.sidebar_back"),
     ];
     add_section_lines(&mut lines, keymap, KeymapMode::DetailSidebar, &sidebar_entries, key_style, desc_style);
     lines.push(Line::from(vec![
         Span::styled("  ──       ", key_style),
-        Span::styled("Custom fields: Enter opens picker / text input (Enter saves, Esc cancels)", desc_style),
+        Span::styled(t!("help.entries.custom_fields_hint").to_string(), desc_style),
     ]));
 
     // View switching (hardcoded, always shown)
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(" Views", section_style)));
+    lines.push(Line::from(Span::styled(
+        format!(" {}", t!("help.sections.views")),
+        section_style,
+    )));
     lines.push(Line::from(vec![
         Span::styled("  1-9     ", key_style),
-        Span::styled("Switch to view 1-9", desc_style),
+        Span::styled(t!("help.entries.view_switch").to_string(), desc_style),
     ]));
     lines.push(Line::from(vec![
         Span::styled("  0       ", key_style),
-        Span::styled("Show all (clear view)", desc_style),
+        Span::styled(t!("help.entries.view_clear").to_string(), desc_style),
     ]));
 
     let paragraph = Paragraph::new(lines).block(block);
@@ -173,7 +199,7 @@ fn add_section_lines(
         let padded = format!("  {:<10}", keys_str);
         lines.push(Line::from(vec![
             Span::styled(padded, key_style),
-            Span::styled(entry.description, desc_style),
+            Span::styled(entry.description.clone(), desc_style),
         ]));
     }
 }
