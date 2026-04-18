@@ -19,6 +19,10 @@ Set Height 700
 Set Theme "nord"
 Set TypingSpeed 60ms
 
+# Force English UI (help overlay etc.) regardless of host locale
+Env LANG "en_US.UTF-8"
+Env LC_ALL "en_US.UTF-8"
+
 Env GH_BOARD_DEMO_OWNER "@me"
 
 Hide
