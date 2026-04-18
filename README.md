@@ -6,6 +6,30 @@ A [gh](https://cli.github.com/) CLI extension to manage GitHub Projects V2 as a 
 
 ![demo](assets/demo.gif)
 
+## Quick Start
+
+```bash
+gh extension install uzimaru0000/gh-board
+gh board                       # pick from your projects
+gh board --owner <org> <num>   # open a specific project
+```
+
+## Why gh-board?
+
+| | gh-board | `gh project` (official) | Web UI |
+|---|---|---|---|
+| Kanban board view | ✅ | ❌ (list only) | ✅ |
+| Card detail with Markdown / comments / reactions | ✅ | ❌ | ✅ |
+| Drag & reorder with the keyboard | ✅ (`Space`) | ❌ | drag-only |
+| Roadmap / Iteration timeline | ✅ | ❌ | ✅ |
+| Bulk operations | ✅ | ❌ | partial |
+| Sub-issue navigation | ✅ | ❌ | ✅ |
+| Works fully offline-cached | ✅ | ❌ | ❌ |
+| No browser required | ✅ | ✅ | ❌ |
+
+If you live in the terminal but `gh project` feels too thin and the Web UI breaks
+your flow, gh-board fills the gap.
+
 ## Features
 
 - **Board / Table / Roadmap views** — switch between kanban board, table, and roadmap layouts
@@ -26,6 +50,12 @@ A [gh](https://cli.github.com/) CLI extension to manage GitHub Projects V2 as a 
 
 ```
 gh extension install uzimaru0000/gh-board
+```
+
+To upgrade later:
+
+```
+gh extension upgrade gh-board
 ```
 
 ## Usage

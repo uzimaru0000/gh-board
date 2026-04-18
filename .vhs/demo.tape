@@ -19,30 +19,30 @@ Set Height 700
 Set Theme "nord"
 Set TypingSpeed 60ms
 
-Env GH_BOARD_DEMO_OWNER "@me"
+# Force English UI (help overlay etc.) regardless of host locale
+Env LANG "en_US.UTF-8"
+Env LC_ALL "en_US.UTF-8"
 
-Hide
-Type `clear`
-Enter
-Type `: ${GH_BOARD_DEMO_PROJECT:?set GH_BOARD_DEMO_PROJECT to the demo project number}`
-Enter
-Show
-
-Type `gh board --owner "$GH_BOARD_DEMO_OWNER" "$GH_BOARD_DEMO_PROJECT"`
+Type `gh board --owner @me 2`
 Sleep 500ms
 Enter
 Sleep 3s
 
-# Navigate cards and columns
+# Navigate cards and columns — sweep across Todo / In Progress / Done,
+# then return to Todo as the launch pad for the rest of the demo
+Type "l"
+Sleep 300ms
 Type "j"
 Sleep 200ms
-Type "j"
+Type "k"
 Sleep 200ms
 Type "l"
 Sleep 300ms
 Type "j"
 Sleep 200ms
 Type "k"
+Sleep 200ms
+Type "h"
 Sleep 200ms
 Type "h"
 Sleep 500ms
@@ -78,6 +78,19 @@ Type "l"
 Sleep 400ms
 Space
 Sleep 1s
+
+# Bulk archive the Done column: jump there, select all, archive in one shot
+# (after grab we are on In Progress; Done is one column to the right)
+Tab
+Sleep 500ms
+Type "v"
+Sleep 800ms
+Type "*"
+Sleep 1s
+Type "a"
+Sleep 1200ms
+Type "y"
+Sleep 1500ms
 
 # Help overlay
 Type "?"
