@@ -282,6 +282,7 @@ impl GitHubClient {
             body: node.body,
             created_at: node.created_at,
             reactions,
+            url: Some(node.url),
         })
     }
 
@@ -306,6 +307,7 @@ impl GitHubClient {
             body: node.body,
             created_at: String::new(), // Will be filled by caller
             reactions: Vec::new(),
+            url: Some(node.url),
         })
     }
 

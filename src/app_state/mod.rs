@@ -189,6 +189,10 @@ pub struct AppState {
 
     /// Bulk 選択モード中に選ばれている item_id の集合。
     pub bulk_selected: std::collections::HashSet<String>,
+
+    /// ステータスラインの右側に一時表示するメッセージ (例: "Copied URL")。
+    /// 次のキー入力で自動クリアされる。
+    pub toast: Option<String>,
 }
 
 impl AppState {
@@ -238,6 +242,7 @@ impl AppState {
             previous_scene: None,
             update_available: None,
             bulk_selected: std::collections::HashSet::new(),
+            toast: None,
         }
     }
 
@@ -1018,6 +1023,9 @@ impl AppState {
         if key.kind != KeyEventKind::Press {
             return Command::None;
         }
+
+        // トーストは次のキー入力で消す (CopyUrl ハンドラが必要なら再設定する流れ)。
+        self.toast = None;
 
         // Clear error on any key press
         if matches!(self.loading, LoadingState::Error(_)) {
@@ -4050,6 +4058,7 @@ mod tests {
             body: body.into(),
             created_at: "2024-01-01T00:00:00Z".into(),
             reactions: vec![],
+            url: Some(format!("https://github.com/owner/repo/issues/1#issuecomment-{id}")),
         }
     }
 
@@ -4081,6 +4090,80 @@ mod tests {
             sub_issues_summary: None,
             sub_issues: vec![],
         }
+    }
+
+    // ========== URL コピー (OSC 52) テスト ==========
+
+    #[test]
+    fn detail_y_copies_card_url_and_sets_toast() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(state.mode, ViewMode::Detail);
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('y'))));
+        assert_eq!(
+            cmd,
+            Command::CopyToClipboard("https://github.com/owner/repo/issues/1".into())
+        );
+        assert!(state.toast.as_deref().unwrap_or("").contains("Copied URL"));
+    }
+
+    #[test]
+    fn detail_y_without_url_returns_none() {
+        let mut card = make_issue_card_with_comments("1", "Card A", vec![]);
+        card.url = None;
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('y'))));
+        assert_eq!(cmd, Command::None);
+        assert!(state.toast.is_none());
+    }
+
+    #[test]
+    fn comment_list_y_copies_selected_comment_url() {
+        let comments = vec![
+            make_comment("c1", "me", "first"),
+            make_comment("c2", "other", "second"),
+        ];
+        let card = make_issue_card_with_comments("1", "Card A", comments);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        // Detail → CommentList
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('C'))));
+        assert_eq!(state.mode, ViewMode::CommentList);
+
+        // 2 件目に移動してコピー
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('y'))));
+        assert_eq!(
+            cmd,
+            Command::CopyToClipboard(
+                "https://github.com/owner/repo/issues/1#issuecomment-c2".into()
+            )
+        );
+        assert!(state.toast.as_deref().unwrap_or("").contains("Copied URL"));
+    }
+
+    #[test]
+    fn toast_clears_on_next_key() {
+        let card = make_issue_card_with_comments("1", "Card A", vec![]);
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('y'))));
+        assert!(state.toast.is_some());
+
+        // 次のキー入力で消える
+        let _ = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert!(state.toast.is_none());
     }
 
     // ========== コメント投稿テスト ==========
@@ -4324,6 +4407,7 @@ mod tests {
             body: "updated body".into(),
             created_at: String::new(),
             reactions: vec![],
+            url: None,
         };
         let _ = state.handle_event(AppEvent::CommentUpdated(Ok(updated)));
 
@@ -6417,6 +6501,7 @@ mod tests {
                 body: "A comment".into(),
                 created_at: "2024-01-01T00:00:00Z".into(),
                 reactions: vec![],
+                url: None,
             }],
             reactions: vec![],
             linked_prs: vec![],
@@ -6450,6 +6535,7 @@ mod tests {
                 body: format!("comment {i}"),
                 created_at: "2024-01-01T00:00:00Z".into(),
                 reactions: vec![],
+                url: None,
             })
             .collect();
 

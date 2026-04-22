@@ -33,6 +33,7 @@ help:
     detail_table_scroll: "Table scroll"
     detail_switch_sidebar: "Switch to sidebar"
     open_in_browser: "Open in browser"
+    copy_url: "Copy URL to clipboard (OSC 52)"
     edit_card: "Edit card"
     new_comment: "New comment"
     open_comment_list: "Comment list"

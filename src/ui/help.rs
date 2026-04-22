@@ -120,6 +120,7 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         entry(Action::MoveLeft, "help.entries.detail_table_scroll"),
         entry(Action::NextTab, "help.entries.detail_switch_sidebar"),
         entry(Action::OpenInBrowser, "help.entries.open_in_browser"),
+        entry(Action::CopyUrl, "help.entries.copy_url"),
         entry(Action::EditCard, "help.entries.edit_card"),
         entry(Action::NewComment, "help.entries.new_comment"),
         entry(Action::OpenCommentList, "help.entries.open_comment_list"),
@@ -138,6 +139,7 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         entry(Action::MoveUp, "help.entries.comment_prev"),
         entry(Action::EditComment, "help.entries.edit_own_comment"),
         entry(Action::NewComment, "help.entries.new_comment"),
+        entry(Action::CopyUrl, "help.entries.copy_url"),
         entry(Action::OpenReactionPicker, "help.entries.toggle_reaction_selected"),
         entry(Action::Back, "help.entries.back_to_detail"),
     ];

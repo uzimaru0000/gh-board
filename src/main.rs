@@ -3,6 +3,7 @@ mod app;
 mod app_state;
 mod cache;
 mod cli;
+mod clipboard;
 mod color;
 mod command;
 mod config;

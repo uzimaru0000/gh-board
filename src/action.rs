@@ -34,6 +34,7 @@ pub enum Action {
     EditCard,
     NewComment,
     OpenCommentList,
+    CopyUrl,
 
     // Detail sidebar / confirm / grab / forms
     Select,

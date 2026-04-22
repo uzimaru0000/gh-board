@@ -541,6 +541,10 @@ impl App {
             Command::OpenUrl(url) => {
                 let _ = open::that(&url);
             }
+            Command::CopyToClipboard(text) => {
+                let mut stdout = std::io::stdout();
+                let _ = crate::clipboard::write_osc52(&mut stdout, &text);
+            }
             Command::UpdateCustomField {
                 project_id,
                 item_id,

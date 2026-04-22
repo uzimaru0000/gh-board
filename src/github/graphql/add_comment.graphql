@@ -3,6 +3,7 @@ mutation AddComment($subjectId: ID!, $body: String!) {
     commentEdge {
       node {
         id
+        url
         author { __typename login }
         body
         createdAt
