@@ -33,6 +33,7 @@ help:
     detail_table_scroll: "テーブル横スクロール"
     detail_switch_sidebar: "サイドバーへ"
     open_in_browser: "ブラウザで開く"
+    copy_url: "URL をクリップボードにコピー (OSC 52)"
     edit_card: "カード編集"
     new_comment: "新規コメント"
     open_comment_list: "コメント一覧"

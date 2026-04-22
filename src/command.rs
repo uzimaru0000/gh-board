@@ -115,6 +115,8 @@ pub enum Command {
         content: crate::model::project::ReactionContent,
     },
     OpenUrl(String),
+    /// OSC 52 でターミナルのクリップボードに文字列を書き込む
+    CopyToClipboard(String),
     UpdateCustomField {
         project_id: String,
         item_id: String,

@@ -12,6 +12,7 @@ query FetchCardDetail($id: ID!) {
       comments(first: 20) {
         nodes {
           id
+          url
           author { __typename login }
           body
           createdAt
@@ -42,6 +43,7 @@ query FetchCardDetail($id: ID!) {
       comments(first: 20) {
         nodes {
           id
+          url
           author { __typename login }
           body
           createdAt
