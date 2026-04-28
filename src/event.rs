@@ -25,6 +25,8 @@ pub enum MutationKind {
     CustomFieldUpdated,
     ReactionToggled,
     CardCreated,
+    /// Draft Issue を実 Issue にコンバートした (ボードの楽観的更新は不可なので必ずリフレッシュ)
+    DraftConverted,
 }
 
 pub enum AppEvent {

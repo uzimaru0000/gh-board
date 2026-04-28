@@ -19,6 +19,7 @@ pub enum Action {
     OpenDetail,
     GrabCard,
     NewCard,
+    ConvertDraftToIssue,
     ArchiveCard,
     ShowArchivedList,
     StartFilter,

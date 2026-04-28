@@ -14,8 +14,8 @@ use crate::model::state::{
     ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
     CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterCondition,
     FilterState, GrabState, GroupBySelectState, LayoutMode, LoadingState, NewCardType,
-    PendingIssueCreate, ReactionPickerState, ReactionTarget, RepoSelectState, Scene,
-    SidebarEditMode, SidebarSection, ViewMode,
+    PendingIssueCreate, ReactionPickerState, ReactionTarget, RepoSelectAction, RepoSelectState,
+    Scene, SidebarEditMode, SidebarSection, ViewMode,
 };
 #[cfg(test)]
 use crate::model::state::{SIDEBAR_ASSIGNEES, SIDEBAR_LABELS};
@@ -369,8 +369,8 @@ impl AppState {
         result: Result<(), String>,
     ) -> Command {
         match (kind, result) {
-            // CardCreated の Ok は新しいカードを反映するためリロード
-            (MutationKind::CardCreated, Ok(())) => {
+            // CardCreated / DraftConverted の Ok は新しい状態を反映するためリロード
+            (MutationKind::CardCreated | MutationKind::DraftConverted, Ok(())) => {
                 if let Some(project) = &self.current_project {
                     let id = project.id.clone();
                     self.start_loading_board(&id)
@@ -998,6 +998,7 @@ impl AppState {
                 self.mode = ViewMode::CreateCard;
                 Some(Command::None)
             }
+            Action::ConvertDraftToIssue => Some(self.start_convert_draft_to_issue()),
             Action::BulkSelectStart => {
                 self.enter_bulk_select();
                 Some(Command::None)
@@ -2674,7 +2675,10 @@ mod tests {
         assert!(state.repo_select_state().is_some());
         let rs = state.repo_select_state().unwrap();
         assert_eq!(rs.selected_index, 0);
-        assert_eq!(rs.pending_create.title, "My Issue");
+        let RepoSelectAction::CreateIssue(pending) = &rs.action else {
+            panic!("expected CreateIssue action");
+        };
+        assert_eq!(pending.title, "My Issue");
     }
 
     #[test]
@@ -2923,9 +2927,12 @@ mod tests {
 
         // RepoSelect に積まれた pending_create が filter 由来の値を保持していること
         let rs = state.repo_select_state().expect("repo select active");
-        assert_eq!(rs.pending_create.initial_label_names, vec!["bug".to_string()]);
+        let RepoSelectAction::CreateIssue(pending) = &rs.action else {
+            panic!("expected CreateIssue action");
+        };
+        assert_eq!(pending.initial_label_names, vec!["bug".to_string()]);
         assert_eq!(
-            rs.pending_create.initial_assignee_logins,
+            pending.initial_assignee_logins,
             vec!["alice".to_string()]
         );
     }
@@ -2958,7 +2965,7 @@ mod tests {
         let mut state = make_state_with_board(board);
         state.enter_repo_select(RepoSelectState {
             selected_index: 0,
-            pending_create: PendingIssueCreate {
+            action: RepoSelectAction::CreateIssue(PendingIssueCreate {
                 title: "My Issue".into(),
                 body: "body".into(),
                 initial_status: Some(crate::command::InitialStatus {
@@ -2967,7 +2974,7 @@ mod tests {
                 }),
                 initial_label_names: vec![],
                 initial_assignee_logins: vec![],
-            },
+            }),
         });
         state
     }
@@ -3028,6 +3035,154 @@ mod tests {
 
         assert_eq!(state.mode, ViewMode::Board);
         assert!(state.repo_select_state().is_none());
+    }
+
+    // ========== Draft → Issue 変換 ==========
+
+    fn make_draft_card_simple(item_id: &str, title: &str) -> Card {
+        let mut c = make_card(item_id, title);
+        c.card_type = CardType::DraftIssue;
+        c
+    }
+
+    fn make_open_issue_card(item_id: &str, title: &str) -> Card {
+        let mut c = make_card(item_id, title);
+        c.card_type = CardType::Issue {
+            state: crate::model::project::IssueState::Open,
+        };
+        c.content_id = Some(format!("issue_{item_id}"));
+        c
+    }
+
+    #[test]
+    fn test_convert_draft_single_repo_dispatches_command_directly() {
+        let board = make_board_with_repos(
+            vec![("Todo", "opt_1", vec![make_draft_card_simple("d1", "Draft A")])],
+            vec![("repo_1", "owner/repo")],
+        );
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('i'))));
+
+        assert_eq!(
+            cmd,
+            Command::ConvertDraftToIssue {
+                project_id: "proj_1".into(),
+                item_id: "d1".into(),
+                repository_id: "repo_1".into(),
+            }
+        );
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn test_convert_draft_multiple_repos_opens_repo_select() {
+        let board = make_board_with_repos(
+            vec![("Todo", "opt_1", vec![make_draft_card_simple("d1", "Draft A")])],
+            vec![("repo_1", "owner/repo1"), ("repo_2", "owner/repo2")],
+        );
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('i'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::RepoSelect);
+
+        let rs = state.repo_select_state().expect("repo select active");
+        match &rs.action {
+            RepoSelectAction::ConvertDraft { item_id, title } => {
+                assert_eq!(item_id, "d1");
+                assert_eq!(title, "Draft A");
+            }
+            other => panic!("expected ConvertDraft action, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_convert_draft_repo_select_enter_dispatches_convert_command() {
+        let board = make_board_with_repos(
+            vec![("Todo", "opt_1", vec![make_draft_card_simple("d1", "Draft A")])],
+            vec![("repo_1", "owner/repo1"), ("repo_2", "owner/repo2")],
+        );
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('i'))));
+        assert_eq!(state.mode, ViewMode::RepoSelect);
+
+        // 2 番目のリポジトリを選択して Enter
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        assert_eq!(
+            cmd,
+            Command::ConvertDraftToIssue {
+                project_id: "proj_1".into(),
+                item_id: "d1".into(),
+                repository_id: "repo_2".into(),
+            }
+        );
+        assert_eq!(state.mode, ViewMode::Board);
+        assert!(state.repo_select_state().is_none());
+    }
+
+    #[test]
+    fn test_convert_draft_on_issue_card_is_no_op() {
+        // Issue (実 issue) に対して i を押しても何も起きない
+        let board = make_board_with_repos(
+            vec![("Todo", "opt_1", vec![make_open_issue_card("i1", "Issue A")])],
+            vec![("repo_1", "owner/repo")],
+        );
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('i'))));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn test_convert_draft_no_repos_shows_error() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_draft_card_simple("d1", "Draft A")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('i'))));
+        assert_eq!(cmd, Command::None);
+        assert!(matches!(state.loading, LoadingState::Error(_)));
+    }
+
+    #[test]
+    fn test_convert_draft_from_detail_view_dispatches() {
+        let board = make_board_with_repos(
+            vec![("Todo", "opt_1", vec![make_draft_card_simple("d1", "Draft A")])],
+            vec![("repo_1", "owner/repo")],
+        );
+        let mut state = make_state_with_board(board);
+        state.selected_column = 0;
+        state.selected_card = 0;
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('i'))));
+
+        assert_eq!(
+            cmd,
+            Command::ConvertDraftToIssue {
+                project_id: "proj_1".into(),
+                item_id: "d1".into(),
+                repository_id: "repo_1".into(),
+            }
+        );
     }
 
     // ========== Body: $EDITOR ==========

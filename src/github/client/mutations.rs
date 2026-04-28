@@ -155,6 +155,23 @@ impl GitHubClient {
         Ok(item.id)
     }
 
+    pub async fn convert_draft_to_issue(
+        &self,
+        item_id: &str,
+        repository_id: &str,
+    ) -> anyhow::Result<String> {
+        let vars = convert_draft_issue::Variables {
+            item_id: item_id.to_string(),
+            repository_id: repository_id.to_string(),
+        };
+        let data = self.query::<ConvertDraftIssue>(vars).await?;
+        let item = data
+            .convert_project_v2_draft_issue_item_to_issue
+            .and_then(|p| p.item)
+            .context("Failed to convert draft issue to issue")?;
+        Ok(item.id)
+    }
+
     pub async fn add_labels(
         &self,
         content_id: &str,

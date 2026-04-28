@@ -237,7 +237,16 @@ pub enum ReactionTarget {
 #[derive(Clone, Debug)]
 pub struct RepoSelectState {
     pub selected_index: usize,
-    pub pending_create: PendingIssueCreate,
+    pub action: RepoSelectAction,
+}
+
+#[derive(Clone, Debug)]
+pub enum RepoSelectAction {
+    /// CreateCard モーダル経由の新規 Issue 作成
+    CreateIssue(PendingIssueCreate),
+    /// Draft Issue を Issue にコンバート (convertProjectV2DraftIssueItemToIssue)。
+    /// `title` はモーダルに「Convert "<title>" → Issue」と表示するためだけに保持する。
+    ConvertDraft { item_id: String, title: String },
 }
 
 #[derive(Clone, Debug)]

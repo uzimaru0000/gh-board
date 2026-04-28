@@ -17,6 +17,7 @@ help:
     next_tab: "Next column (wrap)"
     grab_card: "Grab card (move mode)"
     new_card: "New card (draft/issue)"
+    convert_draft_to_issue: "Convert draft to real issue"
     archive_card: "Archive card"
     show_archived_list: "Open archive page in browser"
     bulk_select: "Bulk select mode (Space:toggle *:all a:archive H/L:move)"

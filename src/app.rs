@@ -255,6 +255,24 @@ impl App {
                     ));
                 });
             }
+            Command::ConvertDraftToIssue {
+                project_id: _,
+                item_id,
+                repository_id,
+            } => {
+                let client = self.github.clone();
+                let tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = client
+                        .convert_draft_to_issue(&item_id, &repository_id)
+                        .await
+                        .map(|_| ());
+                    let _ = tx.send(AppEvent::Mutated(
+                        MutationKind::DraftConverted,
+                        result.map_err(|e| e.to_string()),
+                    ));
+                });
+            }
             Command::CreateCard {
                 project_id,
                 title,

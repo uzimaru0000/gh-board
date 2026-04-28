@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::model::project::Repository;
-use crate::model::state::RepoSelectState;
+use crate::model::state::{RepoSelectAction, RepoSelectState};
 use crate::ui::layout::modal_area_fixed;
 use crate::ui::theme::theme;
 
@@ -16,8 +16,14 @@ pub fn render(frame: &mut Frame, area: Rect, repos: &[Repository], state: &RepoS
     let popup = modal_area_fixed(50, height, area);
     frame.render_widget(Clear, popup);
 
+    let title: String = match &state.action {
+        RepoSelectAction::CreateIssue(_) => " Select Repository ".into(),
+        RepoSelectAction::ConvertDraft { title, .. } => {
+            format!(" Convert \"{title}\" → Issue: Select Repository ")
+        }
+    };
     let block = Block::default()
-        .title(" Select Repository ")
+        .title(title)
         .title_style(
             Style::default()
                 .fg(theme().accent)
