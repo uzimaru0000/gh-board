@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-04-28
+
+### Added
+
+- Convert draft issues to real issues with the `i` key in card detail (#83)
+- Inherit `label:` and `assignee:` filter values when creating new issues (#81)
+- Copy card URL to clipboard with the `y` key in detail view via OSC 52 (#80)
+
 ## [1.2.0] - 2026-04-18
 
 ### Added
@@ -119,6 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Wide character bleeding through detail modal left border
 
+[1.3.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.3.0
 [1.2.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.2.0
 [1.1.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.1.0
 [1.0.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.0.0
