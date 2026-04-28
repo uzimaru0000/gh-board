@@ -141,7 +141,21 @@ impl AppState {
             Action::NewComment => self.start_new_comment(),
             Action::OpenCommentList => self.open_comment_list(),
             Action::OpenReactionPicker => self.open_reaction_picker_for_card(),
+            Action::CopyUrl => self.copy_current_card_url(),
             _ => Command::None,
+        }
+    }
+
+    pub(super) fn copy_current_card_url(&mut self) -> Command {
+        let url = self
+            .current_detail_card()
+            .and_then(|c| c.url.clone());
+        match url {
+            Some(u) => {
+                self.toast = Some(format!("Copied URL: {u}"));
+                Command::CopyToClipboard(u)
+            }
+            None => Command::None,
         }
     }
 
@@ -649,8 +663,27 @@ impl AppState {
                 }
             }
             Action::OpenReactionPicker => self.open_reaction_picker_for_comment(),
+            Action::CopyUrl => self.copy_current_comment_url(),
             _ => Command::None,
         }
+    }
+
+    pub(super) fn copy_current_comment_url(&mut self) -> Command {
+        let cls = match self.comment_list_state() {
+            Some(s) => s,
+            None => return Command::None,
+        };
+        let cursor = cls.cursor;
+        let card = match self.selected_card_ref() {
+            Some(c) => c,
+            None => return Command::None,
+        };
+        let url = match card.comments.get(cursor).and_then(|c| c.url.clone()) {
+            Some(u) => u,
+            None => return Command::None,
+        };
+        self.toast = Some(format!("Copied URL: {url}"));
+        Command::CopyToClipboard(url)
     }
 
     pub(super) fn find_card_by_content_id_mut(&mut self, content_id: &str) -> Option<&mut Card> {

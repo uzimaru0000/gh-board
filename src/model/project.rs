@@ -316,6 +316,9 @@ pub struct Comment {
     pub body: String,
     pub created_at: String,
     pub reactions: Vec<ReactionSummary>,
+    /// Permalink (`https://github.com/.../#issuecomment-<id>`)。旧キャッシュ互換で省略可。
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

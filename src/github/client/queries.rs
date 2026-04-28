@@ -471,6 +471,7 @@ impl GitHubClient {
                                 body: c.body,
                                 created_at: c.created_at,
                                 reactions,
+                                url: Some(c.url),
                             });
                         }
                     }
@@ -489,6 +490,7 @@ impl GitHubClient {
                                 body: c.body,
                                 created_at: c.created_at,
                                 reactions,
+                                url: Some(c.url),
                             });
                         }
                     }
@@ -559,6 +561,7 @@ impl GitHubClient {
                             c.reaction_groups.as_ref(),
                             |g| (&g.content, g.reactors.total_count, g.viewer_has_reacted),
                         ),
+                        url: Some(c.url.clone()),
                     })
                     .collect()
             })
@@ -664,6 +667,7 @@ impl GitHubClient {
                                     c.reaction_groups.as_ref(),
                                     |g| (&g.content, g.reactors.total_count, g.viewer_has_reacted),
                                 ),
+                                url: Some(c.url.clone()),
                             })
                             .collect()
                     })
@@ -716,6 +720,7 @@ impl GitHubClient {
                             c.reaction_groups.as_ref(),
                             |g| (&g.content, g.reactors.total_count, g.viewer_has_reacted),
                         ),
+                        url: Some(c.url.clone()),
                     })
                     .collect()
             })

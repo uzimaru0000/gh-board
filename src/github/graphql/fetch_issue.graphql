@@ -19,6 +19,7 @@ query FetchIssue($id: ID!) {
       comments(first: 20) {
         nodes {
           id
+          url
           author { __typename login }
           body
           createdAt

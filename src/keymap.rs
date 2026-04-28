@@ -375,6 +375,7 @@ impl Keymap {
         detail_content.insert(KeyBind::char('c'), Action::NewComment);
         detail_content.insert(KeyBind::char('C'), Action::OpenCommentList);
         detail_content.insert(KeyBind::char('r'), Action::OpenReactionPicker);
+        detail_content.insert(KeyBind::char('y'), Action::CopyUrl);
         keymap.modes.insert(KeymapMode::DetailContent, detail_content);
 
         // Detail sidebar
@@ -424,6 +425,7 @@ impl Keymap {
         comment_list.insert(KeyBind::char('e'), Action::EditComment);
         comment_list.insert(KeyBind::char('c'), Action::NewComment);
         comment_list.insert(KeyBind::char('r'), Action::OpenReactionPicker);
+        comment_list.insert(KeyBind::char('y'), Action::CopyUrl);
         keymap.modes.insert(KeymapMode::CommentList, comment_list);
 
         // GroupBySelect mode
@@ -635,6 +637,7 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "edit_card" => Some(Action::EditCard),
         "new_comment" => Some(Action::NewComment),
         "open_comment_list" => Some(Action::OpenCommentList),
+        "copy_url" => Some(Action::CopyUrl),
         "select" => Some(Action::Select),
         "confirm_yes" => Some(Action::ConfirmYes),
         "confirm_no" => Some(Action::ConfirmNo),
@@ -691,6 +694,7 @@ pub fn action_name(action: Action) -> &'static str {
         Action::EditCard => "edit_card",
         Action::NewComment => "new_comment",
         Action::OpenCommentList => "open_comment_list",
+        Action::CopyUrl => "copy_url",
         Action::Select => "select",
         Action::ConfirmYes => "confirm_yes",
         Action::ConfirmNo => "confirm_no",

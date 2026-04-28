@@ -187,8 +187,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(line, status_area);
 
     // 右端に loading status (アニメーション付き) を重ねて描画
-    // loading が無いときに限り、update 通知を同じ位置に表示する
+    // loading が無いときに限り、toast → update 通知の順で同じ位置に表示する
     let right_line = build_loading_line(&app.state.loading)
+        .or_else(|| build_toast_line(app.state.toast.as_deref()))
         .or_else(|| build_update_line(app.state.update_available.as_deref()));
     if let Some(line) = right_line {
         let width = line.width() as u16;
@@ -215,6 +216,14 @@ pub(crate) fn loading_spinner_span(loading: &LoadingState) -> Option<Span<'stati
         }
         _ => None,
     }
+}
+
+fn build_toast_line(toast: Option<&str>) -> Option<Line<'static>> {
+    let msg = toast?;
+    let style = Style::default()
+        .fg(theme().green)
+        .add_modifier(Modifier::BOLD);
+    Some(Line::from(vec![Span::styled(format!("{msg} "), style)]))
 }
 
 fn build_update_line(update_available: Option<&str>) -> Option<Line<'static>> {

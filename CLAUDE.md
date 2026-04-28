@@ -94,6 +94,7 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 - c: 新規コメント投稿 ($EDITOR 経由、Issue/PR のみ)
 - C: コメント一覧 (ViewMode::CommentList) を開く
 - Enter/o: ブラウザで開く、Esc/q: ボードに戻る
+- y: 選択中カードの URL をクリップボードにコピー (OSC 52 経由、依存追加なし)。`ViewMode::CommentList` でも選択中のコメント URL をコピー可能。成功時は `AppState.toast` にメッセージをセットし、ステータスライン右端に一時表示 (次のキー入力で自動クリア)
 - Markdown レンダリング: tui-markdown でヘッダー・太字・コード等を装飾表示
 - テーブル: pulldown-cmark でパースし罫線文字で自前レンダリング。ビューポートに収まらないテーブルのみ h/l で横スクロール可能
 - 非テーブルテキストは表示幅に合わせて自動折り返し (wrap_line)

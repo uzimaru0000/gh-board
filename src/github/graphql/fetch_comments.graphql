@@ -6,6 +6,7 @@ query FetchComments($id: ID!, $cursor: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          url
           author { __typename login }
           body
           createdAt
@@ -22,6 +23,7 @@ query FetchComments($id: ID!, $cursor: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          url
           author { __typename login }
           body
           createdAt
