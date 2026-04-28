@@ -1,0 +1,9 @@
+mutation ConvertDraftIssue($itemId: ID!, $repositoryId: ID!) {
+  convertProjectV2DraftIssueItemToIssue(
+    input: { itemId: $itemId, repositoryId: $repositoryId }
+  ) {
+    item {
+      id
+    }
+  }
+}

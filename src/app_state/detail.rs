@@ -138,6 +138,7 @@ impl AppState {
                 Command::None
             }
             Action::EditCard => self.start_edit_card(),
+            Action::ConvertDraftToIssue => self.start_convert_draft_to_issue(),
             Action::NewComment => self.start_new_comment(),
             Action::OpenCommentList => self.open_comment_list(),
             Action::OpenReactionPicker => self.open_reaction_picker_for_card(),

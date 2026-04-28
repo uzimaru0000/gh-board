@@ -208,6 +208,73 @@ impl AppState {
         }
     }
 
+    /// 現在選択中のカードが Draft Issue であれば、convertProjectV2DraftIssueItemToIssue で
+    /// 実 Issue にコンバートする。リポジトリが 1 つなら直接 Command を返し、複数あれば
+    /// RepoSelect モーダルを開く。
+    pub(super) fn start_convert_draft_to_issue(&mut self) -> Command {
+        // detail_stack 上の Issue (ボード外) はコンバート対象外
+        if !self.detail_stack.is_empty() {
+            return Command::None;
+        }
+
+        let real_idx = match self.real_card_index() {
+            Some(idx) => idx,
+            None => return Command::None,
+        };
+
+        let card = match self
+            .board
+            .as_ref()
+            .and_then(|b| b.columns.get(self.selected_column))
+            .and_then(|c| c.cards.get(real_idx))
+        {
+            Some(c) => c,
+            None => return Command::None,
+        };
+
+        // Draft 以外は no-op
+        if !matches!(card.card_type, CardType::DraftIssue) {
+            return Command::None;
+        }
+
+        let item_id = card.item_id.clone();
+        let title = card.title.clone();
+
+        let project_id = match &self.current_project {
+            Some(p) => p.id.clone(),
+            None => return Command::None,
+        };
+
+        let repos = self
+            .board
+            .as_ref()
+            .map(|b| &b.repositories)
+            .cloned()
+            .unwrap_or_default();
+
+        if repos.is_empty() {
+            self.loading =
+                LoadingState::Error("No repositories linked to this project.".into());
+            return Command::None;
+        }
+
+        if repos.len() == 1 {
+            self.mode = ViewMode::Board;
+            self.loading = LoadingState::Loading("Converting draft to issue...".into());
+            return Command::ConvertDraftToIssue {
+                project_id,
+                item_id,
+                repository_id: repos[0].id.clone(),
+            };
+        }
+
+        self.enter_repo_select(RepoSelectState {
+            selected_index: 0,
+            action: super::RepoSelectAction::ConvertDraft { item_id, title },
+        });
+        Command::None
+    }
+
     pub(super) fn show_archived_list(&mut self) -> Command {
         // GitHub Projects V2 の GraphQL API では archived item を取得する手段が
         // 存在しない (items() の query 引数では `is:archived` が効かず、未指定時も
@@ -305,13 +372,13 @@ impl AppState {
                 // 複数リポジトリ → セレクタ表示
                 self.enter_repo_select(RepoSelectState {
                     selected_index: 0,
-                    pending_create: PendingIssueCreate {
+                    action: super::RepoSelectAction::CreateIssue(PendingIssueCreate {
                         title,
                         body,
                         initial_status,
                         initial_label_names,
                         initial_assignee_logins,
-                    },
+                    }),
                 });
                 Command::None
             }
@@ -380,17 +447,29 @@ impl AppState {
         };
 
         self.mode = ViewMode::Board;
-        self.loading = LoadingState::Loading("Creating issue...".into());
 
-        Command::CreateIssue {
-            project_id,
-            repository_id: repo.id,
-            repository_name_with_owner: repo.name_with_owner,
-            title: rs.pending_create.title,
-            body: rs.pending_create.body,
-            initial_status: rs.pending_create.initial_status,
-            initial_label_names: rs.pending_create.initial_label_names,
-            initial_assignee_logins: rs.pending_create.initial_assignee_logins,
+        match rs.action {
+            super::RepoSelectAction::CreateIssue(pending) => {
+                self.loading = LoadingState::Loading("Creating issue...".into());
+                Command::CreateIssue {
+                    project_id,
+                    repository_id: repo.id,
+                    repository_name_with_owner: repo.name_with_owner,
+                    title: pending.title,
+                    body: pending.body,
+                    initial_status: pending.initial_status,
+                    initial_label_names: pending.initial_label_names,
+                    initial_assignee_logins: pending.initial_assignee_logins,
+                }
+            }
+            super::RepoSelectAction::ConvertDraft { item_id, .. } => {
+                self.loading = LoadingState::Loading("Converting draft to issue...".into());
+                Command::ConvertDraftToIssue {
+                    project_id,
+                    item_id,
+                    repository_id: repo.id,
+                }
+            }
         }
     }
 

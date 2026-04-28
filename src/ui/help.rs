@@ -94,6 +94,7 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
     let action_entries = vec![
         entry(Action::GrabCard, "help.entries.grab_card"),
         entry(Action::NewCard, "help.entries.new_card"),
+        entry(Action::ConvertDraftToIssue, "help.entries.convert_draft_to_issue"),
         entry(Action::ArchiveCard, "help.entries.archive_card"),
         entry(Action::ShowArchivedList, "help.entries.show_archived_list"),
         entry(Action::BulkSelectStart, "help.entries.bulk_select"),
@@ -122,6 +123,7 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         entry(Action::OpenInBrowser, "help.entries.open_in_browser"),
         entry(Action::CopyUrl, "help.entries.copy_url"),
         entry(Action::EditCard, "help.entries.edit_card"),
+        entry(Action::ConvertDraftToIssue, "help.entries.convert_draft_to_issue"),
         entry(Action::NewComment, "help.entries.new_comment"),
         entry(Action::OpenCommentList, "help.entries.open_comment_list"),
         entry(Action::OpenReactionPicker, "help.entries.toggle_reaction"),

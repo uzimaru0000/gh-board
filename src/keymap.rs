@@ -222,6 +222,7 @@ impl Keymap {
         board.insert(KeyBind::char('A'), Action::ShowArchivedList);
         board.insert(KeyBind::char('v'), Action::BulkSelectStart);
         board.insert(KeyBind::char('n'), Action::NewCard);
+        board.insert(KeyBind::char('i'), Action::ConvertDraftToIssue);
         board.insert(KeyBind::char(' '), Action::GrabCard);
         board.insert(KeyBind::ctrl('g'), Action::ChangeGrouping);
         board.insert(KeyBind::char('t'), Action::ToggleLayout);
@@ -247,6 +248,7 @@ impl Keymap {
         table.insert(KeyBind::char('A'), Action::ShowArchivedList);
         table.insert(KeyBind::char('v'), Action::BulkSelectStart);
         table.insert(KeyBind::char('n'), Action::NewCard);
+        table.insert(KeyBind::char('i'), Action::ConvertDraftToIssue);
         table.insert(KeyBind::char(' '), Action::GrabCard);
         table.insert(KeyBind::ctrl('g'), Action::ChangeGrouping);
         table.insert(KeyBind::char('t'), Action::ToggleLayout);
@@ -372,6 +374,7 @@ impl Keymap {
         detail_content.insert(KeyBind::char('l'), Action::MoveRight);
         detail_content.insert(KeyBind::key(KeyCode::Right), Action::MoveRight);
         detail_content.insert(KeyBind::char('e'), Action::EditCard);
+        detail_content.insert(KeyBind::char('i'), Action::ConvertDraftToIssue);
         detail_content.insert(KeyBind::char('c'), Action::NewComment);
         detail_content.insert(KeyBind::char('C'), Action::OpenCommentList);
         detail_content.insert(KeyBind::char('r'), Action::OpenReactionPicker);
@@ -624,6 +627,7 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "open_detail" => Some(Action::OpenDetail),
         "grab_card" => Some(Action::GrabCard),
         "new_card" => Some(Action::NewCard),
+        "convert_draft_to_issue" => Some(Action::ConvertDraftToIssue),
         "archive_card" => Some(Action::ArchiveCard),
         "show_archived_list" => Some(Action::ShowArchivedList),
         "start_filter" => Some(Action::StartFilter),
@@ -681,6 +685,7 @@ pub fn action_name(action: Action) -> &'static str {
         Action::OpenDetail => "open_detail",
         Action::GrabCard => "grab_card",
         Action::NewCard => "new_card",
+        Action::ConvertDraftToIssue => "convert_draft_to_issue",
         Action::ArchiveCard => "archive_card",
         Action::ShowArchivedList => "show_archived_list",
         Action::StartFilter => "start_filter",

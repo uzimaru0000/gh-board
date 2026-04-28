@@ -32,6 +32,13 @@ pub enum Command {
         project_id: String,
         item_id: String,
     },
+    /// Draft Issue (ProjectV2DraftIssue) を実 Issue にコンバートする。
+    /// `convertProjectV2DraftIssueItemToIssue` mutation を呼び、完了後にボードをリフレッシュする。
+    ConvertDraftToIssue {
+        project_id: String,
+        item_id: String,
+        repository_id: String,
+    },
     CreateCard {
         project_id: String,
         title: String,

@@ -17,6 +17,7 @@ help:
     next_tab: "次のカラム (ラップ)"
     grab_card: "カードを掴む (移動モード)"
     new_card: "新規カード (draft/issue)"
+    convert_draft_to_issue: "Draft を Issue にコンバート"
     archive_card: "カードをアーカイブ"
     show_archived_list: "アーカイブ一覧をブラウザで開く"
     bulk_select: "一括選択モード (Space:選択 *:全選択 a:アーカイブ H/L:移動)"
