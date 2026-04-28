@@ -10,8 +10,18 @@ use crate::model::state::{CreateCardField, CreateCardState, NewCardType};
 use crate::ui::layout::modal_area_fixed;
 use crate::ui::theme::theme;
 
-pub fn render(frame: &mut Frame, area: Rect, state: &CreateCardState) {
-    let popup = modal_area_fixed(60, 21, area);
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    state: &CreateCardState,
+    inherit_labels: &[String],
+    inherit_assignees: &[String],
+) {
+    let inherit_visible = matches!(state.card_type, NewCardType::Issue)
+        && (!inherit_labels.is_empty() || !inherit_assignees.is_empty());
+    let inherit_height: u16 = if inherit_visible { 2 } else { 0 };
+    let popup_height = 21 + inherit_height;
+    let popup = modal_area_fixed(60, popup_height, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -37,7 +47,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &CreateCardState) {
     let input_style = Style::default().fg(theme().text);
     let hint_style = Style::default().fg(theme().text_muted);
 
-    // Layout: Type(2) + gap(1) + Title(3) + gap(1) + Body(2) + gap(1) + Submit(3) + hints
+    // Layout: Type(2) + gap(1) + Title(3) + gap(1) + Body(2) + gap(1) + Submit(3) + Inherit(?) + hints
     let chunks = Layout::vertical([
         Constraint::Length(2), // Type
         Constraint::Length(1), // gap
@@ -46,6 +56,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &CreateCardState) {
         Constraint::Length(2), // Body
         Constraint::Length(1), // gap
         Constraint::Length(3), // Submit button
+        Constraint::Length(inherit_height),
         Constraint::Min(0),    // hints
     ])
     .split(inner);
@@ -97,8 +108,44 @@ pub fn render(frame: &mut Frame, area: Rect, state: &CreateCardState) {
     let submit_enabled = !state.title_input.trim().is_empty();
     render_submit_button(frame, chunks[6], submit_focused, submit_enabled);
 
+    // --- Filter inheritance hint ---
+    if inherit_visible {
+        let inherit_area = chunks[7];
+        if inherit_area.height >= 2 {
+            let mut spans = vec![
+                Span::raw("  "),
+                Span::styled(
+                    "From filter:",
+                    Style::default().fg(theme().text_muted),
+                ),
+            ];
+            if !inherit_labels.is_empty() {
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled("labels=", hint_style));
+                spans.push(Span::styled(
+                    inherit_labels.join(","),
+                    Style::default().fg(theme().yellow),
+                ));
+            }
+            if !inherit_assignees.is_empty() {
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled("assignees=", hint_style));
+                spans.push(Span::styled(
+                    inherit_assignees.join(","),
+                    Style::default().fg(theme().yellow),
+                ));
+            }
+            let line1 = Line::from(spans);
+            let line2 = Line::from(Span::styled(
+                "  (resolved against repo on submit)",
+                Style::default().fg(theme().text_muted),
+            ));
+            frame.render_widget(Paragraph::new(vec![line1, line2]), inherit_area);
+        }
+    }
+
     // --- Hints ---
-    let hint_area = chunks[7];
+    let hint_area = chunks[8];
     if hint_area.height >= 1 {
         let hint_line = Line::from(vec![
             Span::raw("  "),

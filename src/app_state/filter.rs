@@ -236,4 +236,46 @@ impl AppState {
         }
         Command::None
     }
+
+    /// アクティブなフィルタからカード作成時に引き継ぐラベル名を抽出する。
+    /// 単一 AND グループのみを対象にし、`Not` は無視する (引き継ぐとカード作成と矛盾するため)。
+    /// OR を含むフィルタは曖昧なため空で返す。
+    pub fn derive_initial_label_names_from_filter(&self) -> Vec<String> {
+        let Some(filter) = self.filter.active_filter.as_ref() else {
+            return Vec::new();
+        };
+        if filter.groups.len() != 1 {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for cond in &filter.groups[0] {
+            if let FilterCondition::Label(name) = cond
+                && !out.contains(name)
+            {
+                out.push(name.clone());
+            }
+        }
+        out
+    }
+
+    /// アクティブなフィルタからカード作成時に引き継ぐ assignee ログイン名を抽出する。
+    /// `@` プレフィックスは除去済みで返す。OR を含む場合は空。
+    pub fn derive_initial_assignee_logins_from_filter(&self) -> Vec<String> {
+        let Some(filter) = self.filter.active_filter.as_ref() else {
+            return Vec::new();
+        };
+        if filter.groups.len() != 1 {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for cond in &filter.groups[0] {
+            if let FilterCondition::Assignee(login) = cond {
+                let stripped = login.strip_prefix('@').unwrap_or(login).to_string();
+                if !stripped.is_empty() && !out.contains(&stripped) {
+                    out.push(stripped);
+                }
+            }
+        }
+        out
+    }
 }

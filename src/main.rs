@@ -279,7 +279,15 @@ fn render(frame: &mut Frame, app: &App) {
         Scene::CreateCard => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
-            ui::create_card::render(frame, area, &app.state.create_card_state);
+            let inherit_labels = app.state.derive_initial_label_names_from_filter();
+            let inherit_assignees = app.state.derive_initial_assignee_logins_from_filter();
+            ui::create_card::render(
+                frame,
+                area,
+                &app.state.create_card_state,
+                &inherit_labels,
+                &inherit_assignees,
+            );
         }
         Scene::Detail => {
             render_board_with_tabs(frame, main_area, app);

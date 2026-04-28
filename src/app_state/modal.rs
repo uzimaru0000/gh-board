@@ -284,15 +284,21 @@ impl AppState {
                     return Command::None;
                 }
 
+                let initial_label_names = self.derive_initial_label_names_from_filter();
+                let initial_assignee_logins = self.derive_initial_assignee_logins_from_filter();
+
                 if repos.len() == 1 {
                     self.mode = ViewMode::Board;
                     self.loading = LoadingState::Loading("Creating issue...".into());
                     return Command::CreateIssue {
                         project_id,
                         repository_id: repos[0].id.clone(),
+                        repository_name_with_owner: repos[0].name_with_owner.clone(),
                         title,
                         body,
                         initial_status,
+                        initial_label_names,
+                        initial_assignee_logins,
                     };
                 }
 
@@ -303,6 +309,8 @@ impl AppState {
                         title,
                         body,
                         initial_status,
+                        initial_label_names,
+                        initial_assignee_logins,
                     },
                 });
                 Command::None
@@ -360,14 +368,14 @@ impl AppState {
             None => return Command::None,
         };
 
-        let repository_id = self
+        let repo = self
             .board
             .as_ref()
             .and_then(|b| b.repositories.get(rs.selected_index))
-            .map(|r| r.id.clone());
+            .cloned();
 
-        let repository_id = match repository_id {
-            Some(id) => id,
+        let repo = match repo {
+            Some(r) => r,
             None => return Command::None,
         };
 
@@ -376,10 +384,13 @@ impl AppState {
 
         Command::CreateIssue {
             project_id,
-            repository_id,
+            repository_id: repo.id,
+            repository_name_with_owner: repo.name_with_owner,
             title: rs.pending_create.title,
             body: rs.pending_create.body,
             initial_status: rs.pending_create.initial_status,
+            initial_label_names: rs.pending_create.initial_label_names,
+            initial_assignee_logins: rs.pending_create.initial_assignee_logins,
         }
     }
 

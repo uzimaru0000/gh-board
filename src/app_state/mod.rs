@@ -12,10 +12,10 @@ use crate::model::project::{
 };
 use crate::model::state::{
     ActiveFilter, CommentListState, ConfirmAction, ConfirmState, CreateCardField,
-    CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterState, GrabState,
-    GroupBySelectState, LayoutMode, LoadingState, NewCardType, PendingIssueCreate,
-    ReactionPickerState, ReactionTarget, RepoSelectState, Scene, SidebarEditMode, SidebarSection,
-    ViewMode,
+    CreateCardState, DetailPane, EditCardField, EditCardState, EditItem, FilterCondition,
+    FilterState, GrabState, GroupBySelectState, LayoutMode, LoadingState, NewCardType,
+    PendingIssueCreate, ReactionPickerState, ReactionTarget, RepoSelectState, Scene,
+    SidebarEditMode, SidebarSection, ViewMode,
 };
 #[cfg(test)]
 use crate::model::state::{SIDEBAR_ASSIGNEES, SIDEBAR_LABELS};
@@ -2632,12 +2632,15 @@ mod tests {
             Command::CreateIssue {
                 project_id: "proj_1".into(),
                 repository_id: "repo_1".into(),
+                repository_name_with_owner: "owner/repo".into(),
                 title: "My Issue".into(),
                 body: "body".into(),
                 initial_status: Some(crate::command::InitialStatus {
                     field_id: "field_1".into(),
                     option_id: "opt_1".into(),
                 }),
+                initial_label_names: vec![],
+                initial_assignee_logins: vec![],
             }
         );
         assert_eq!(state.mode, ViewMode::Board);
@@ -2729,6 +2732,168 @@ mod tests {
         assert!(state.can_submit_create_card());
     }
 
+    // ========== フィルタ条件を新規 Issue に反映 (#78) ==========
+
+    fn issue_repo_board() -> Board {
+        make_board_with_repos(
+            vec![("Todo", "opt_1", vec![make_card("1", "A")])],
+            vec![("repo_1", "owner/repo1")],
+        )
+    }
+
+    fn submit_new_issue(state: &mut AppState) -> Command {
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state.card_type = NewCardType::Issue;
+        state.create_card_state.title_input = "My Issue".into();
+        state.create_card_state.body_input = "body".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
+        state.handle_event(AppEvent::Key(key(KeyCode::Enter)))
+    }
+
+    #[test]
+    fn test_create_issue_inherits_filter_label_and_assignee() {
+        let mut state = make_state_with_board(issue_repo_board());
+        state.filter.active_filter =
+            Some(ActiveFilter::parse("label:bug assignee:alice"));
+
+        let cmd = submit_new_issue(&mut state);
+
+        match cmd {
+            Command::CreateIssue {
+                initial_label_names,
+                initial_assignee_logins,
+                ..
+            } => {
+                assert_eq!(initial_label_names, vec!["bug".to_string()]);
+                assert_eq!(initial_assignee_logins, vec!["alice".to_string()]);
+            }
+            other => panic!("expected CreateIssue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_create_issue_strips_at_prefix_from_assignee_filter() {
+        let mut state = make_state_with_board(issue_repo_board());
+        state.filter.active_filter = Some(ActiveFilter::parse("assignee:@me"));
+
+        let cmd = submit_new_issue(&mut state);
+
+        match cmd {
+            Command::CreateIssue {
+                initial_assignee_logins,
+                ..
+            } => {
+                assert_eq!(initial_assignee_logins, vec!["me".to_string()]);
+            }
+            other => panic!("expected CreateIssue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_create_issue_ignores_or_groups() {
+        // OR の場合はどちらを採るか曖昧なので空にする
+        let mut state = make_state_with_board(issue_repo_board());
+        state.filter.active_filter =
+            Some(ActiveFilter::parse("label:bug | label:enhancement"));
+
+        let cmd = submit_new_issue(&mut state);
+
+        match cmd {
+            Command::CreateIssue {
+                initial_label_names,
+                initial_assignee_logins,
+                ..
+            } => {
+                assert!(initial_label_names.is_empty());
+                assert!(initial_assignee_logins.is_empty());
+            }
+            other => panic!("expected CreateIssue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_create_issue_ignores_negated_conditions() {
+        let mut state = make_state_with_board(issue_repo_board());
+        state.filter.active_filter =
+            Some(ActiveFilter::parse("label:bug -assignee:alice"));
+
+        let cmd = submit_new_issue(&mut state);
+
+        match cmd {
+            Command::CreateIssue {
+                initial_label_names,
+                initial_assignee_logins,
+                ..
+            } => {
+                assert_eq!(initial_label_names, vec!["bug".to_string()]);
+                assert!(initial_assignee_logins.is_empty());
+            }
+            other => panic!("expected CreateIssue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_create_issue_no_filter_yields_empty_extras() {
+        let mut state = make_state_with_board(issue_repo_board());
+        // active_filter はデフォルトで None
+
+        let cmd = submit_new_issue(&mut state);
+
+        match cmd {
+            Command::CreateIssue {
+                initial_label_names,
+                initial_assignee_logins,
+                ..
+            } => {
+                assert!(initial_label_names.is_empty());
+                assert!(initial_assignee_logins.is_empty());
+            }
+            other => panic!("expected CreateIssue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_create_draft_ignores_filter_label_and_assignee() {
+        // Draft Issue は label/assignee を持てないので CreateCard には含めない
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter =
+            Some(ActiveFilter::parse("label:bug assignee:alice"));
+        state.mode = ViewMode::CreateCard;
+        state.create_card_state.card_type = NewCardType::Draft;
+        state.create_card_state.title_input = "Draft Title".into();
+        state.create_card_state.focused_field = CreateCardField::Submit;
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+
+        // CreateCard には label/assignee フィールドがそもそも無い (Draft で設定不可)
+        match cmd {
+            Command::CreateCard { .. } => {}
+            other => panic!("expected CreateCard, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_create_issue_filter_pending_create_for_multi_repo() {
+        let board = make_board_with_repos(
+            vec![("Todo", "opt_1", vec![make_card("1", "A")])],
+            vec![("repo_1", "owner/repo1"), ("repo_2", "owner/repo2")],
+        );
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter =
+            Some(ActiveFilter::parse("label:bug assignee:alice"));
+
+        submit_new_issue(&mut state);
+
+        // RepoSelect に積まれた pending_create が filter 由来の値を保持していること
+        let rs = state.repo_select_state().expect("repo select active");
+        assert_eq!(rs.pending_create.initial_label_names, vec!["bug".to_string()]);
+        assert_eq!(
+            rs.pending_create.initial_assignee_logins,
+            vec!["alice".to_string()]
+        );
+    }
+
     #[test]
     fn test_create_card_ctrl_s_no_longer_submits() {
         let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
@@ -2764,6 +2929,8 @@ mod tests {
                     field_id: "field_1".into(),
                     option_id: "opt_1".into(),
                 }),
+                initial_label_names: vec![],
+                initial_assignee_logins: vec![],
             },
         });
         state
@@ -2802,12 +2969,15 @@ mod tests {
             Command::CreateIssue {
                 project_id: "proj_1".into(),
                 repository_id: "repo_2".into(),
+                repository_name_with_owner: "owner/repo2".into(),
                 title: "My Issue".into(),
                 body: "body".into(),
                 initial_status: Some(crate::command::InitialStatus {
                     field_id: "field_1".into(),
                     option_id: "opt_1".into(),
                 }),
+                initial_label_names: vec![],
+                initial_assignee_logins: vec![],
             }
         );
         assert_eq!(state.mode, ViewMode::Board);
