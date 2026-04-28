@@ -2874,6 +2874,34 @@ mod tests {
     }
 
     #[test]
+    fn test_create_issue_inherits_filter_from_view() {
+        // config の view で定義された filter を `1` で適用 → そのまま新規 Issue に引き継ぐ
+        let mut state = make_state_with_board(issue_repo_board());
+        state.views = vec![crate::config::ViewConfig {
+            name: "Bugs".into(),
+            filter: "label:bug assignee:alice".into(),
+            layout: None,
+        }];
+        // 数字キーで view を適用 (filter.active_filter がセットされる)
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('1'))));
+        assert!(state.filter.active_filter.is_some());
+
+        let cmd = submit_new_issue(&mut state);
+
+        match cmd {
+            Command::CreateIssue {
+                initial_label_names,
+                initial_assignee_logins,
+                ..
+            } => {
+                assert_eq!(initial_label_names, vec!["bug".to_string()]);
+                assert_eq!(initial_assignee_logins, vec!["alice".to_string()]);
+            }
+            other => panic!("expected CreateIssue, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_create_issue_filter_pending_create_for_multi_repo() {
         let board = make_board_with_repos(
             vec![("Todo", "opt_1", vec![make_card("1", "A")])],
