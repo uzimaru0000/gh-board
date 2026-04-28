@@ -42,9 +42,18 @@ pub enum Command {
     CreateIssue {
         project_id: String,
         repository_id: String,
+        /// `<owner>/<name>` 形式。`initial_label_names` / `initial_assignee_logins` が
+        /// 空でないとき、repo の labels / assignable users を引くのに使う。
+        repository_name_with_owner: String,
         title: String,
         body: String,
         initial_status: Option<InitialStatus>,
+        /// アクティブなフィルタの `label:<name>` 条件から抽出したラベル名。
+        /// Issue 作成後に repo の labels を引いて id を解決し、付与する。
+        initial_label_names: Vec<String>,
+        /// アクティブなフィルタの `assignee:<login>` 条件から抽出したログイン名 (`@` プレフィックスは除去済み)。
+        /// Issue 作成後に repo の assignable users を引いて id を解決し、付与する。
+        initial_assignee_logins: Vec<String>,
     },
     OpenEditor {
         content: String,

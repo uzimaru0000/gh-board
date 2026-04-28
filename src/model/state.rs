@@ -245,6 +245,8 @@ pub struct PendingIssueCreate {
     pub title: String,
     pub body: String,
     pub initial_status: Option<super::super::command::InitialStatus>,
+    pub initial_label_names: Vec<String>,
+    pub initial_assignee_logins: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

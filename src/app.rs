@@ -292,9 +292,12 @@ impl App {
             Command::CreateIssue {
                 project_id,
                 repository_id,
+                repository_name_with_owner,
                 title,
                 body,
                 initial_status,
+                initial_label_names,
+                initial_assignee_logins,
             } => {
                 let client = self.github.clone();
                 let tx = self.event_tx.clone();
@@ -321,6 +324,69 @@ impl App {
                                 )
                                 .await
                                 .map_err(|e| e.to_string())?;
+                        }
+
+                        if !initial_label_names.is_empty()
+                            || !initial_assignee_logins.is_empty()
+                        {
+                            let (owner, name) = match repository_name_with_owner.split_once('/') {
+                                Some((o, n)) => (o.to_string(), n.to_string()),
+                                None => return Ok(()),
+                            };
+
+                            if !initial_label_names.is_empty() {
+                                let labels = client
+                                    .get_repo_labels(&owner, &name)
+                                    .await
+                                    .map_err(|e| e.to_string())?;
+                                let label_ids: Vec<String> = initial_label_names
+                                    .iter()
+                                    .filter_map(|wanted| {
+                                        labels
+                                            .iter()
+                                            .find(|l| {
+                                                l.name.eq_ignore_ascii_case(wanted)
+                                                    || l.name
+                                                        .to_lowercase()
+                                                        .contains(&wanted.to_lowercase())
+                                            })
+                                            .map(|l| l.id.clone())
+                                    })
+                                    .collect();
+                                if !label_ids.is_empty() {
+                                    client
+                                        .add_labels(&issue_id, label_ids)
+                                        .await
+                                        .map_err(|e| e.to_string())?;
+                                }
+                            }
+
+                            if !initial_assignee_logins.is_empty() {
+                                let users = client
+                                    .get_assignable_users(&owner, &name)
+                                    .await
+                                    .map_err(|e| e.to_string())?;
+                                let user_ids: Vec<String> = initial_assignee_logins
+                                    .iter()
+                                    .filter_map(|wanted| {
+                                        users
+                                            .iter()
+                                            .find(|(_, login)| {
+                                                login.eq_ignore_ascii_case(wanted)
+                                                    || login
+                                                        .to_lowercase()
+                                                        .contains(&wanted.to_lowercase())
+                                            })
+                                            .map(|(id, _)| id.clone())
+                                    })
+                                    .collect();
+                                if !user_ids.is_empty() {
+                                    client
+                                        .add_assignees(&issue_id, user_ids)
+                                        .await
+                                        .map_err(|e| e.to_string())?;
+                                }
+                            }
                         }
                         Ok(())
                     }
