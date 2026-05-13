@@ -57,17 +57,17 @@ Each item includes `custom_fields` containing all project field values (Priority
 ### Card
 
 ```bash
-# Create a draft issue on the project
+# Create a draft issue on the project (default)
 gh board card create <NUMBER> --title <TITLE> [--body <BODY>] [--owner <LOGIN>] [--status <STATUS_NAME>]
 
 # Create a real issue and add it to the project
-gh board card create-issue <NUMBER> --repo <OWNER/REPO> --title <TITLE> [--body <BODY>] [--owner <LOGIN>] [--status <STATUS_NAME>]
+gh board card create <NUMBER> --card-type issue --repo <OWNER/REPO> --title <TITLE> [--body <BODY>] [--owner <LOGIN>] [--status <STATUS_NAME>]
 
 # Get card details (Issue only, by content node ID)
 gh board card get <CONTENT_ID>
 
 # Edit a card (update title/body)
-gh board card edit <CONTENT_ID> --type <draft|issue|pr> --title <TITLE> [--body <BODY>]
+gh board card edit <CONTENT_ID> --card-type <draft|issue|pr> --title <TITLE> [--body <BODY>]
 
 # Move a card (update a field value)
 gh board card move <PROJECT_ID> <ITEM_ID> --field-id <FIELD_ID> --value <VALUE> [--value-type <single_select|iteration|text|number|date>]
@@ -136,7 +136,7 @@ gh board board view 5 --owner myorg
 gh board card create 5 --owner myorg --title "Fix login bug" --body "Details..." --status "In Progress"
 
 # Or create a real issue in a repo
-gh board card create-issue 5 --owner myorg --repo myorg/myrepo --title "Fix login bug" --status "Todo"
+gh board card create 5 --owner myorg --card-type issue --repo myorg/myrepo --title "Fix login bug" --status "Todo"
 ```
 
 ### 3. Move a card to a different status
