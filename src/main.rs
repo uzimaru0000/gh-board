@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
@@ -85,7 +86,10 @@ async fn main() -> Result<()> {
     let github = GitHubClient::new().await?;
 
     let mut terminal = ratatui::init();
+    // マウスキャプチャを有効化 (ratatui::init は raw_mode と AlternateScreen のみ)
+    let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let result = run(&mut terminal, github, cli, cfg).await;
+    let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
 
     result
@@ -127,12 +131,12 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg
         if let Some(content) = app.pending_editor.take() {
             events.pause();
             disable_raw_mode()?;
-            crossterm::execute!(std::io::stdout(), LeaveAlternateScreen)?;
+            crossterm::execute!(std::io::stdout(), DisableMouseCapture, LeaveAlternateScreen)?;
 
             let result = run_editor(&content);
 
             enable_raw_mode()?;
-            crossterm::execute!(std::io::stdout(), EnterAlternateScreen)?;
+            crossterm::execute!(std::io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
             terminal.clear()?;
             events.resume();
 

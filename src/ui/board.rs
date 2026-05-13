@@ -8,7 +8,7 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::app_state::AppState;
+use crate::app_state::{AppState, BoardClickRegion};
 use crate::model::state::ViewMode;
 use crate::ui::card::{CardWidget, CARD_HEIGHT};
 use crate::ui::scroll_fade::{draw_bottom_arrow, draw_left_arrow, draw_right_arrow, draw_top_arrow};
@@ -53,6 +53,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let constraints = column_constraints(render_count, area.width);
 
     let col_areas = Layout::horizontal(constraints).split(area);
+
+    // マウスクリック判定用に毎フレーム再構築 (カラム背景 + 各カード)
+    let mut click_regions: Vec<BoardClickRegion> = Vec::new();
 
     for (vis_idx, col_idx) in (scroll_x..end).enumerate() {
         let column = &board.columns[col_idx];
@@ -175,10 +178,24 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 card_area,
             );
 
+            click_regions.push(BoardClickRegion {
+                area: card_area,
+                column_index: col_idx,
+                card_index: Some(display_idx),
+            });
+
             if grabbing {
                 grab_shadow_area = Some(card_area);
             }
         }
+
+        // カラム背景: カードに該当しないクリックでもカラム選択を更新できるよう、
+        // カラム領域全体をフォールバックとして最後に push する。
+        click_regions.push(BoardClickRegion {
+            area: col_area,
+            column_index: col_idx,
+            card_index: None,
+        });
 
         // 影は全カード描画後に描画（次のカードに上書きされないように）
         if let Some(area) = grab_shadow_area {
@@ -207,6 +224,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if has_right {
         draw_right_arrow(buf, area);
     }
+
+    *app.state.board_click_regions.borrow_mut() = click_regions;
 }
 
 /// 描画するカラム数と利用可能幅から horizontal Layout 用の Constraint 配列を返す。

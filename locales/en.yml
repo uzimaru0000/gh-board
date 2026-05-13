@@ -7,6 +7,7 @@ help:
     comment_list: "Comment List"
     detail_sidebar: "Detail View (Sidebar)"
     views: "Views"
+    mouse: "Mouse"
   entries:
     move_down: "Next card"
     move_up: "Previous card"
@@ -51,3 +52,6 @@ help:
     custom_fields_hint: "Custom fields: Enter opens picker / text input (Enter saves, Esc cancels)"
     view_switch: "Switch to view 1-9"
     view_clear: "Show all (clear view)"
+    mouse_click_card: "Click card to select; click selected card again to open detail"
+    mouse_wheel_board: "Scroll wheel: move card selection up/down"
+    mouse_wheel_detail: "Scroll wheel: scroll detail content"

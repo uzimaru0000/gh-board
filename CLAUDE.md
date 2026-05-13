@@ -87,6 +87,15 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 - Ctrl+g: グループ化軸の切替 (SingleSelect / Iteration field から選択)
 - p: プロジェクト切替、r: リフレッシュ、?: ヘルプ、q/Esc: 終了
 
+### マウス操作
+- 起動時に `EnableMouseCapture` を crossterm 経由で execute (`ratatui::init` は raw_mode + AlternateScreen のみカバーするため自前で追加)
+- ボード画面: 左クリックでカードを選択。**選択中のカードを再度クリック**するとカード詳細を開く (ダブルクリック相当)。空カラムや背景のクリックはカラム選択のみ更新
+- ボード画面: マウスホイールで現在カラムのカード選択を上下に移動 (j/k 相当、`filtered_card_indices` の範囲で clamp)
+- 詳細ビュー: マウスホイールで本文を縦スクロール (`detail_max_scroll` で clamp)
+- ヒットテスト: `ui/board.rs` 描画時に `AppState.board_click_regions: RefCell<Vec<BoardClickRegion>>` へカード/カラム背景の Rect を書き戻し、`handle_mouse` でこのリストを線形検索 (前方優先 = カード優先 → カラム背景がフォールバック)
+- `$EDITOR` 起動時は `DisableMouseCapture` してから AlternateScreen を抜け、復帰時に `EnableMouseCapture` を再実行
+- マウスキャプチャ中はターミナルのテキスト選択が無効化される。macOS Terminal/iTerm2 では Option/Shift 修飾で回避可能
+
 ### カード詳細ビュー (ViewMode::Detail)
 - Enter でボード上のカードを選択すると 80%×80% のモーダルポップアップを表示
 - 表示内容: 状態、アサイニー、ラベル、本文 (Markdown)、コメント (全件取得)

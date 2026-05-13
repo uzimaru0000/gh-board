@@ -1,4 +1,5 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 
 use crate::action::Action;
 use crate::command::Command;
@@ -76,6 +77,13 @@ fn format_number(n: f64) -> String {
     } else {
         format!("{n}")
     }
+}
+
+fn point_in_rect(x: u16, y: u16, rect: Rect) -> bool {
+    x >= rect.x
+        && x < rect.x.saturating_add(rect.width)
+        && y >= rect.y
+        && y < rect.y.saturating_add(rect.height)
 }
 
 fn is_valid_iso_date(s: &str) -> bool {
@@ -193,6 +201,21 @@ pub struct AppState {
     /// ステータスラインの右側に一時表示するメッセージ (例: "Copied URL")。
     /// 次のキー入力で自動クリアされる。
     pub toast: Option<String>,
+
+    /// マウスクリック判定用に、ボード描画時に書き戻すカード/カラム領域。
+    /// 描画→入力の順で更新されるため Cell で UI 側から書き戻す。
+    /// 各エントリの優先順位は要素順 (前方優先 = カード領域がカラム背景より先)。
+    pub board_click_regions: std::cell::RefCell<Vec<BoardClickRegion>>,
+}
+
+/// ボード上でマウスクリック対象となる領域。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoardClickRegion {
+    pub area: Rect,
+    pub column_index: usize,
+    /// `Some(display_idx)`: フィルタ後の表示インデックスを selected_card に設定。
+    /// `None`: カラム背景 (カラム選択のみ)。
+    pub card_index: Option<usize>,
 }
 
 impl AppState {
@@ -243,6 +266,7 @@ impl AppState {
             update_available: None,
             bulk_selected: std::collections::HashSet::new(),
             toast: None,
+            board_click_regions: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -951,7 +975,80 @@ impl AppState {
                 Command::None
             }
             AppEvent::Tick | AppEvent::Resize(_, _) => Command::None,
+            AppEvent::Mouse(me) => self.handle_mouse(me),
         }
+    }
+
+    /// マウスイベントの分岐: 現状は Board / Detail / CommentList のスクロールと、
+    /// Board でのクリック選択 + 再クリックでの詳細表示を扱う。
+    /// その他のモードでは現時点では無視する。
+    fn handle_mouse(&mut self, me: MouseEvent) -> Command {
+        // ロード/エラー中は無視 (キー入力と同じ振る舞い)
+        if matches!(
+            self.loading,
+            LoadingState::Loading(_) | LoadingState::Error(_)
+        ) {
+            return Command::None;
+        }
+
+        match (&self.mode, me.kind) {
+            (ViewMode::Board, MouseEventKind::Down(crossterm::event::MouseButton::Left)) => {
+                self.handle_board_click(me.column, me.row)
+            }
+            (ViewMode::Board, MouseEventKind::ScrollDown) => {
+                let len = self.filtered_card_indices(self.selected_column).len();
+                if len > 0 {
+                    self.selected_card = (self.selected_card + 1).min(len - 1);
+                }
+                Command::None
+            }
+            (ViewMode::Board, MouseEventKind::ScrollUp) => {
+                self.selected_card = self.selected_card.saturating_sub(1);
+                Command::None
+            }
+            (ViewMode::Detail, MouseEventKind::ScrollDown) => {
+                let max = self.detail_max_scroll.get();
+                self.detail_scroll = (self.detail_scroll + 1).min(max);
+                Command::None
+            }
+            (ViewMode::Detail, MouseEventKind::ScrollUp) => {
+                self.detail_scroll = self.detail_scroll.saturating_sub(1);
+                Command::None
+            }
+            _ => Command::None,
+        }
+    }
+
+    /// クリック位置 (x, y) からヒットするカード/カラムを引き、選択を更新する。
+    /// 既に選択中のカードを再度クリックした場合は詳細ビューを開く。
+    fn handle_board_click(&mut self, x: u16, y: u16) -> Command {
+        let hit = self
+            .board_click_regions
+            .borrow()
+            .iter()
+            .find(|r| point_in_rect(x, y, r.area))
+            .copied();
+        let Some(region) = hit else {
+            return Command::None;
+        };
+
+        let col_changed = region.column_index != self.selected_column;
+        if col_changed {
+            self.selected_column = region.column_index;
+            self.selected_card = 0;
+        }
+
+        if let Some(idx) = region.card_index {
+            // 同じカラムの同じカードを再度クリック → 詳細を開く (ダブルクリック相当)
+            if !col_changed && self.selected_card == idx {
+                return self.open_detail_view();
+            }
+            self.selected_card = idx;
+        } else {
+            // カラム背景: カード選択は変更しない (clamp のみ)
+            self.clamp_card_selection();
+        }
+        Command::None
     }
 
     /// Board/Table/Roadmap ハンドラで共通のアクション処理。
@@ -7056,5 +7153,214 @@ mod tests {
         let cmd = state.handle_event(AppEvent::UpdateAvailable("1.2.0".into()));
         assert_eq!(state.update_available, Some("1.2.0".into()));
         assert_eq!(cmd, Command::None);
+    }
+
+    // ========== Mouse support ==========
+
+    fn mouse(kind: crossterm::event::MouseEventKind, column: u16, row: u16) -> crossterm::event::MouseEvent {
+        crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn make_two_column_state() -> AppState {
+        let board = make_board(vec![
+            (
+                "Todo",
+                "opt_1",
+                vec![
+                    make_card("1", "A"),
+                    make_card("2", "B"),
+                    make_card("3", "C"),
+                ],
+            ),
+            ("Done", "opt_2", vec![make_card("4", "D")]),
+        ]);
+        make_state_with_board(board)
+    }
+
+    #[test]
+    fn mouse_scroll_down_moves_card_selection_in_board() {
+        let mut state = make_two_column_state();
+        let cmd = state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollDown,
+            0,
+            0,
+        )));
+        assert_eq!(state.selected_card, 1);
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn mouse_scroll_up_moves_card_selection_in_board() {
+        let mut state = make_two_column_state();
+        state.selected_card = 2;
+        let cmd = state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollUp,
+            0,
+            0,
+        )));
+        assert_eq!(state.selected_card, 1);
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn mouse_scroll_down_does_not_exceed_card_count() {
+        let mut state = make_two_column_state();
+        state.selected_card = 2; // 末尾
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollDown,
+            0,
+            0,
+        )));
+        assert_eq!(state.selected_card, 2);
+    }
+
+    fn set_click_regions(state: &AppState, regions: Vec<BoardClickRegion>) {
+        *state.board_click_regions.borrow_mut() = regions;
+    }
+
+    #[test]
+    fn mouse_click_on_card_selects_it() {
+        let mut state = make_two_column_state();
+        set_click_regions(
+            &state,
+            vec![BoardClickRegion {
+                area: Rect { x: 0, y: 0, width: 30, height: 3 },
+                column_index: 0,
+                card_index: Some(2),
+            }],
+        );
+
+        let cmd = state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            1,
+        )));
+        assert_eq!(state.selected_column, 0);
+        assert_eq!(state.selected_card, 2);
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn mouse_click_on_selected_card_opens_detail_view() {
+        let mut state = make_two_column_state();
+        state.selected_card = 1;
+        set_click_regions(
+            &state,
+            vec![BoardClickRegion {
+                area: Rect { x: 0, y: 3, width: 30, height: 3 },
+                column_index: 0,
+                card_index: Some(1),
+            }],
+        );
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            4,
+        )));
+        assert_eq!(state.mode, ViewMode::Detail);
+    }
+
+    #[test]
+    fn mouse_click_other_column_resets_card_index() {
+        let mut state = make_two_column_state();
+        state.selected_card = 2;
+        set_click_regions(
+            &state,
+            vec![
+                BoardClickRegion {
+                    area: Rect { x: 30, y: 0, width: 30, height: 3 },
+                    column_index: 1,
+                    card_index: Some(0),
+                },
+            ],
+        );
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            35,
+            1,
+        )));
+        assert_eq!(state.selected_column, 1);
+        // 別カラムへの移動でカード位置は 0 にリセットされ、その後に区域の display_idx=0 を適用
+        assert_eq!(state.selected_card, 0);
+    }
+
+    #[test]
+    fn mouse_click_on_column_background_keeps_card_selection() {
+        let mut state = make_two_column_state();
+        state.selected_card = 1;
+        set_click_regions(
+            &state,
+            vec![BoardClickRegion {
+                area: Rect { x: 0, y: 0, width: 30, height: 20 },
+                column_index: 0,
+                card_index: None,
+            }],
+        );
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            10,
+            15,
+        )));
+        assert_eq!(state.selected_column, 0);
+        assert_eq!(state.selected_card, 1);
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn mouse_click_outside_any_region_is_noop() {
+        let mut state = make_two_column_state();
+        state.selected_card = 2;
+        // regions が空なら何も起きない
+        let cmd = state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            5,
+        )));
+        assert_eq!(state.selected_card, 2);
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn mouse_scroll_in_detail_view_changes_scroll_offset() {
+        let mut state = make_two_column_state();
+        state.mode = ViewMode::Detail;
+        state.detail_max_scroll.set(10);
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollDown,
+            0,
+            0,
+        )));
+        assert_eq!(state.detail_scroll, 1);
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollUp,
+            0,
+            0,
+        )));
+        assert_eq!(state.detail_scroll, 0);
+    }
+
+    #[test]
+    fn mouse_scroll_in_detail_view_clamps_to_max() {
+        let mut state = make_two_column_state();
+        state.mode = ViewMode::Detail;
+        state.detail_max_scroll.set(2);
+        state.detail_scroll = 2;
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollDown,
+            0,
+            0,
+        )));
+        assert_eq!(state.detail_scroll, 2);
     }
 }
