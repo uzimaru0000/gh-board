@@ -59,3 +59,4 @@ help:
     mouse_wheel_detail: "ホイール: 詳細ビューの本文をスクロール"
     mouse_click_tab: "View タブをクリックで切替"
     mouse_click_outside_modal: "詳細モーダル外をクリックで閉じる"
+    mouse_click_sidebar: "サイドバーセクションをクリックで選択。再クリックで編集/開く"

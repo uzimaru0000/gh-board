@@ -215,6 +215,10 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         Span::styled("  Click     ", key_style),
         Span::styled(t!("help.entries.mouse_click_outside_modal").to_string(), desc_style),
     ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Click     ", key_style),
+        Span::styled(t!("help.entries.mouse_click_sidebar").to_string(), desc_style),
+    ]));
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, popup);

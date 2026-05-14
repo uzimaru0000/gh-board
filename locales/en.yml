@@ -59,3 +59,4 @@ help:
     mouse_wheel_detail: "Scroll wheel: scroll detail content"
     mouse_click_tab: "Click view tab to switch view"
     mouse_click_outside_modal: "Click outside detail modal to close it"
+    mouse_click_sidebar: "Click sidebar section to focus; click again to edit / open"

@@ -132,6 +132,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let left_area = horiz_chunks[0];
     let right_area = horiz_chunks[1];
 
+    app.state.detail_content_area.set(Some(left_area));
     render_content_pane(frame, left_area, app, card);
     render_sidebar(frame, right_area, app);
 

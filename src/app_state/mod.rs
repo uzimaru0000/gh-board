@@ -219,6 +219,15 @@ pub struct AppState {
     /// Down(Left) → Up(Left) の間で、ドラッグ可能なカードを保持する。
     /// Up 時の座標と比較して、同じ位置ならクリック扱い、違う位置なら drop として処理する。
     pub(crate) pending_drag: Option<PendingDrag>,
+
+    /// 詳細ビューのサイドバー各セクションのクリック判定領域。
+    /// `ui/detail/sidebar` 描画時に書き戻し、Detail モードの Down(Left) がヒットすれば
+    /// `detail_pane = Sidebar` + `sidebar_selected` を更新、再クリックで Action::Select 相当。
+    pub detail_sidebar_regions: std::cell::RefCell<Vec<DetailSidebarRegion>>,
+
+    /// 詳細ビューの content ペイン領域 (サイドバーを除いた本文側)。
+    /// Detail モードでクリックされたときに detail_pane を Content に切り替える判定用。
+    pub detail_content_area: std::cell::Cell<Option<Rect>>,
 }
 
 /// マウスドラッグ用の中間状態。Down(Left) で立ち、Up(Left) で take される。
@@ -240,6 +249,13 @@ pub struct BoardClickRegion {
     /// `Some(display_idx)`: フィルタ後の表示インデックスを selected_card に設定。
     /// `None`: カラム背景 (カラム選択のみ)。
     pub card_index: Option<usize>,
+}
+
+/// 詳細ビュー サイドバーのクリック判定領域。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DetailSidebarRegion {
+    pub area: Rect,
+    pub section_index: usize,
 }
 
 /// View タブのクリック判定領域。
@@ -302,6 +318,8 @@ impl AppState {
             view_tab_regions: std::cell::RefCell::new(Vec::new()),
             detail_modal_area: std::cell::Cell::new(None),
             pending_drag: None,
+            detail_sidebar_regions: std::cell::RefCell::new(Vec::new()),
+            detail_content_area: std::cell::Cell::new(None),
         }
     }
 
@@ -1086,15 +1104,7 @@ impl AppState {
                 Command::None
             }
             (ViewMode::Detail, MouseEventKind::Down(crossterm::event::MouseButton::Left)) => {
-                if let Some(area) = self.detail_modal_area.get()
-                    && !point_in_rect(me.column, me.row, area)
-                {
-                    // モーダル外クリック: sub-issue スタックを 1 段戻すか、無ければ Board に戻る
-                    if !self.pop_detail_stack() {
-                        self.mode = ViewMode::Board;
-                    }
-                }
-                Command::None
+                self.handle_detail_mouse_down(me.column, me.row)
             }
             (ViewMode::CommentList, MouseEventKind::Down(crossterm::event::MouseButton::Left)) => {
                 if let Some(area) = self.detail_modal_area.get()
@@ -1204,6 +1214,46 @@ impl AppState {
         } else {
             // カラム背景: カード選択は変更しない (clamp のみ)
             self.clamp_card_selection();
+        }
+        Command::None
+    }
+
+    /// Detail モードの Down(Left): モーダル外なら閉じる、サイドバーセクションヒットで選択 / 再クリックで実行、
+    /// content 領域なら detail_pane を Content に切り替え。
+    fn handle_detail_mouse_down(&mut self, x: u16, y: u16) -> Command {
+        // モーダル外クリック → 閉じる
+        if let Some(area) = self.detail_modal_area.get()
+            && !point_in_rect(x, y, area)
+        {
+            if !self.pop_detail_stack() {
+                self.mode = ViewMode::Board;
+            }
+            return Command::None;
+        }
+
+        // サイドバーリージョンにヒット?
+        let sidebar_hit = self
+            .detail_sidebar_regions
+            .borrow()
+            .iter()
+            .find(|r| point_in_rect(x, y, r.area))
+            .copied();
+        if let Some(region) = sidebar_hit {
+            let was_focused = self.detail_pane == DetailPane::Sidebar
+                && self.sidebar_selected == region.section_index;
+            self.detail_pane = DetailPane::Sidebar;
+            self.sidebar_selected = region.section_index;
+            if was_focused {
+                return self.handle_detail_sidebar_action(Action::Select);
+            }
+            return Command::None;
+        }
+
+        // content 領域内にヒット (サイドバー以外のモーダル内) → Content ペインに切り替え
+        if let Some(content) = self.detail_content_area.get()
+            && point_in_rect(x, y, content)
+        {
+            self.detail_pane = DetailPane::Content;
         }
         Command::None
     }
@@ -8016,6 +8066,64 @@ mod tests {
             30,
             10,
         )));
+        assert_eq!(state.mode, ViewMode::Detail);
+    }
+
+    fn set_sidebar_regions(state: &AppState, regions: Vec<DetailSidebarRegion>) {
+        *state.detail_sidebar_regions.borrow_mut() = regions;
+    }
+
+    #[test]
+    fn mouse_click_sidebar_section_switches_pane_and_selection() {
+        let mut state = make_two_column_state();
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Content;
+        state.detail_modal_area.set(Some(Rect {
+            x: 10,
+            y: 5,
+            width: 60,
+            height: 20,
+        }));
+        set_sidebar_regions(
+            &state,
+            vec![DetailSidebarRegion {
+                area: Rect { x: 50, y: 6, width: 18, height: 3 },
+                section_index: SIDEBAR_LABELS,
+            }],
+        );
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            55,
+            7,
+        )));
+        assert_eq!(state.detail_pane, DetailPane::Sidebar);
+        assert_eq!(state.sidebar_selected, SIDEBAR_LABELS);
+        assert_eq!(state.mode, ViewMode::Detail);
+    }
+
+    #[test]
+    fn mouse_click_sidebar_content_area_switches_to_content_pane() {
+        let mut state = make_two_column_state();
+        state.mode = ViewMode::Detail;
+        state.detail_pane = DetailPane::Sidebar;
+        state.detail_modal_area.set(Some(Rect {
+            x: 10,
+            y: 5,
+            width: 60,
+            height: 20,
+        }));
+        state.detail_content_area.set(Some(Rect {
+            x: 10,
+            y: 5,
+            width: 38,
+            height: 20,
+        }));
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            20,
+            10,
+        )));
+        assert_eq!(state.detail_pane, DetailPane::Content);
         assert_eq!(state.mode, ViewMode::Detail);
     }
 

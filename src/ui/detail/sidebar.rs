@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::app_state::DetailSidebarRegion;
 use crate::color::parse_hex_color;
 use crate::model::project::{CardType, ColumnColor, CustomFieldValue, IssueState, PrState};
 use crate::model::state::{
@@ -26,6 +27,7 @@ pub(super) fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     if let Some(edit) = &app.state.sidebar_edit {
+        app.state.detail_sidebar_regions.borrow_mut().clear();
         render_sidebar_edit(frame, area, edit);
         return;
     }
@@ -382,6 +384,40 @@ pub(super) fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         0
     };
+
+    // クリック判定領域 (各セクション) を AppState に書き戻す。
+    // scroll で隠れた範囲はスキップ、inner 範囲を超える分は clamp する。
+    let mut regions: Vec<DetailSidebarRegion> = Vec::new();
+    let section_count = sections_layout.len();
+    for i in 0..section_count {
+        let start = section_line_offsets[i];
+        let end = if i + 1 < section_count {
+            section_line_offsets[i + 1]
+        } else {
+            total_lines
+        };
+        if end <= scroll {
+            continue;
+        }
+        if start >= scroll + visible {
+            continue;
+        }
+        let visible_start = start.saturating_sub(scroll);
+        let visible_end = (end - scroll).min(visible);
+        if visible_end <= visible_start {
+            continue;
+        }
+        regions.push(DetailSidebarRegion {
+            area: Rect {
+                x: inner.x,
+                y: inner.y + visible_start,
+                width: inner.width,
+                height: visible_end - visible_start,
+            },
+            section_index: i,
+        });
+    }
+    *app.state.detail_sidebar_regions.borrow_mut() = regions;
 
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
