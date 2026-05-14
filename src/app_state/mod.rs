@@ -228,6 +228,17 @@ pub struct AppState {
     /// 詳細ビューの content ペイン領域 (サイドバーを除いた本文側)。
     /// Detail モードでクリックされたときに detail_pane を Content に切り替える判定用。
     pub detail_content_area: std::cell::Cell<Option<Rect>>,
+
+    /// サイドバー編集モード (Labels / Assignees / CustomField の picker) の各 item の
+    /// クリック判定領域。`ui/detail/sidebar::render_sidebar_edit` で書き戻す。
+    pub sidebar_edit_item_regions: std::cell::RefCell<Vec<SidebarEditItemRegion>>,
+}
+
+/// サイドバー編集モード picker の item クリック判定領域。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SidebarEditItemRegion {
+    pub area: Rect,
+    pub item_index: usize,
 }
 
 /// マウスドラッグ用の中間状態。Down(Left) で立ち、Up(Left) で take される。
@@ -320,6 +331,7 @@ impl AppState {
             pending_drag: None,
             detail_sidebar_regions: std::cell::RefCell::new(Vec::new()),
             detail_content_area: std::cell::Cell::new(None),
+            sidebar_edit_item_regions: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -1095,12 +1107,20 @@ impl AppState {
                 Command::None
             }
             (ViewMode::Detail, MouseEventKind::ScrollDown) => {
-                let max = self.detail_max_scroll.get();
-                self.detail_scroll = (self.detail_scroll + 1).min(max);
+                if self.sidebar_edit.is_some() {
+                    self.move_sidebar_edit_cursor(1);
+                } else {
+                    let max = self.detail_max_scroll.get();
+                    self.detail_scroll = (self.detail_scroll + 1).min(max);
+                }
                 Command::None
             }
             (ViewMode::Detail, MouseEventKind::ScrollUp) => {
-                self.detail_scroll = self.detail_scroll.saturating_sub(1);
+                if self.sidebar_edit.is_some() {
+                    self.move_sidebar_edit_cursor(-1);
+                } else {
+                    self.detail_scroll = self.detail_scroll.saturating_sub(1);
+                }
                 Command::None
             }
             (ViewMode::Detail, MouseEventKind::Down(crossterm::event::MouseButton::Left)) => {
@@ -1220,7 +1240,25 @@ impl AppState {
 
     /// Detail モードの Down(Left): モーダル外なら閉じる、サイドバーセクションヒットで選択 / 再クリックで実行、
     /// content 領域なら detail_pane を Content に切り替え。
+    /// `sidebar_edit` 中は picker 内の item クリックで cursor 更新 + toggle、外側クリックで edit を閉じる。
     fn handle_detail_mouse_down(&mut self, x: u16, y: u16) -> Command {
+        // サイドバー編集中 (Labels/Assignees/CustomField picker): item クリック優先
+        if self.sidebar_edit.is_some() {
+            let hit = self
+                .sidebar_edit_item_regions
+                .borrow()
+                .iter()
+                .find(|r| point_in_rect(x, y, r.area))
+                .copied();
+            if let Some(region) = hit {
+                self.set_sidebar_edit_cursor(region.item_index);
+                return self.toggle_sidebar_edit_item();
+            }
+            // 編集モード中の外側クリック → 編集を閉じる (内側のヘッダ等もここで吸収)
+            self.sidebar_edit = None;
+            return Command::None;
+        }
+
         // モーダル外クリック → 閉じる
         if let Some(area) = self.detail_modal_area.get()
             && !point_in_rect(x, y, area)
@@ -1256,6 +1294,51 @@ impl AppState {
             self.detail_pane = DetailPane::Content;
         }
         Command::None
+    }
+
+    /// `sidebar_edit` の cursor を更新する。items_len で clamp。
+    fn set_sidebar_edit_cursor(&mut self, index: usize) {
+        let Some(edit) = &mut self.sidebar_edit else { return };
+        match edit {
+            SidebarEditMode::Labels { items, cursor } => {
+                *cursor = index.min(items.len().saturating_sub(1));
+            }
+            SidebarEditMode::Assignees { items, cursor } => {
+                *cursor = index.min(items.len().saturating_sub(1));
+            }
+            SidebarEditMode::CustomFieldSingleSelect { options, cursor, .. } => {
+                *cursor = index.min(options.len()); // +1 for "None"
+            }
+            SidebarEditMode::CustomFieldIteration { iterations, cursor, .. } => {
+                *cursor = index.min(iterations.len());
+            }
+            SidebarEditMode::CustomFieldText { .. }
+            | SidebarEditMode::CustomFieldNumber { .. }
+            | SidebarEditMode::CustomFieldDate { .. } => {}
+        }
+    }
+
+    /// `sidebar_edit` の cursor を delta だけ動かす (clamp 付き)。マウスホイール用。
+    fn move_sidebar_edit_cursor(&mut self, delta: i32) {
+        let Some(edit) = &mut self.sidebar_edit else { return };
+        let (items_len, cursor) = match edit {
+            SidebarEditMode::Labels { items, cursor } => (items.len(), cursor),
+            SidebarEditMode::Assignees { items, cursor } => (items.len(), cursor),
+            SidebarEditMode::CustomFieldSingleSelect { options, cursor, .. } => {
+                (options.len() + 1, cursor)
+            }
+            SidebarEditMode::CustomFieldIteration { iterations, cursor, .. } => {
+                (iterations.len() + 1, cursor)
+            }
+            SidebarEditMode::CustomFieldText { .. }
+            | SidebarEditMode::CustomFieldNumber { .. }
+            | SidebarEditMode::CustomFieldDate { .. } => return,
+        };
+        if items_len == 0 {
+            return;
+        }
+        let next = (*cursor as i32 + delta).clamp(0, items_len as i32 - 1) as usize;
+        *cursor = next;
     }
 
     /// Board / CardGrab モードの Drag(Left): 初回で grab に入り、以降は hover 位置に楽観的に移動する。
@@ -8125,6 +8208,115 @@ mod tests {
         )));
         assert_eq!(state.detail_pane, DetailPane::Content);
         assert_eq!(state.mode, ViewMode::Detail);
+    }
+
+    fn set_sidebar_edit_item_regions(state: &AppState, regions: Vec<SidebarEditItemRegion>) {
+        *state.sidebar_edit_item_regions.borrow_mut() = regions;
+    }
+
+    fn make_labels_edit_state() -> AppState {
+        let mut state = make_two_column_state();
+        state.mode = ViewMode::Detail;
+        state.sidebar_edit = Some(SidebarEditMode::Labels {
+            items: vec![
+                EditItem {
+                    id: "L1".into(),
+                    name: "bug".into(),
+                    color: Some("d73a4a".into()),
+                    applied: false,
+                },
+                EditItem {
+                    id: "L2".into(),
+                    name: "enhancement".into(),
+                    color: Some("a2eeef".into()),
+                    applied: false,
+                },
+            ],
+            cursor: 0,
+        });
+        state.detail_modal_area.set(Some(Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 30,
+        }));
+        state
+    }
+
+    fn cursor_of_labels_edit(state: &AppState) -> Option<usize> {
+        match &state.sidebar_edit {
+            Some(SidebarEditMode::Labels { cursor, .. }) => Some(*cursor),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn mouse_click_picker_item_updates_cursor_and_toggles() {
+        let mut state = make_labels_edit_state();
+        // Card に content_id を付けないと toggle 用の API 呼び出しが None になる。
+        // ここではテスト用に selected card の content_id をセットしておく。
+        if let Some(b) = state.board.as_mut() {
+            b.columns[0].cards[1].content_id = Some("ISSUE_2".into());
+        }
+        state.selected_card = 1;
+
+        set_sidebar_edit_item_regions(
+            &state,
+            vec![
+                SidebarEditItemRegion {
+                    area: Rect { x: 0, y: 2, width: 30, height: 1 },
+                    item_index: 0,
+                },
+                SidebarEditItemRegion {
+                    area: Rect { x: 0, y: 3, width: 30, height: 1 },
+                    item_index: 1,
+                },
+            ],
+        );
+
+        // cursor 0 → index 1 のラベルをクリック
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            3,
+        )));
+        assert_eq!(cursor_of_labels_edit(&state), Some(1));
+        // toggle 結果: applied が true に
+        if let Some(SidebarEditMode::Labels { items, .. }) = &state.sidebar_edit {
+            assert!(items[1].applied);
+        } else {
+            panic!("expected Labels edit mode");
+        }
+    }
+
+    #[test]
+    fn mouse_click_outside_picker_closes_edit_mode() {
+        let mut state = make_labels_edit_state();
+        // regions に該当しない座標をクリック → edit が閉じる
+        set_sidebar_edit_item_regions(&state, vec![]);
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            10,
+        )));
+        assert!(state.sidebar_edit.is_none());
+    }
+
+    #[test]
+    fn mouse_wheel_in_picker_moves_cursor() {
+        let mut state = make_labels_edit_state();
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollDown,
+            5,
+            5,
+        )));
+        assert_eq!(cursor_of_labels_edit(&state), Some(1));
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollUp,
+            5,
+            5,
+        )));
+        assert_eq!(cursor_of_labels_edit(&state), Some(0));
     }
 
     #[test]
