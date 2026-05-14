@@ -1039,13 +1039,14 @@ impl AppState {
             (ViewMode::Board, MouseEventKind::Down(crossterm::event::MouseButton::Left)) => {
                 self.handle_board_mouse_down(me.column, me.row)
             }
-            (ViewMode::Board, MouseEventKind::Up(crossterm::event::MouseButton::Left)) => {
-                self.handle_board_mouse_up(me.column, me.row)
-            }
-            (ViewMode::Board, MouseEventKind::Drag(crossterm::event::MouseButton::Left)) => {
-                // 現状の MVP では Drag 中の楽観プレビューは行わず、Up の座標だけで確定する。
-                Command::None
-            }
+            (
+                ViewMode::Board | ViewMode::CardGrab,
+                MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+            ) => self.handle_board_mouse_drag(me.column, me.row),
+            (
+                ViewMode::Board | ViewMode::CardGrab,
+                MouseEventKind::Up(crossterm::event::MouseButton::Left),
+            ) => self.handle_board_mouse_up(me.column, me.row),
             (ViewMode::Board, MouseEventKind::ScrollDown) => {
                 // Shift+Wheel は水平スクロール (右カラム移動) として扱う。
                 // 一部端末では水平ホイールが Shift+垂直ホイールとして送られる。
@@ -1207,11 +1208,41 @@ impl AppState {
         Command::None
     }
 
-    /// Board モードの Up(Left): pending_drag と Up 位置の関係から
-    /// - 同位置 + 元 selected → 詳細を開く
-    /// - 同位置 + 未 selected → no-op (selection は Down で更新済み)
-    /// - 別カラム / 別カード → drop してカード移動 / 並び替え
+    /// Board / CardGrab モードの Drag(Left): 初回で grab に入り、以降は hover 位置に楽観的に移動する。
+    fn handle_board_mouse_drag(&mut self, x: u16, y: u16) -> Command {
+        let Some(pending) = self.pending_drag.clone() else {
+            return Command::None;
+        };
+        let Some(target) = self.hit_test_board(x, y) else {
+            return Command::None;
+        };
+
+        // 初回 Drag: CardGrab モードに入って視覚効果 (黄色太線 + 影) を有効化
+        if !matches!(self.mode, ViewMode::CardGrab) {
+            let origin_indices = self.filtered_card_indices(pending.origin_column);
+            let Some(&origin_real) = origin_indices.get(pending.origin_display_card) else {
+                return Command::None;
+            };
+            self.enter_card_grab(GrabState {
+                origin_column: pending.origin_column,
+                origin_card_index: origin_real,
+                item_id: pending.item_id.clone(),
+            });
+        }
+
+        self.optimistic_move_card_by_id(&pending.item_id, target.column_index, target.card_index);
+        Command::None
+    }
+
+    /// Board / CardGrab モードの Up(Left):
+    /// - CardGrab 中なら confirm_grab() で MoveCard / ReorderCard を発行
+    /// - そうでなければ pending_drag と Up 位置から click / drop を判定
     fn handle_board_mouse_up(&mut self, x: u16, y: u16) -> Command {
+        if matches!(self.mode, ViewMode::CardGrab) {
+            self.pending_drag = None;
+            return self.confirm_grab();
+        }
+
         let Some(pending) = self.pending_drag.take() else {
             return Command::None;
         };
@@ -1236,30 +1267,37 @@ impl AppState {
         self.drop_card_to(pending, target.column_index, target.card_index)
     }
 
-    /// 指定の target_column / target_display_card に pending のカードを drop する。
-    /// 楽観的にカードを移動し、grab 機構を経由して MoveCard / ReorderCard コマンドを返す。
-    fn drop_card_to(
+    /// `item_id` で指定されるカードを target_column / target_display_card の位置に楽観的に移動する。
+    /// 現在カードがどこにあるかは board を線形検索する (Drag 連発で既にカードが動いている可能性があるため)。
+    /// 戻り値: 実際に移動できたら true。
+    fn optimistic_move_card_by_id(
         &mut self,
-        pending: PendingDrag,
+        item_id: &str,
         target_column: usize,
         target_display_card: Option<usize>,
-    ) -> Command {
-        // "No <field>" カラム (option_id 空) への drop は禁止
+    ) -> bool {
+        // 現在カードがあるカラムと real_idx を探す
+        let Some((src_col, src_real)) = self.board.as_ref().and_then(|b| {
+            for (ci, col) in b.columns.iter().enumerate() {
+                if let Some(pos) = col.cards.iter().position(|c| c.item_id == item_id) {
+                    return Some((ci, pos));
+                }
+            }
+            None
+        }) else {
+            return false;
+        };
+
+        // "No <field>" カラム (option_id 空) への移動は拒否 (元のカラムに居る間の hover はそのまま)
         let target_empty_option = self
             .board
             .as_ref()
             .and_then(|b| b.columns.get(target_column))
             .map(|c| c.option_id.is_empty())
             .unwrap_or(true);
-        if target_empty_option && target_column != pending.origin_column {
-            return Command::None;
+        if target_empty_option && target_column != src_col {
+            return false;
         }
-
-        // origin の real_idx を解決
-        let origin_indices = self.filtered_card_indices(pending.origin_column);
-        let Some(&origin_real) = origin_indices.get(pending.origin_display_card) else {
-            return Command::None;
-        };
 
         // target の real_idx を解決 (display_card が無いならカラム末尾)
         let target_real = if let Some(disp) = target_display_card {
@@ -1281,23 +1319,22 @@ impl AppState {
                 .unwrap_or(0)
         };
 
-        let item_id = pending.item_id.clone();
+        // 同じ位置なら no-op (Drag の連射で頻繁にここに来る)
+        if src_col == target_column && src_real == target_real {
+            return false;
+        }
 
         // 楽観的更新: 元のカラムから抜いて target に挿入
         let board = match &mut self.board {
             Some(b) => b,
-            None => return Command::None,
+            None => return false,
         };
-        if pending.origin_column >= board.columns.len()
-            || origin_real >= board.columns[pending.origin_column].cards.len()
-        {
-            return Command::None;
+        if src_col >= board.columns.len() || src_real >= board.columns[src_col].cards.len() {
+            return false;
         }
-        let card = board.columns[pending.origin_column].cards.remove(origin_real);
-
-        // 同カラム reorder の場合、remove で後続のインデックスがずれることに注意
+        let card = board.columns[src_col].cards.remove(src_real);
         let mut insert_idx = target_real;
-        if target_column == pending.origin_column && insert_idx > origin_real {
+        if target_column == src_col && insert_idx > src_real {
             insert_idx = insert_idx.saturating_sub(1);
         }
         let cap = board.columns[target_column].cards.len();
@@ -1314,12 +1351,36 @@ impl AppState {
                 self.selected_card = pos;
             }
         }
+        true
+    }
 
-        // grab に入って confirm (MoveCard / ReorderCard / Batch を発行)
+    /// 指定の target_column / target_display_card に pending のカードを drop する。
+    /// Drag(Left) が来なかった場合のフォールバック: 楽観的に移動し、grab 経由で
+    /// MoveCard / ReorderCard コマンドを返す。
+    fn drop_card_to(
+        &mut self,
+        pending: PendingDrag,
+        target_column: usize,
+        target_display_card: Option<usize>,
+    ) -> Command {
+        // origin の real_idx を解決
+        let origin_indices = self.filtered_card_indices(pending.origin_column);
+        let Some(&origin_real) = origin_indices.get(pending.origin_display_card) else {
+            return Command::None;
+        };
+
+        if !self.optimistic_move_card_by_id(
+            &pending.item_id,
+            target_column,
+            target_display_card,
+        ) {
+            return Command::None;
+        }
+
         self.enter_card_grab(GrabState {
             origin_column: pending.origin_column,
             origin_card_index: origin_real,
-            item_id,
+            item_id: pending.item_id,
         });
         self.confirm_grab()
     }
@@ -7631,6 +7692,110 @@ mod tests {
             Command::ReorderCard { .. } => {}
             other => panic!("expected ReorderCard, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn mouse_drag_event_enters_card_grab_and_moves_optimistically() {
+        let mut state = make_two_column_state();
+        set_click_regions(
+            &state,
+            vec![
+                BoardClickRegion {
+                    area: Rect { x: 0, y: 0, width: 30, height: 3 },
+                    column_index: 0,
+                    card_index: Some(0),
+                },
+                BoardClickRegion {
+                    area: Rect { x: 30, y: 0, width: 30, height: 3 },
+                    column_index: 1,
+                    card_index: Some(0),
+                },
+            ],
+        );
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            1,
+        )));
+        assert_eq!(state.mode, ViewMode::Board);
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+            35,
+            1,
+        )));
+        assert_eq!(state.mode, ViewMode::CardGrab);
+        let board = state.board.as_ref().unwrap();
+        assert_eq!(board.columns[1].cards[0].item_id, "1");
+    }
+
+    #[test]
+    fn mouse_up_after_drag_confirms_grab() {
+        let mut state = make_two_column_state();
+        set_click_regions(
+            &state,
+            vec![
+                BoardClickRegion {
+                    area: Rect { x: 0, y: 0, width: 30, height: 3 },
+                    column_index: 0,
+                    card_index: Some(0),
+                },
+                BoardClickRegion {
+                    area: Rect { x: 30, y: 0, width: 30, height: 3 },
+                    column_index: 1,
+                    card_index: Some(0),
+                },
+            ],
+        );
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            1,
+        )));
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+            35,
+            1,
+        )));
+        let cmd = state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+            35,
+            1,
+        )));
+        assert_eq!(state.mode, ViewMode::Board);
+        match cmd {
+            Command::Batch(_) | Command::MoveCard { .. } | Command::ReorderCard { .. } => {}
+            other => panic!("expected MoveCard/ReorderCard/Batch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn mouse_drag_to_same_position_does_not_change_card_order() {
+        let mut state = make_two_column_state();
+        set_click_regions(
+            &state,
+            vec![BoardClickRegion {
+                area: Rect { x: 0, y: 0, width: 30, height: 3 },
+                column_index: 0,
+                card_index: Some(0),
+            }],
+        );
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            1,
+        )));
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+            5,
+            1,
+        )));
+        let board = state.board.as_ref().unwrap();
+        assert_eq!(board.columns[0].cards[0].item_id, "1");
+        assert_eq!(state.mode, ViewMode::CardGrab);
     }
 
     #[test]

@@ -89,7 +89,7 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 
 ### マウス操作
 - 起動時に `EnableMouseCapture` を crossterm 経由で execute (`ratatui::init` は raw_mode + AlternateScreen のみカバーするため自前で追加)
-- ボード画面: 左クリックでカードを選択。Down で `pending_drag` を立て、**同位置で Up したら click 扱い** (選択中なら詳細表示、未選択ならただ選択)。**別カラム/別カードで Up したら drop 扱い** (楽観的更新 + `enter_card_grab` → `confirm_grab` で `MoveCard` / `ReorderCard` を発行)
+- ボード画面: 左クリックでカードを選択。Down で `pending_drag` を立て、**Drag(Left) が来た時点で `CardGrab` モードに入って楽観プレビュー** (黄色太線 + 透過影が hover に追従する。`optimistic_move_card_by_id` が item_id で現在位置を線形検索し、board を直接編集)。**Up(Left)** で `confirm_grab` を呼び `MoveCard` / `ReorderCard` を発行。Drag が来なかった (= ただクリック離した) ケースは `pending_drag` の origin と Up 座標を比較し、同位置なら click 扱い (選択中なら詳細表示)、違う位置なら `drop_card_to` でフォールバック
 - ボード画面: マウスホイールで現在カラムのカード選択を上下移動。水平ホイール (`ScrollLeft`/`ScrollRight`) または **Shift+ホイール** で `selected_column` を増減 (隣カラムへ)
 - 詳細ビュー: マウスホイールで本文を縦スクロール (`detail_max_scroll` で clamp)。`CommentList` でも同様
 - 詳細ビューのモーダル外クリックで Detail/CommentList を閉じる (Detail は `pop_detail_stack` → 空なら Board へ、`CommentList` は Detail に戻る)
