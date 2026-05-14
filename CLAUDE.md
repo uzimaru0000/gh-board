@@ -89,10 +89,15 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 
 ### マウス操作
 - 起動時に `EnableMouseCapture` を crossterm 経由で execute (`ratatui::init` は raw_mode + AlternateScreen のみカバーするため自前で追加)
-- ボード画面: 左クリックでカードを選択。**選択中のカードを再度クリック**するとカード詳細を開く (ダブルクリック相当)。空カラムや背景のクリックはカラム選択のみ更新
-- ボード画面: マウスホイールで現在カラムのカード選択を上下に移動 (j/k 相当、`filtered_card_indices` の範囲で clamp)
-- 詳細ビュー: マウスホイールで本文を縦スクロール (`detail_max_scroll` で clamp)
-- ヒットテスト: `ui/board.rs` 描画時に `AppState.board_click_regions: RefCell<Vec<BoardClickRegion>>` へカード/カラム背景の Rect を書き戻し、`handle_mouse` でこのリストを線形検索 (前方優先 = カード優先 → カラム背景がフォールバック)
+- ボード画面: 左クリックでカードを選択。Down で `pending_drag` を立て、**同位置で Up したら click 扱い** (選択中なら詳細表示、未選択ならただ選択)。**別カラム/別カードで Up したら drop 扱い** (楽観的更新 + `enter_card_grab` → `confirm_grab` で `MoveCard` / `ReorderCard` を発行)
+- ボード画面: マウスホイールで現在カラムのカード選択を上下移動。水平ホイール (`ScrollLeft`/`ScrollRight`) または **Shift+ホイール** で `selected_column` を増減 (隣カラムへ)
+- 詳細ビュー: マウスホイールで本文を縦スクロール (`detail_max_scroll` で clamp)。`CommentList` でも同様
+- 詳細ビューのモーダル外クリックで Detail/CommentList を閉じる (Detail は `pop_detail_stack` → 空なら Board へ、`CommentList` は Detail に戻る)
+- View タブクリック (`ui/tab_bar`): 任意のモードから Board に強制復帰した後 `switch_to_view` / `clear_view` を呼ぶ
+- ヒットテスト用に UI 側から `Cell`/`RefCell` 経由で書き戻すフィールド:
+  - `board_click_regions: RefCell<Vec<BoardClickRegion>>` — ボード上のカード/カラム背景 (前方優先)
+  - `view_tab_regions: RefCell<Vec<ViewTabRegion>>` — タブバーの各タブ
+  - `detail_modal_area: Cell<Option<Rect>>` — 詳細モーダルの popup
 - `$EDITOR` 起動時は `DisableMouseCapture` してから AlternateScreen を抜け、復帰時に `EnableMouseCapture` を再実行
 - マウスキャプチャ中はターミナルのテキスト選択が無効化される。macOS Terminal/iTerm2 では Option/Shift 修飾で回避可能
 

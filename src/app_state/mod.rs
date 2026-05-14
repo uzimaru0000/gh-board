@@ -206,6 +206,30 @@ pub struct AppState {
     /// 描画→入力の順で更新されるため Cell で UI 側から書き戻す。
     /// 各エントリの優先順位は要素順 (前方優先 = カード領域がカラム背景より先)。
     pub board_click_regions: std::cell::RefCell<Vec<BoardClickRegion>>,
+
+    /// View タブ (`ui/tab_bar`) のクリック判定領域。
+    /// 任意のモードから view 切替を可能にするため、ボード描画時に書き戻す。
+    pub view_tab_regions: std::cell::RefCell<Vec<ViewTabRegion>>,
+
+    /// 詳細ビュー (`ui/detail`) のモーダル外側クリック判定用。
+    /// 描画時にモーダルの popup Rect を書き戻し、Detail/CommentList の Down(Left) が
+    /// この領域の外なら詳細ビューを閉じる。
+    pub detail_modal_area: std::cell::Cell<Option<Rect>>,
+
+    /// Down(Left) → Up(Left) の間で、ドラッグ可能なカードを保持する。
+    /// Up 時の座標と比較して、同じ位置ならクリック扱い、違う位置なら drop として処理する。
+    pub(crate) pending_drag: Option<PendingDrag>,
+}
+
+/// マウスドラッグ用の中間状態。Down(Left) で立ち、Up(Left) で take される。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingDrag {
+    pub origin_column: usize,
+    /// origin の display_idx (フィルタ後の表示インデックス)
+    pub origin_display_card: usize,
+    pub item_id: String,
+    /// Down 時点でこのカードが既に選択中だったか (Up が同位置の場合に詳細を開く判定)
+    pub was_selected: bool,
 }
 
 /// ボード上でマウスクリック対象となる領域。
@@ -216,6 +240,14 @@ pub struct BoardClickRegion {
     /// `Some(display_idx)`: フィルタ後の表示インデックスを selected_card に設定。
     /// `None`: カラム背景 (カラム選択のみ)。
     pub card_index: Option<usize>,
+}
+
+/// View タブのクリック判定領域。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewTabRegion {
+    pub area: Rect,
+    /// `Some(view_index)`: その view に切替。`None`: All (view 解除)。
+    pub view_index: Option<usize>,
 }
 
 impl AppState {
@@ -267,6 +299,9 @@ impl AppState {
             bulk_selected: std::collections::HashSet::new(),
             toast: None,
             board_click_regions: std::cell::RefCell::new(Vec::new()),
+            view_tab_regions: std::cell::RefCell::new(Vec::new()),
+            detail_modal_area: std::cell::Cell::new(None),
+            pending_drag: None,
         }
     }
 
@@ -991,19 +1026,53 @@ impl AppState {
             return Command::None;
         }
 
+        // View タブクリックは任意のモードから優先処理する
+        if matches!(
+            me.kind,
+            MouseEventKind::Down(crossterm::event::MouseButton::Left)
+        ) && let Some(cmd) = self.try_handle_view_tab_click(me.column, me.row)
+        {
+            return cmd;
+        }
+
         match (&self.mode, me.kind) {
             (ViewMode::Board, MouseEventKind::Down(crossterm::event::MouseButton::Left)) => {
-                self.handle_board_click(me.column, me.row)
+                self.handle_board_mouse_down(me.column, me.row)
+            }
+            (ViewMode::Board, MouseEventKind::Up(crossterm::event::MouseButton::Left)) => {
+                self.handle_board_mouse_up(me.column, me.row)
+            }
+            (ViewMode::Board, MouseEventKind::Drag(crossterm::event::MouseButton::Left)) => {
+                // 現状の MVP では Drag 中の楽観プレビューは行わず、Up の座標だけで確定する。
+                Command::None
             }
             (ViewMode::Board, MouseEventKind::ScrollDown) => {
-                let len = self.filtered_card_indices(self.selected_column).len();
-                if len > 0 {
-                    self.selected_card = (self.selected_card + 1).min(len - 1);
+                // Shift+Wheel は水平スクロール (右カラム移動) として扱う。
+                // 一部端末では水平ホイールが Shift+垂直ホイールとして送られる。
+                if me.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) {
+                    self.move_selected_column_by(1);
+                } else {
+                    let len = self.filtered_card_indices(self.selected_column).len();
+                    if len > 0 {
+                        self.selected_card = (self.selected_card + 1).min(len - 1);
+                    }
                 }
                 Command::None
             }
             (ViewMode::Board, MouseEventKind::ScrollUp) => {
-                self.selected_card = self.selected_card.saturating_sub(1);
+                if me.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) {
+                    self.move_selected_column_by(-1);
+                } else {
+                    self.selected_card = self.selected_card.saturating_sub(1);
+                }
+                Command::None
+            }
+            (ViewMode::Board, MouseEventKind::ScrollRight) => {
+                self.move_selected_column_by(1);
+                Command::None
+            }
+            (ViewMode::Board, MouseEventKind::ScrollLeft) => {
+                self.move_selected_column_by(-1);
                 Command::None
             }
             (ViewMode::Detail, MouseEventKind::ScrollDown) => {
@@ -1015,22 +1084,92 @@ impl AppState {
                 self.detail_scroll = self.detail_scroll.saturating_sub(1);
                 Command::None
             }
+            (ViewMode::Detail, MouseEventKind::Down(crossterm::event::MouseButton::Left)) => {
+                if let Some(area) = self.detail_modal_area.get()
+                    && !point_in_rect(me.column, me.row, area)
+                {
+                    // モーダル外クリック: sub-issue スタックを 1 段戻すか、無ければ Board に戻る
+                    if !self.pop_detail_stack() {
+                        self.mode = ViewMode::Board;
+                    }
+                }
+                Command::None
+            }
+            (ViewMode::CommentList, MouseEventKind::Down(crossterm::event::MouseButton::Left)) => {
+                if let Some(area) = self.detail_modal_area.get()
+                    && !point_in_rect(me.column, me.row, area)
+                {
+                    self.mode = ViewMode::Detail;
+                }
+                Command::None
+            }
+            (ViewMode::CommentList, MouseEventKind::ScrollDown) => {
+                let max = self.detail_max_scroll.get();
+                self.detail_scroll = (self.detail_scroll + 1).min(max);
+                Command::None
+            }
+            (ViewMode::CommentList, MouseEventKind::ScrollUp) => {
+                self.detail_scroll = self.detail_scroll.saturating_sub(1);
+                Command::None
+            }
             _ => Command::None,
         }
     }
 
-    /// クリック位置 (x, y) からヒットするカード/カラムを引き、選択を更新する。
-    /// 既に選択中のカードを再度クリックした場合は詳細ビューを開く。
-    fn handle_board_click(&mut self, x: u16, y: u16) -> Command {
-        let hit = self
-            .board_click_regions
+    /// View タブクリック処理。ヒットしたら任意のモードから Board に戻して view 切替する。
+    fn try_handle_view_tab_click(&mut self, x: u16, y: u16) -> Option<Command> {
+        let region = self
+            .view_tab_regions
             .borrow()
             .iter()
             .find(|r| point_in_rect(x, y, r.area))
-            .copied();
-        let Some(region) = hit else {
+            .copied()?;
+
+        // 任意のモード/シーンから Board に強制的に戻す。
+        self.mode = ViewMode::Board;
+        self.previous_scene = None;
+        self.scene = Scene::Board;
+
+        let cmd = match region.view_index {
+            Some(idx) => self.switch_to_view(idx),
+            None => self.clear_view(),
+        };
+        Some(cmd)
+    }
+
+    /// `selected_column` を delta だけ動かし、範囲外をクランプして card 選択も clamp する。
+    fn move_selected_column_by(&mut self, delta: i32) {
+        let Some(board) = &self.board else { return };
+        let col_count = board.columns.len();
+        if col_count == 0 {
+            return;
+        }
+        let next = (self.selected_column as i32 + delta)
+            .clamp(0, col_count as i32 - 1) as usize;
+        if next != self.selected_column {
+            self.selected_column = next;
+            self.clamp_card_selection();
+        }
+    }
+
+    fn hit_test_board(&self, x: u16, y: u16) -> Option<BoardClickRegion> {
+        self.board_click_regions
+            .borrow()
+            .iter()
+            .find(|r| point_in_rect(x, y, r.area))
+            .copied()
+    }
+
+    /// Board モードの Down(Left): カード/カラム選択を更新し、pending_drag を立てる。
+    /// 再クリック判定 (= 詳細表示) は Up 側で行う。
+    fn handle_board_mouse_down(&mut self, x: u16, y: u16) -> Command {
+        self.pending_drag = None;
+        let Some(region) = self.hit_test_board(x, y) else {
             return Command::None;
         };
+
+        let was_selected = region.column_index == self.selected_column
+            && region.card_index == Some(self.selected_card);
 
         let col_changed = region.column_index != self.selected_column;
         if col_changed {
@@ -1039,16 +1178,150 @@ impl AppState {
         }
 
         if let Some(idx) = region.card_index {
-            // 同じカラムの同じカードを再度クリック → 詳細を開く (ダブルクリック相当)
-            if !col_changed && self.selected_card == idx {
-                return self.open_detail_view();
-            }
             self.selected_card = idx;
+            // origin の item_id を解決して pending_drag をセット
+            let real = self
+                .filtered_card_indices(region.column_index)
+                .get(idx)
+                .copied();
+            let item_id = real.and_then(|r| {
+                self.board.as_ref().and_then(|b| {
+                    b.columns
+                        .get(region.column_index)
+                        .and_then(|c| c.cards.get(r))
+                        .map(|c| c.item_id.clone())
+                })
+            });
+            if let Some(item_id) = item_id {
+                self.pending_drag = Some(PendingDrag {
+                    origin_column: region.column_index,
+                    origin_display_card: idx,
+                    item_id,
+                    was_selected,
+                });
+            }
         } else {
             // カラム背景: カード選択は変更しない (clamp のみ)
             self.clamp_card_selection();
         }
         Command::None
+    }
+
+    /// Board モードの Up(Left): pending_drag と Up 位置の関係から
+    /// - 同位置 + 元 selected → 詳細を開く
+    /// - 同位置 + 未 selected → no-op (selection は Down で更新済み)
+    /// - 別カラム / 別カード → drop してカード移動 / 並び替え
+    fn handle_board_mouse_up(&mut self, x: u16, y: u16) -> Command {
+        let Some(pending) = self.pending_drag.take() else {
+            return Command::None;
+        };
+        let target = self.hit_test_board(x, y);
+
+        // hit しなかった or 元と同じ位置 → クリック扱い
+        let same_pos = match target {
+            None => true,
+            Some(t) => {
+                t.column_index == pending.origin_column
+                    && t.card_index == Some(pending.origin_display_card)
+            }
+        };
+        if same_pos {
+            if pending.was_selected {
+                return self.open_detail_view();
+            }
+            return Command::None;
+        }
+
+        let target = target.unwrap();
+        self.drop_card_to(pending, target.column_index, target.card_index)
+    }
+
+    /// 指定の target_column / target_display_card に pending のカードを drop する。
+    /// 楽観的にカードを移動し、grab 機構を経由して MoveCard / ReorderCard コマンドを返す。
+    fn drop_card_to(
+        &mut self,
+        pending: PendingDrag,
+        target_column: usize,
+        target_display_card: Option<usize>,
+    ) -> Command {
+        // "No <field>" カラム (option_id 空) への drop は禁止
+        let target_empty_option = self
+            .board
+            .as_ref()
+            .and_then(|b| b.columns.get(target_column))
+            .map(|c| c.option_id.is_empty())
+            .unwrap_or(true);
+        if target_empty_option && target_column != pending.origin_column {
+            return Command::None;
+        }
+
+        // origin の real_idx を解決
+        let origin_indices = self.filtered_card_indices(pending.origin_column);
+        let Some(&origin_real) = origin_indices.get(pending.origin_display_card) else {
+            return Command::None;
+        };
+
+        // target の real_idx を解決 (display_card が無いならカラム末尾)
+        let target_real = if let Some(disp) = target_display_card {
+            self.filtered_card_indices(target_column)
+                .get(disp)
+                .copied()
+                .unwrap_or_else(|| {
+                    self.board
+                        .as_ref()
+                        .and_then(|b| b.columns.get(target_column))
+                        .map(|c| c.cards.len())
+                        .unwrap_or(0)
+                })
+        } else {
+            self.board
+                .as_ref()
+                .and_then(|b| b.columns.get(target_column))
+                .map(|c| c.cards.len())
+                .unwrap_or(0)
+        };
+
+        let item_id = pending.item_id.clone();
+
+        // 楽観的更新: 元のカラムから抜いて target に挿入
+        let board = match &mut self.board {
+            Some(b) => b,
+            None => return Command::None,
+        };
+        if pending.origin_column >= board.columns.len()
+            || origin_real >= board.columns[pending.origin_column].cards.len()
+        {
+            return Command::None;
+        }
+        let card = board.columns[pending.origin_column].cards.remove(origin_real);
+
+        // 同カラム reorder の場合、remove で後続のインデックスがずれることに注意
+        let mut insert_idx = target_real;
+        if target_column == pending.origin_column && insert_idx > origin_real {
+            insert_idx = insert_idx.saturating_sub(1);
+        }
+        let cap = board.columns[target_column].cards.len();
+        insert_idx = insert_idx.min(cap);
+        board.columns[target_column].cards.insert(insert_idx, card);
+
+        // selection を target に追従
+        self.selected_column = target_column;
+        if self.filter.active_filter.is_none() {
+            self.selected_card = insert_idx;
+        } else {
+            let new_indices = self.filtered_card_indices(target_column);
+            if let Some(pos) = new_indices.iter().position(|&i| i == insert_idx) {
+                self.selected_card = pos;
+            }
+        }
+
+        // grab に入って confirm (MoveCard / ReorderCard / Batch を発行)
+        self.enter_card_grab(GrabState {
+            origin_column: pending.origin_column,
+            origin_card_index: origin_real,
+            item_id,
+        });
+        self.confirm_grab()
     }
 
     /// Board/Table/Roadmap ハンドラで共通のアクション処理。
@@ -7259,11 +7532,131 @@ mod tests {
             }],
         );
 
+        // Down → Up を同じ位置で発行すると click 扱いで詳細が開く
         state.handle_event(AppEvent::Mouse(mouse(
             crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
             5,
             4,
         )));
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+            5,
+            4,
+        )));
+        assert_eq!(state.mode, ViewMode::Detail);
+    }
+
+    #[test]
+    fn mouse_drag_to_another_column_moves_card() {
+        let mut state = make_two_column_state();
+        set_click_regions(
+            &state,
+            vec![
+                BoardClickRegion {
+                    area: Rect { x: 0, y: 0, width: 30, height: 3 },
+                    column_index: 0,
+                    card_index: Some(0),
+                },
+                BoardClickRegion {
+                    area: Rect { x: 30, y: 0, width: 30, height: 3 },
+                    column_index: 1,
+                    card_index: Some(0),
+                },
+            ],
+        );
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            1,
+        )));
+        let cmd = state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+            35,
+            1,
+        )));
+
+        // カードがカラム 1 に楽観的に移動している
+        let board = state.board.as_ref().unwrap();
+        assert_eq!(board.columns[0].cards.len(), 2);
+        assert_eq!(board.columns[1].cards.len(), 2);
+        assert_eq!(board.columns[1].cards[0].item_id, "1");
+        // MoveCard コマンドが発行される (内部 Batch または単独)
+        match cmd {
+            Command::Batch(_) | Command::MoveCard { .. } => {}
+            other => panic!("expected MoveCard or Batch, got {:?}", other),
+        }
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn mouse_drag_within_same_column_reorders_card() {
+        let mut state = make_two_column_state();
+        set_click_regions(
+            &state,
+            vec![
+                BoardClickRegion {
+                    area: Rect { x: 0, y: 0, width: 30, height: 3 },
+                    column_index: 0,
+                    card_index: Some(0),
+                },
+                BoardClickRegion {
+                    area: Rect { x: 0, y: 6, width: 30, height: 3 },
+                    column_index: 0,
+                    card_index: Some(2),
+                },
+            ],
+        );
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            1,
+        )));
+        let cmd = state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+            5,
+            7,
+        )));
+
+        let board = state.board.as_ref().unwrap();
+        assert_eq!(board.columns[0].cards.len(), 3);
+        let order: Vec<&str> = board.columns[0]
+            .cards
+            .iter()
+            .map(|c| c.item_id.as_str())
+            .collect();
+        assert_ne!(order[0], "1", "card A should have moved from index 0");
+        match cmd {
+            Command::ReorderCard { .. } => {}
+            other => panic!("expected ReorderCard, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn mouse_drag_returning_to_same_card_is_a_click() {
+        let mut state = make_two_column_state();
+        state.selected_card = 0;
+        set_click_regions(
+            &state,
+            vec![BoardClickRegion {
+                area: Rect { x: 0, y: 0, width: 30, height: 3 },
+                column_index: 0,
+                card_index: Some(0),
+            }],
+        );
+
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            1,
+        )));
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+            5,
+            1,
+        )));
+        // selected card への click = 詳細を開く
         assert_eq!(state.mode, ViewMode::Detail);
     }
 
@@ -7348,6 +7741,135 @@ mod tests {
             0,
         )));
         assert_eq!(state.detail_scroll, 0);
+    }
+
+    fn mouse_with_modifiers(
+        kind: crossterm::event::MouseEventKind,
+        column: u16,
+        row: u16,
+        modifiers: KeyModifiers,
+    ) -> crossterm::event::MouseEvent {
+        crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn mouse_scroll_right_moves_to_next_column() {
+        let mut state = make_two_column_state();
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollRight,
+            0,
+            0,
+        )));
+        assert_eq!(state.selected_column, 1);
+    }
+
+    #[test]
+    fn mouse_scroll_left_moves_to_prev_column() {
+        let mut state = make_two_column_state();
+        state.selected_column = 1;
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollLeft,
+            0,
+            0,
+        )));
+        assert_eq!(state.selected_column, 0);
+    }
+
+    #[test]
+    fn mouse_shift_scroll_down_moves_to_next_column() {
+        let mut state = make_two_column_state();
+        state.handle_event(AppEvent::Mouse(mouse_with_modifiers(
+            crossterm::event::MouseEventKind::ScrollDown,
+            0,
+            0,
+            KeyModifiers::SHIFT,
+        )));
+        assert_eq!(state.selected_column, 1);
+    }
+
+    #[test]
+    fn mouse_shift_scroll_up_moves_to_prev_column() {
+        let mut state = make_two_column_state();
+        state.selected_column = 1;
+        state.handle_event(AppEvent::Mouse(mouse_with_modifiers(
+            crossterm::event::MouseEventKind::ScrollUp,
+            0,
+            0,
+            KeyModifiers::SHIFT,
+        )));
+        assert_eq!(state.selected_column, 0);
+    }
+
+    #[test]
+    fn mouse_scroll_right_clamps_at_last_column() {
+        let mut state = make_two_column_state();
+        state.selected_column = 1;
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::ScrollRight,
+            0,
+            0,
+        )));
+        assert_eq!(state.selected_column, 1);
+    }
+
+    #[test]
+    fn mouse_click_outside_detail_modal_closes_detail() {
+        let mut state = make_two_column_state();
+        state.mode = ViewMode::Detail;
+        state.detail_modal_area.set(Some(Rect {
+            x: 10,
+            y: 5,
+            width: 60,
+            height: 20,
+        }));
+        // モーダル領域 (x: 10..70, y: 5..25) の外をクリック
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            2,
+        )));
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn mouse_click_inside_detail_modal_keeps_detail_open() {
+        let mut state = make_two_column_state();
+        state.mode = ViewMode::Detail;
+        state.detail_modal_area.set(Some(Rect {
+            x: 10,
+            y: 5,
+            width: 60,
+            height: 20,
+        }));
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            30,
+            10,
+        )));
+        assert_eq!(state.mode, ViewMode::Detail);
+    }
+
+    #[test]
+    fn mouse_click_outside_comment_list_returns_to_detail() {
+        let mut state = make_two_column_state();
+        state.mode = ViewMode::CommentList;
+        state.detail_modal_area.set(Some(Rect {
+            x: 10,
+            y: 5,
+            width: 60,
+            height: 20,
+        }));
+        state.handle_event(AppEvent::Mouse(mouse(
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            5,
+            2,
+        )));
+        assert_eq!(state.mode, ViewMode::Detail);
     }
 
     #[test]

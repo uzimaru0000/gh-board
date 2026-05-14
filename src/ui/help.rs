@@ -192,12 +192,28 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         Span::styled(t!("help.entries.mouse_click_card").to_string(), desc_style),
     ]));
     lines.push(Line::from(vec![
+        Span::styled("  Drag      ", key_style),
+        Span::styled(t!("help.entries.mouse_drag_card").to_string(), desc_style),
+    ]));
+    lines.push(Line::from(vec![
         Span::styled("  Wheel     ", key_style),
         Span::styled(t!("help.entries.mouse_wheel_board").to_string(), desc_style),
     ]));
     lines.push(Line::from(vec![
+        Span::styled("  S-Wheel   ", key_style),
+        Span::styled(t!("help.entries.mouse_wheel_horizontal").to_string(), desc_style),
+    ]));
+    lines.push(Line::from(vec![
         Span::styled("  Wheel     ", key_style),
         Span::styled(t!("help.entries.mouse_wheel_detail").to_string(), desc_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Click     ", key_style),
+        Span::styled(t!("help.entries.mouse_click_tab").to_string(), desc_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Click     ", key_style),
+        Span::styled(t!("help.entries.mouse_click_outside_modal").to_string(), desc_style),
     ]));
 
     let paragraph = Paragraph::new(lines).block(block);
