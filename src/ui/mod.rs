@@ -1,5 +1,6 @@
 pub mod board;
 pub mod card;
+pub mod command_palette;
 pub mod comment_list;
 pub mod confirm;
 pub mod detail;

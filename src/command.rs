@@ -1,4 +1,5 @@
 #[derive(Debug, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 pub enum Command {
     None,
     LoadProjects {
@@ -145,6 +146,14 @@ pub enum Command {
         field_id: String,
     },
     Batch(Vec<Command>),
+    /// ユーザ定義のシェルコマンドを実行する。
+    /// `command_line` は placeholder 展開済みの文字列で、`sh -c <command_line>` として渡される。
+    /// `interactive = true` の場合は TUI を一時停止して foreground 実行する。
+    RunCustomCommand {
+        name: String,
+        command_line: String,
+        interactive: bool,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone, serde::Serialize)]

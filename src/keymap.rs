@@ -170,6 +170,7 @@ pub enum KeymapMode {
     CreateCardGlobal,
     EditCardGlobal,
     BulkSelect,
+    CommandPalette,
 }
 
 pub struct Keymap {
@@ -228,6 +229,7 @@ impl Keymap {
         board.insert(KeyBind::char('t'), Action::ToggleLayout);
         board.insert(KeyBind::char('q'), Action::Quit);
         board.insert(KeyBind::key(KeyCode::Esc), Action::Quit);
+        board.insert(KeyBind::char(':'), Action::OpenCommandPalette);
         keymap.modes.insert(KeymapMode::Board, board);
 
         // Table mode (LayoutMode::Table 時の board ハンドラから利用)
@@ -254,6 +256,7 @@ impl Keymap {
         table.insert(KeyBind::char('t'), Action::ToggleLayout);
         table.insert(KeyBind::char('q'), Action::Quit);
         table.insert(KeyBind::key(KeyCode::Esc), Action::Quit);
+        table.insert(KeyBind::char(':'), Action::OpenCommandPalette);
         keymap.modes.insert(KeymapMode::Table, table);
 
         // Roadmap mode (LayoutMode::Roadmap 時の board ハンドラから利用)
@@ -277,6 +280,7 @@ impl Keymap {
         roadmap.insert(KeyBind::char('t'), Action::ToggleLayout);
         roadmap.insert(KeyBind::char('q'), Action::Quit);
         roadmap.insert(KeyBind::key(KeyCode::Esc), Action::Quit);
+        roadmap.insert(KeyBind::char(':'), Action::OpenCommandPalette);
         keymap.modes.insert(KeymapMode::Roadmap, roadmap);
 
         // ProjectSelect mode (文字キーはフィルタ入力に使うため割り当てない)
@@ -379,6 +383,7 @@ impl Keymap {
         detail_content.insert(KeyBind::char('C'), Action::OpenCommentList);
         detail_content.insert(KeyBind::char('r'), Action::OpenReactionPicker);
         detail_content.insert(KeyBind::char('y'), Action::CopyUrl);
+        detail_content.insert(KeyBind::char(':'), Action::OpenCommandPalette);
         keymap.modes.insert(KeymapMode::DetailContent, detail_content);
 
         // Detail sidebar
@@ -393,6 +398,7 @@ impl Keymap {
         detail_sidebar.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
         detail_sidebar.insert(KeyBind::key(KeyCode::Enter), Action::Select);
         detail_sidebar.insert(KeyBind::char('a'), Action::ArchiveCard);
+        detail_sidebar.insert(KeyBind::char(':'), Action::OpenCommandPalette);
         keymap.modes.insert(KeymapMode::DetailSidebar, detail_sidebar);
 
         // Status select dropdown
@@ -487,7 +493,37 @@ impl Keymap {
         bulk_select.insert(KeyBind::key(KeyCode::Esc), Action::BulkSelectClear);
         keymap.modes.insert(KeymapMode::BulkSelect, bulk_select);
 
+        // CommandPalette mode
+        let mut palette = HashMap::new();
+        palette.insert(KeyBind::char('j'), Action::MoveDown);
+        palette.insert(KeyBind::key(KeyCode::Down), Action::MoveDown);
+        palette.insert(KeyBind::char('k'), Action::MoveUp);
+        palette.insert(KeyBind::key(KeyCode::Up), Action::MoveUp);
+        palette.insert(KeyBind::key(KeyCode::Enter), Action::Select);
+        palette.insert(KeyBind::key(KeyCode::Esc), Action::Back);
+        palette.insert(KeyBind::char('q'), Action::Back);
+        keymap.modes.insert(KeymapMode::CommandPalette, palette);
+
         keymap
+    }
+
+    /// `[[command]]` で定義された custom command の `key` を global keymap に登録する。
+    /// インデックスは `CustomCommandConfig` 配列の順序に対応し、`Action::RunCustomCommand(idx)` として保持される。
+    /// `key` 未指定 / parse 失敗 / index >= 256 のエントリは無視する。
+    pub fn register_custom_commands(mut self, commands: &[crate::config::CustomCommandConfig]) -> Self {
+        for (idx, cmd) in commands.iter().enumerate() {
+            if idx >= 256 {
+                break;
+            }
+            let Some(key_str) = cmd.key.as_deref() else {
+                continue;
+            };
+            let Ok(bind) = KeyBind::parse(key_str) else {
+                continue;
+            };
+            self.global.insert(bind, Action::RunCustomCommand(idx as u8));
+        }
+        self
     }
 
     /// Merge user overrides on top of defaults.
@@ -518,6 +554,7 @@ impl Keymap {
             ("create_card", KeymapMode::CreateCardGlobal),
             ("edit_card", KeymapMode::EditCardGlobal),
             ("bulk_select", KeymapMode::BulkSelect),
+            ("command_palette", KeymapMode::CommandPalette),
         ];
 
         for (config_key, mode) in mode_configs {
@@ -663,6 +700,9 @@ fn parse_action_name(name: &str) -> Option<Action> {
         "bulk_archive" => Some(Action::BulkArchive),
         "bulk_move_left" => Some(Action::BulkMoveLeft),
         "bulk_move_right" => Some(Action::BulkMoveRight),
+        "open_command_palette" => Some(Action::OpenCommandPalette),
+        // `run_custom_command` は index 付きなので config 文字列からの parse 対象外。
+        // 各 `[[command]]` の `key` が直接 keymap に bind される (`Keymap::register_custom_commands`)。
         _ => None,
     }
 }
@@ -721,6 +761,8 @@ pub fn action_name(action: Action) -> &'static str {
         Action::BulkArchive => "bulk_archive",
         Action::BulkMoveLeft => "bulk_move_left",
         Action::BulkMoveRight => "bulk_move_right",
+        Action::OpenCommandPalette => "open_command_palette",
+        Action::RunCustomCommand(_) => "run_custom_command",
     }
 }
 
@@ -1040,6 +1082,99 @@ mod tests {
         let bindings = keymap.bindings_for_action(KeymapMode::Board, Action::MoveDown);
         assert!(bindings.contains(&&KeyBind::char('j')));
         assert!(bindings.contains(&&KeyBind::key(KeyCode::Down)));
+    }
+
+    // ========== register_custom_commands tests ==========
+
+    #[test]
+    fn test_register_custom_commands_global_bind() {
+        let commands = vec![
+            crate::config::CustomCommandConfig {
+                name: "First".into(),
+                command: "echo a".into(),
+                key: Some("C-r".into()),
+                interactive: true,
+                description: None,
+            },
+            crate::config::CustomCommandConfig {
+                name: "Second".into(),
+                command: "echo b".into(),
+                key: None, // 未指定なので無視
+                interactive: true,
+                description: None,
+            },
+            crate::config::CustomCommandConfig {
+                name: "Third".into(),
+                command: "echo c".into(),
+                key: Some("C-t".into()),
+                interactive: true,
+                description: None,
+            },
+        ];
+        let keymap = Keymap::default_keymap().register_custom_commands(&commands);
+
+        // 0 番目: C-r が RunCustomCommand(0)
+        assert_eq!(
+            keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('r'), KeyModifiers::CONTROL)),
+            Some(Action::RunCustomCommand(0))
+        );
+        // 1 番目: key 未指定なので bind されない
+        // 2 番目: C-t が RunCustomCommand(2)
+        assert_eq!(
+            keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('t'), KeyModifiers::CONTROL)),
+            Some(Action::RunCustomCommand(2))
+        );
+    }
+
+    #[test]
+    fn test_register_custom_commands_works_across_modes() {
+        // global にバインドされるので、Board 以外でも resolve できることを確認
+        let commands = vec![crate::config::CustomCommandConfig {
+            name: "X".into(),
+            command: "echo".into(),
+            key: Some("C-r".into()),
+            interactive: true,
+            description: None,
+        }];
+        let keymap = Keymap::default_keymap().register_custom_commands(&commands);
+        assert_eq!(
+            keymap.resolve(KeymapMode::DetailContent, &make_key_event(KeyCode::Char('r'), KeyModifiers::CONTROL)),
+            Some(Action::RunCustomCommand(0))
+        );
+    }
+
+    #[test]
+    fn test_register_custom_commands_invalid_key_ignored() {
+        let commands = vec![crate::config::CustomCommandConfig {
+            name: "Bad".into(),
+            command: "echo".into(),
+            key: Some("totally-bogus".into()),
+            interactive: true,
+            description: None,
+        }];
+        let keymap = Keymap::default_keymap().register_custom_commands(&commands);
+        // 何も bind されていないので resolve に影響しないことを確認 (適当な key を投げて元の挙動)
+        assert_eq!(
+            keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char('j'), KeyModifiers::NONE)),
+            Some(Action::MoveDown)
+        );
+    }
+
+    #[test]
+    fn test_command_palette_resolves() {
+        let keymap = Keymap::default_keymap();
+        assert_eq!(
+            keymap.resolve(KeymapMode::Board, &make_key_event(KeyCode::Char(':'), KeyModifiers::NONE)),
+            Some(Action::OpenCommandPalette)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::DetailContent, &make_key_event(KeyCode::Char(':'), KeyModifiers::NONE)),
+            Some(Action::OpenCommandPalette)
+        );
+        assert_eq!(
+            keymap.resolve(KeymapMode::CommandPalette, &make_key_event(KeyCode::Enter, KeyModifiers::NONE)),
+            Some(Action::Select)
+        );
     }
 
     #[test]

@@ -182,6 +182,43 @@ filter = "assignee:@me"
 layout = "table"
 ```
 
+### Custom Commands
+
+Define shell snippets in `~/.config/gh-board/config.toml` and run them against the currently selected card. Trigger a command either by its bound key, or open the palette with `:` (on the Board or Detail screen) and pick from the list.
+
+```toml
+[[command]]
+name = "Resolve with Claude"
+command = "git worktree add ../{repo}.resolve-{number} -b resolve-{number} && cd ../{repo}.resolve-{number} && claude 'https://github.com/{owner}/{repo}/issues/{number} を解決してください'"
+key = "C-r"
+description = "Spawn a worktree and launch claude inside"
+
+[[command]]
+name = "Copy issue ref"
+command = "printf '#%s' '{number}' | pbcopy"
+interactive = false
+```
+
+Available placeholders (resolved from the selected card / current project):
+
+| Placeholder | Description |
+|---|---|
+| `{number}` | Issue / PR number |
+| `{title}` | Card title |
+| `{url}` | Card URL |
+| `{body}` | Card body (Markdown) |
+| `{owner}` / `{repo}` / `{name_with_owner}` | Parsed from the card URL |
+| `{id}` / `{content_id}` | Issue / PR node id |
+| `{item_id}` | Project item id |
+| `{card_type}` | `issue` / `pull_request` / `draft_issue` |
+| `{project_number}` / `{project_title}` / `{project_url}` | Current project info |
+
+Notes:
+- `command` is executed via `sh -c`, so you can chain with `&&`, `|`, etc.
+- `interactive = true` (default) suspends the TUI like `$EDITOR` does — required for tools that take over the terminal (e.g. `claude`, `vim`). `interactive = false` runs the command in the background and discards its output.
+- Placeholders for fields the card does not have (e.g. `{number}` on a draft issue) expand to an empty string. Unknown placeholders are left intact so you can compose your own templates safely.
+- Commands without a `key` are still reachable via the `:` palette.
+
 ## Building
 
 ```

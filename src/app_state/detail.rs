@@ -143,6 +143,8 @@ impl AppState {
             Action::OpenCommentList => self.open_comment_list(),
             Action::OpenReactionPicker => self.open_reaction_picker_for_card(),
             Action::CopyUrl => self.copy_current_card_url(),
+            Action::OpenCommandPalette => self.open_command_palette(ViewMode::Detail),
+            Action::RunCustomCommand(idx) => self.run_custom_command(idx as usize),
             _ => Command::None,
         }
     }
@@ -437,6 +439,8 @@ impl AppState {
                 self.start_archive_card(ViewMode::Detail);
                 Command::None
             }
+            Action::OpenCommandPalette => self.open_command_palette(ViewMode::Detail),
+            Action::RunCustomCommand(idx) => self.run_custom_command(idx as usize),
             _ => Command::None,
         }
     }

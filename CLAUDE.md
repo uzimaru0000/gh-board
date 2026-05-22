@@ -214,6 +214,16 @@ assert_eq!(cmd, Command::MoveCard { ... });
 - `cargo test` で全テストが通ることを確認してからコミットする
 - 実装完了後は `cargo clippy -- -D warnings` も実行し、警告がないことを確認する (CI で同じチェックが走る)
 
+### カスタムコマンド (`[[command]]`)
+- `~/.config/gh-board/config.toml` の `[[command]]` で定義した shell snippet を、選択中のカードを context にして実行する
+- 各 entry: `name` / `command` / `key`(任意) / `interactive`(default true) / `description`(任意)
+- `command` 内の `{number}` `{title}` `{url}` `{owner}` `{repo}` `{name_with_owner}` `{id}` `{content_id}` `{item_id}` `{body}` `{card_type}` `{project_number}` `{project_title}` `{project_url}` が `src/app_state/custom_command.rs::expand_placeholders` で展開される。未対応 key は `{...}` のまま残る (将来拡張に安全)
+- 発火経路:
+  - `key` が登録されたエントリは `Keymap::register_custom_commands` で `global` に bind され、Board / Detail から直接発動
+  - Board / Detail の `:` で `ViewMode::CommandPalette` を開き、j/k で選択 → Enter で発動 (`src/ui/command_palette.rs`)
+- 実行は `Command::RunCustomCommand { name, command_line, interactive }` を返し、`interactive = true` の場合は `App.pending_custom_command` に積んで `main.rs` 側で `$EDITOR` と同様に TUI 一時停止 + `sh -c <command_line>` を foreground 実行 → 完了 toast を表示する。`interactive = false` の場合は `tokio::spawn` でバックグラウンド実行 (stdio は捨てる)
+- AppState は `custom_commands: Vec<CustomCommandConfig>` を保持 (`set_custom_commands`)
+
 ## i18n (ヘルプ画面のみ)
 
 - `rust-i18n` v3 でコンパイル時に `locales/*.yml` を埋め込み、`src/ui/help.rs` でのみ `t!("key")` を使う

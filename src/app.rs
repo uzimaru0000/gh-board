@@ -15,6 +15,9 @@ pub struct App {
     pub state: AppState,
     pub pending_editor: Option<String>,
     pub pending_comment_editor: Option<CommentEditorContext>,
+    /// Interactive custom command を実行するため、メインループに引き渡す pending エントリ。
+    /// main.rs が pending を見つけたら TUI を一時停止し、`sh -c <command_line>` を foreground 実行する。
+    pub pending_custom_command: Option<PendingCustomCommand>,
     github: GitHubClient,
     event_tx: mpsc::UnboundedSender<AppEvent>,
     cache: DiskCache,
@@ -40,6 +43,7 @@ impl App {
             state,
             pending_editor: None,
             pending_comment_editor: None,
+            pending_custom_command: None,
             github,
             event_tx,
             cache,
@@ -669,8 +673,37 @@ impl App {
                     self.execute(cmd);
                 }
             }
+            Command::RunCustomCommand {
+                name,
+                command_line,
+                interactive,
+            } => {
+                if interactive {
+                    self.pending_custom_command = Some(PendingCustomCommand {
+                        name,
+                        command_line,
+                    });
+                } else {
+                    tokio::spawn(async move {
+                        let _ = tokio::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(&command_line)
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .status()
+                            .await;
+                    });
+                }
+            }
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingCustomCommand {
+    pub name: String,
+    pub command_line: String,
 }
 
 /// AppState 処理後に App が行うキャッシュ操作。`handle_event` で event を消費する前に

@@ -34,6 +34,32 @@ pub struct Config {
     pub keys: KeysConfig,
     #[serde(default)]
     pub board: BoardConfig,
+    #[serde(default, rename = "command")]
+    pub commands: Vec<CustomCommandConfig>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// ユーザ定義のシェルコマンド。
+/// `command` は `sh -c <command>` で実行され、現在選択中のカードから次の placeholder が展開される:
+/// `{number}` `{title}` `{url}` `{owner}` `{repo}` `{name_with_owner}` `{id}` `{item_id}` `{body}` `{project_number}` `{project_title}` `{project_url}`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct CustomCommandConfig {
+    /// パレットや status line に表示する名前。
+    pub name: String,
+    /// `sh -c` に渡すコマンド文字列。placeholder を含められる。
+    pub command: String,
+    /// 任意のキーバインド (例: "C-r")。指定時は global keymap に登録され、Board/Detail から即時起動できる。
+    #[serde(default)]
+    pub key: Option<String>,
+    /// true の場合は TUI を一時停止して foreground 実行する ($EDITOR と同様)。default: true。
+    #[serde(default = "default_true")]
+    pub interactive: bool,
+    /// パレットや status line に表示する説明 (option)。
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -67,6 +93,7 @@ pub struct KeysConfig {
     pub filter: HashMap<String, Vec<String>>,
     pub create_card: HashMap<String, Vec<String>>,
     pub edit_card: HashMap<String, Vec<String>>,
+    pub command_palette: HashMap<String, Vec<String>>,
 }
 
 impl KeysConfig {
@@ -93,6 +120,7 @@ impl KeysConfig {
             "filter" => self.filter.clone(),
             "create_card" => self.create_card.clone(),
             "edit_card" => self.edit_card.clone(),
+            "command_palette" => self.command_palette.clone(),
             _ => HashMap::new(),
         }
     }
@@ -531,6 +559,70 @@ refresh = ["R"]
 
         let empty = keys.section("nonexistent");
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_parse_no_commands() {
+        let config: Config = toml::from_str("").unwrap();
+        assert!(config.commands.is_empty());
+    }
+
+    #[test]
+    fn test_parse_single_command_minimum() {
+        let toml = r#"
+[[command]]
+name = "Print number"
+command = "echo {number}"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.commands.len(), 1);
+        assert_eq!(config.commands[0].name, "Print number");
+        assert_eq!(config.commands[0].command, "echo {number}");
+        assert_eq!(config.commands[0].key, None);
+        // interactive defaults to true
+        assert!(config.commands[0].interactive);
+    }
+
+    #[test]
+    fn test_parse_command_with_key_and_interactive() {
+        let toml = r#"
+[[command]]
+name = "Resolve with Claude"
+command = "git worktree add ../resolve-{number} -b resolve-{number} && cd ../resolve-{number} && claude '{url}'"
+key = "C-r"
+interactive = true
+description = "Spawn claude inside a new worktree"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.commands.len(), 1);
+        assert_eq!(config.commands[0].key.as_deref(), Some("C-r"));
+        assert!(config.commands[0].interactive);
+        assert_eq!(
+            config.commands[0].description.as_deref(),
+            Some("Spawn claude inside a new worktree")
+        );
+    }
+
+    #[test]
+    fn test_parse_multiple_commands() {
+        let toml = r#"
+[[command]]
+name = "First"
+command = "echo a"
+
+[[command]]
+name = "Second"
+command = "echo b"
+key = "C-b"
+interactive = false
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.commands.len(), 2);
+        assert_eq!(config.commands[0].name, "First");
+        assert!(config.commands[0].interactive);
+        assert_eq!(config.commands[1].name, "Second");
+        assert!(!config.commands[1].interactive);
+        assert_eq!(config.commands[1].key.as_deref(), Some("C-b"));
     }
 
     #[test]

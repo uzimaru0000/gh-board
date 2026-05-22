@@ -31,6 +31,7 @@ help:
     refresh: "リフレッシュ"
     show_help: "ヘルプ切替"
     quit: "終了"
+    open_command_palette: "カスタムコマンドパレットを開く"
     detail_scroll: "スクロール"
     detail_table_scroll: "テーブル横スクロール"
     detail_switch_sidebar: "サイドバーへ"

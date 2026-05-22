@@ -110,8 +110,11 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg
     app.state.set_views(cfg.view);
     app.state.preferred_grouping_field_name = cfg.board.group_by.clone();
 
-    let keymap = keymap::Keymap::default_keymap().with_overrides(&cfg.keys);
+    let keymap = keymap::Keymap::default_keymap()
+        .with_overrides(&cfg.keys)
+        .register_custom_commands(&cfg.commands);
     app.state.set_keymap(keymap);
+    app.state.set_custom_commands(cfg.commands);
 
     // When project number is specified, load that project directly (skip project list)
     if let Some(number) = cli.number {
@@ -173,12 +176,52 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg
             }
         }
 
+        // [[command]] でユーザ定義された interactive コマンドを実行
+        if let Some(pending) = app.pending_custom_command.take() {
+            events.pause();
+            disable_raw_mode()?;
+            crossterm::execute!(std::io::stdout(), DisableMouseCapture, LeaveAlternateScreen)?;
+
+            let status = run_custom_command(&pending.command_line);
+
+            enable_raw_mode()?;
+            crossterm::execute!(std::io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+            terminal.clear()?;
+            events.resume();
+
+            match status {
+                Ok(status) if status.success() => {
+                    app.state.toast = Some(format!("✓ {}", pending.name));
+                }
+                Ok(status) => {
+                    app.state.toast = Some(format!(
+                        "✗ {} (exit {})",
+                        pending.name,
+                        status.code().unwrap_or(-1)
+                    ));
+                }
+                Err(e) => {
+                    app.state.toast = Some(format!("✗ {}: {e}", pending.name));
+                }
+            }
+        }
+
         if app.state.should_quit {
             break;
         }
     }
 
     Ok(())
+}
+
+fn run_custom_command(command_line: &str) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(command_line)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
 }
 
 fn run_editor(content: &str) -> Result<String> {
@@ -342,6 +385,11 @@ fn render(frame: &mut Frame, app: &App) {
         Scene::BulkSelect => {
             render_board_with_tabs(frame, main_area, app);
             ui::statusline::render(frame, area, app);
+        }
+        Scene::CommandPalette => {
+            render_board_with_tabs(frame, main_area, app);
+            ui::statusline::render(frame, area, app);
+            ui::command_palette::render(frame, area, app);
         }
     }
 
