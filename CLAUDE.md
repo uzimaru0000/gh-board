@@ -87,6 +87,23 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 - Ctrl+g: グループ化軸の切替 (SingleSelect / Iteration field から選択)
 - p: プロジェクト切替、r: リフレッシュ、?: ヘルプ、q/Esc: 終了
 
+### マウス操作
+- 起動時に `EnableMouseCapture` を crossterm 経由で execute (`ratatui::init` は raw_mode + AlternateScreen のみカバーするため自前で追加)
+- ボード画面: 左クリックでカードを選択。Down で `pending_drag` を立て、**Drag(Left) が来た時点で `CardGrab` モードに入って楽観プレビュー** (黄色太線 + 透過影が hover に追従する。`optimistic_move_card_by_id` が item_id で現在位置を線形検索し、board を直接編集)。**Up(Left)** で `confirm_grab` を呼び `MoveCard` / `ReorderCard` を発行。Drag が来なかった (= ただクリック離した) ケースは `pending_drag` の origin と Up 座標を比較し、同位置なら click 扱い (選択中なら詳細表示)、違う位置なら `drop_card_to` でフォールバック
+- ボード画面: マウスホイールで現在カラムのカード選択を上下移動。水平ホイール (`ScrollLeft`/`ScrollRight`) または **Shift+ホイール** で `selected_column` を増減 (隣カラムへ)
+- 詳細ビュー: マウスホイールで本文を縦スクロール (`detail_max_scroll` で clamp)。`CommentList` でも同様
+- 詳細ビューのモーダル外クリックで Detail/CommentList を閉じる (Detail は `pop_detail_stack` → 空なら Board へ、`CommentList` は Detail に戻る)
+- 詳細ビューのサイドバー各セクションをクリック: `detail_pane = Sidebar` + `sidebar_selected` を更新。**同じセクションを再クリック**で `Action::Select` 相当 (Status/Labels/Assignees ピッカー、Parent/SubIssue 開く、Archive ボタン、CustomField 編集)。サイドバー外 (content 領域) をクリックで `detail_pane = Content` に切替
+- View タブクリック (`ui/tab_bar`): 任意のモードから Board に強制復帰した後 `switch_to_view` / `clear_view` を呼ぶ
+- ヒットテスト用に UI 側から `Cell`/`RefCell` 経由で書き戻すフィールド:
+  - `board_click_regions: RefCell<Vec<BoardClickRegion>>` — ボード上のカード/カラム背景 (前方優先)
+  - `view_tab_regions: RefCell<Vec<ViewTabRegion>>` — タブバーの各タブ
+  - `detail_modal_area: Cell<Option<Rect>>` — 詳細モーダルの popup
+  - `detail_content_area: Cell<Option<Rect>>` — 詳細モーダルの content ペイン (サイドバー以外)
+  - `detail_sidebar_regions: RefCell<Vec<DetailSidebarRegion>>` — サイドバー各セクション
+- `$EDITOR` 起動時は `DisableMouseCapture` してから AlternateScreen を抜け、復帰時に `EnableMouseCapture` を再実行
+- マウスキャプチャ中はターミナルのテキスト選択が無効化される。macOS Terminal/iTerm2 では Option/Shift 修飾で回避可能
+
 ### カード詳細ビュー (ViewMode::Detail)
 - Enter でボード上のカードを選択すると 80%×80% のモーダルポップアップを表示
 - 表示内容: 状態、アサイニー、ラベル、本文 (Markdown)、コメント (全件取得)

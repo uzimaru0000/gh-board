@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crossterm::event::{EventStream, KeyEvent};
+use crossterm::event::{EventStream, KeyEvent, MouseEvent};
 use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -31,6 +31,7 @@ pub enum MutationKind {
 
 pub enum AppEvent {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     #[allow(dead_code)]
     Resize(u16, u16),
     Tick,
@@ -102,6 +103,11 @@ impl EventHandler {
                         match event {
                             Some(Ok(crossterm::event::Event::Key(key)))
                                 if event_tx.send(AppEvent::Key(key)).is_err() =>
+                            {
+                                break;
+                            }
+                            Some(Ok(crossterm::event::Event::Mouse(me)))
+                                if event_tx.send(AppEvent::Mouse(me)).is_err() =>
                             {
                                 break;
                             }

@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::app_state::{DetailSidebarRegion, SidebarEditItemRegion};
 use crate::color::parse_hex_color;
 use crate::model::project::{CardType, ColumnColor, CustomFieldValue, IssueState, PrState};
 use crate::model::state::{
@@ -26,9 +27,13 @@ pub(super) fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     if let Some(edit) = &app.state.sidebar_edit {
-        render_sidebar_edit(frame, area, edit);
+        app.state.detail_sidebar_regions.borrow_mut().clear();
+        let mut item_regions = app.state.sidebar_edit_item_regions.borrow_mut();
+        item_regions.clear();
+        render_sidebar_edit(frame, area, edit, &mut item_regions);
         return;
     }
+    app.state.sidebar_edit_item_regions.borrow_mut().clear();
 
     let focused = app.state.detail_pane == DetailPane::Sidebar;
     let selected = app.state.sidebar_selected;
@@ -383,17 +388,56 @@ pub(super) fn render_sidebar(frame: &mut Frame, area: Rect, app: &App) {
         0
     };
 
+    // クリック判定領域 (各セクション) を AppState に書き戻す。
+    // scroll で隠れた範囲はスキップ、inner 範囲を超える分は clamp する。
+    let mut regions: Vec<DetailSidebarRegion> = Vec::new();
+    let section_count = sections_layout.len();
+    for i in 0..section_count {
+        let start = section_line_offsets[i];
+        let end = if i + 1 < section_count {
+            section_line_offsets[i + 1]
+        } else {
+            total_lines
+        };
+        if end <= scroll {
+            continue;
+        }
+        if start >= scroll + visible {
+            continue;
+        }
+        let visible_start = start.saturating_sub(scroll);
+        let visible_end = (end - scroll).min(visible);
+        if visible_end <= visible_start {
+            continue;
+        }
+        regions.push(DetailSidebarRegion {
+            area: Rect {
+                x: inner.x,
+                y: inner.y + visible_start,
+                width: inner.width,
+                height: visible_end - visible_start,
+            },
+            section_index: i,
+        });
+    }
+    *app.state.detail_sidebar_regions.borrow_mut() = regions;
+
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
 }
 
-fn render_sidebar_edit(frame: &mut Frame, area: Rect, edit: &SidebarEditMode) {
+fn render_sidebar_edit(
+    frame: &mut Frame,
+    area: Rect,
+    edit: &SidebarEditMode,
+    item_regions: &mut Vec<SidebarEditItemRegion>,
+) {
     let (title, items, cursor) = match edit {
         SidebarEditMode::Labels { items, cursor } => ("Labels", items.as_slice(), *cursor),
         SidebarEditMode::Assignees { items, cursor } => ("Assignees", items.as_slice(), *cursor),
         SidebarEditMode::CustomFieldSingleSelect { .. }
         | SidebarEditMode::CustomFieldIteration { .. } => {
-            render_custom_field_select_edit(frame, area, edit);
+            render_custom_field_select_edit(frame, area, edit, item_regions);
             return;
         }
         SidebarEditMode::CustomFieldText { .. }
@@ -461,6 +505,18 @@ fn render_sidebar_edit(frame: &mut Frame, area: Rect, edit: &SidebarEditMode) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(lines), inner);
+
+    // クリック領域: items は line 2 から 1 行ずつ並ぶ
+    for i in 0..items.len() {
+        let y = inner.y.saturating_add(2 + i as u16);
+        if y >= inner.y + inner.height {
+            break;
+        }
+        item_regions.push(SidebarEditItemRegion {
+            area: Rect { x: inner.x, y, width: inner.width, height: 1 },
+            item_index: i,
+        });
+    }
 }
 
 fn render_custom_field_value_line(current: Option<&CustomFieldValue>) -> Line<'static> {
@@ -505,7 +561,12 @@ fn render_custom_field_value_line(current: Option<&CustomFieldValue>) -> Line<'s
 
 type SelectEntry = (String, Option<ColumnColor>);
 
-fn render_custom_field_select_edit(frame: &mut Frame, area: Rect, edit: &SidebarEditMode) {
+fn render_custom_field_select_edit(
+    frame: &mut Frame,
+    area: Rect,
+    edit: &SidebarEditMode,
+    item_regions: &mut Vec<SidebarEditItemRegion>,
+) {
     let title: &str;
     let entries: Vec<SelectEntry>;
     let cursor: usize;
@@ -598,6 +659,18 @@ fn render_custom_field_select_edit(frame: &mut Frame, area: Rect, edit: &Sidebar
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(lines), inner);
+
+    // クリック領域: items は line 2 から 1 行ずつ並ぶ (末尾に has_clear のクリアエントリ)
+    for i in 0..total {
+        let y = inner.y.saturating_add(2 + i as u16);
+        if y >= inner.y + inner.height {
+            break;
+        }
+        item_regions.push(SidebarEditItemRegion {
+            area: Rect { x: inner.x, y, width: inner.width, height: 1 },
+            item_index: i,
+        });
+    }
 }
 
 fn render_custom_field_text_edit(frame: &mut Frame, area: Rect, edit: &SidebarEditMode) {
