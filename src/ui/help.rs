@@ -105,6 +105,7 @@ pub fn render(frame: &mut Frame, area: Rect, keymap: &Keymap) {
         entry(Action::StartFilter, "help.entries.start_filter"),
         entry(Action::ClearFilter, "help.entries.clear_filter"),
         entry(Action::Refresh, "help.entries.refresh"),
+        entry(Action::OpenCommandPalette, "help.entries.open_command_palette"),
         entry(Action::ShowHelp, "help.entries.show_help"),
         entry(Action::Quit, "help.entries.quit"),
     ];

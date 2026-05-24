@@ -63,4 +63,11 @@ pub enum Action {
     BulkArchive,
     BulkMoveLeft,
     BulkMoveRight,
+
+    // Custom commands
+    /// `[[command]]` で定義された config index 番目のコマンドを発火する。
+    /// パレット経由でも同じ発火に最終的に行き着く。
+    RunCustomCommand(u8),
+    /// コマンドパレット (`:`) を開く。
+    OpenCommandPalette,
 }

@@ -182,6 +182,43 @@ filter = "assignee:@me"
 layout = "table"
 ```
 
+### カスタムコマンド
+
+`~/.config/gh-board/config.toml` にシェルコマンドを定義しておき、現在選択中のカードを文脈にして実行できます。割り当てた `key` で直接実行するほか、Board / Detail 画面で `:` を押すとパレットが開き一覧から選択できます。
+
+```toml
+[[command]]
+name = "Resolve with Claude"
+command = "git worktree add ../{repo}.resolve-{number} -b resolve-{number} && cd ../{repo}.resolve-{number} && claude 'https://github.com/{owner}/{repo}/issues/{number} を解決してください'"
+key = "C-r"
+description = "worktree を作って claude を起動する"
+
+[[command]]
+name = "Copy issue ref"
+command = "printf '#%s' '{number}' | pbcopy"
+interactive = false
+```
+
+利用可能なプレースホルダ (選択中のカード / プロジェクトから解決):
+
+| プレースホルダ | 説明 |
+|---|---|
+| `{number}` | Issue / PR 番号 |
+| `{title}` | カードタイトル |
+| `{url}` | カード URL |
+| `{body}` | カード本文 (Markdown) |
+| `{owner}` / `{repo}` / `{name_with_owner}` | カード URL からパース |
+| `{id}` / `{content_id}` | Issue / PR の node id |
+| `{item_id}` | プロジェクトアイテム id |
+| `{card_type}` | `issue` / `pull_request` / `draft_issue` |
+| `{project_number}` / `{project_title}` / `{project_url}` | 現在のプロジェクト情報 |
+
+ポイント:
+- `command` は `sh -c` で実行されます。`&&` や `|` なども普通に書けます。
+- `interactive = true` (デフォルト) は `$EDITOR` と同じく TUI を一時停止して foreground で実行します (claude や vim のようにターミナルを占有するツール向け)。`interactive = false` の場合はバックグラウンドで spawn され、stdout/stderr は破棄されます。
+- カードに対応する値が無いプレースホルダ (例: Draft Issue の `{number}`) は空文字列に展開されます。未知のプレースホルダはそのまま残るので、独自テンプレートにも安全に使えます。
+- `key` を指定していないコマンドも `:` パレットから実行できます。
+
 ## ビルド
 
 ```

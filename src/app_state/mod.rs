@@ -23,6 +23,7 @@ use crate::model::state::{SIDEBAR_ASSIGNEES, SIDEBAR_LABELS};
 
 mod board;
 mod bulk;
+mod custom_command;
 mod detail;
 mod filter;
 mod modal;
@@ -68,6 +69,7 @@ fn scene_from_mode_tag(mode: &ViewMode) -> Scene {
             Scene::Board
         }
         ViewMode::BulkSelect => Scene::BulkSelect,
+        ViewMode::CommandPalette => Scene::CommandPalette,
     }
 }
 
@@ -232,6 +234,14 @@ pub struct AppState {
     /// サイドバー編集モード (Labels / Assignees / CustomField の picker) の各 item の
     /// クリック判定領域。`ui/detail/sidebar::render_sidebar_edit` で書き戻す。
     pub sidebar_edit_item_regions: std::cell::RefCell<Vec<SidebarEditItemRegion>>,
+
+    /// `[[command]]` の定義一覧。`Action::RunCustomCommand(idx)` から index 参照される。
+    pub custom_commands: Vec<crate::config::CustomCommandConfig>,
+
+    /// コマンドパレット (`ViewMode::CommandPalette`) のカーソル位置。
+    pub command_palette_cursor: usize,
+    /// パレットを開いた際の戻り先 (`ViewMode::Board` / `ViewMode::Detail` / `ViewMode::CommentList`)。
+    pub command_palette_return_to: ViewMode,
 }
 
 /// サイドバー編集モード picker の item クリック判定領域。
@@ -332,6 +342,9 @@ impl AppState {
             detail_sidebar_regions: std::cell::RefCell::new(Vec::new()),
             detail_content_area: std::cell::Cell::new(None),
             sidebar_edit_item_regions: std::cell::RefCell::new(Vec::new()),
+            custom_commands: Vec::new(),
+            command_palette_cursor: 0,
+            command_palette_return_to: ViewMode::Board,
         }
     }
 
@@ -1567,6 +1580,8 @@ impl AppState {
                 self.enter_bulk_select();
                 Some(Command::None)
             }
+            Action::OpenCommandPalette => Some(self.open_command_palette(ViewMode::Board)),
+            Action::RunCustomCommand(idx) => Some(self.run_custom_command(idx as usize)),
             _ => None,
         }
     }
@@ -1628,6 +1643,7 @@ impl AppState {
             ViewMode::GroupBySelect => self.handle_group_by_select_key(key),
             ViewMode::ReactionPicker => self.handle_reaction_picker_key(key),
             ViewMode::BulkSelect => self.handle_bulk_select_key(key),
+            ViewMode::CommandPalette => self.handle_command_palette_key(key),
         }
     }
 
@@ -8349,5 +8365,168 @@ mod tests {
             0,
         )));
         assert_eq!(state.detail_scroll, 2);
+    }
+
+    // ========== Custom commands ==========
+
+    fn make_custom_command(name: &str, command: &str, key: Option<&str>) -> crate::config::CustomCommandConfig {
+        crate::config::CustomCommandConfig {
+            name: name.into(),
+            command: command.into(),
+            key: key.map(String::from),
+            interactive: true,
+            description: None,
+        }
+    }
+
+    fn make_state_with_issue_card_and_commands(
+        commands: Vec<crate::config::CustomCommandConfig>,
+    ) -> AppState {
+        let mut card = make_card("ITEM_1", "Bug: foo");
+        card.number = Some(42);
+        card.card_type = CardType::Issue {
+            state: crate::model::project::IssueState::Open,
+        };
+        card.url = Some("https://github.com/acme/widget/issues/42".into());
+        let board = make_board(vec![("Todo", "opt_1", vec![card])]);
+        let mut state = make_state_with_board(board);
+        state.keymap = crate::keymap::Keymap::default_keymap()
+            .register_custom_commands(&commands);
+        state.set_custom_commands(commands);
+        state
+    }
+
+    #[test]
+    fn custom_command_dispatched_via_key_binding_returns_run_command() {
+        let commands = vec![make_custom_command(
+            "Resolve",
+            "echo {number} {repo}",
+            Some("C-r"),
+        )];
+        let mut state = make_state_with_issue_card_and_commands(commands);
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('r'),
+            KeyModifiers::CONTROL,
+        )));
+
+        assert_eq!(
+            cmd,
+            Command::RunCustomCommand {
+                name: "Resolve".into(),
+                command_line: "echo 42 widget".into(),
+                interactive: true,
+            }
+        );
+    }
+
+    #[test]
+    fn custom_command_with_invalid_key_is_not_dispatched() {
+        let commands = vec![make_custom_command("X", "echo x", Some("totally-bogus"))];
+        let mut state = make_state_with_issue_card_and_commands(commands);
+        // 不正な key は登録されないので、普通の `j` は MoveDown のままで Command::None になる
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn open_command_palette_via_colon() {
+        let commands = vec![
+            make_custom_command("First", "echo a", None),
+            make_custom_command("Second", "echo b", None),
+        ];
+        let mut state = make_state_with_issue_card_and_commands(commands);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(':'))));
+
+        assert_eq!(state.mode, ViewMode::CommandPalette);
+        assert!(matches!(state.scene, Scene::CommandPalette));
+        assert_eq!(state.command_palette_cursor, 0);
+        assert_eq!(state.command_palette_return_to, ViewMode::Board);
+    }
+
+    #[test]
+    fn command_palette_navigation_and_select() {
+        let commands = vec![
+            make_custom_command("First", "echo first", None),
+            make_custom_command("Second", "echo second-{number}", None),
+        ];
+        let mut state = make_state_with_issue_card_and_commands(commands);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(':'))));
+        // 下に移動 → 2 番目を選択
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('j'))));
+        assert_eq!(state.command_palette_cursor, 1);
+
+        // Enter で実行
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::RunCustomCommand {
+                name: "Second".into(),
+                command_line: "echo second-42".into(),
+                interactive: true,
+            }
+        );
+        // 元の Board モードに戻っている
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn command_palette_escape_closes_without_running() {
+        let commands = vec![make_custom_command("First", "echo a", None)];
+        let mut state = make_state_with_issue_card_and_commands(commands);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(':'))));
+        assert_eq!(state.mode, ViewMode::CommandPalette);
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Esc)));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(state.mode, ViewMode::Board);
+    }
+
+    #[test]
+    fn command_palette_with_no_commands_shows_toast_and_stays_in_board() {
+        let mut state = make_state_with_issue_card_and_commands(vec![]);
+        state.handle_event(AppEvent::Key(key(KeyCode::Char(':'))));
+        // パレットは開かない
+        assert_eq!(state.mode, ViewMode::Board);
+        assert!(state.toast.is_some());
+    }
+
+    #[test]
+    fn run_custom_command_out_of_range_returns_none() {
+        let state = make_state_with_issue_card_and_commands(vec![]);
+        assert_eq!(state.run_custom_command(0), Command::None);
+        assert_eq!(state.run_custom_command(99), Command::None);
+    }
+
+    #[test]
+    fn custom_command_uses_detail_stack_card_when_present() {
+        // detail_stack に積んだカードを優先することを確認
+        let commands = vec![make_custom_command("X", "echo {number}", Some("C-x"))];
+        let mut state = make_state_with_issue_card_and_commands(commands);
+
+        // detail_stack に number=100 のカードを積む
+        let mut stack_card = make_card("STK", "Stack card");
+        stack_card.number = Some(100);
+        stack_card.card_type = CardType::Issue {
+            state: crate::model::project::IssueState::Open,
+        };
+        stack_card.url = Some("https://github.com/o/r/issues/100".into());
+        state.detail_stack.push(stack_card);
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('x'),
+            KeyModifiers::CONTROL,
+        )));
+
+        assert_eq!(
+            cmd,
+            Command::RunCustomCommand {
+                name: "X".into(),
+                command_line: "echo 100".into(),
+                interactive: true,
+            }
+        );
     }
 }

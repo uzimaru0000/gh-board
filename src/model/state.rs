@@ -21,6 +21,7 @@ pub enum ViewMode {
     GroupBySelect,
     ReactionPicker,
     BulkSelect,
+    CommandPalette,
 }
 
 /// 現在表示中の「シーン」。Phase B リファクタで段階的にモード固有の state を
@@ -50,6 +51,7 @@ pub enum Scene {
     GroupBySelect(GroupBySelectState),
     ReactionPicker(ReactionPickerState),
     BulkSelect,
+    CommandPalette,
 }
 
 /// Board の表示レイアウト。Kanban (Board) / Table / Roadmap の 3 種類をサポート。

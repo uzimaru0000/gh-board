@@ -31,6 +31,7 @@ help:
     refresh: "Refresh"
     show_help: "Toggle help"
     quit: "Quit"
+    open_command_palette: "Open custom command palette"
     detail_scroll: "Scroll"
     detail_table_scroll: "Table scroll"
     detail_switch_sidebar: "Switch to sidebar"
