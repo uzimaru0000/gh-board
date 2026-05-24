@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-05-25
+
+### Added
+
+- Mouse support on the board and detail view: click to select, drag-and-drop to move/reorder cards with an optimistic preview, scroll wheel navigation, and click-to-switch View tabs
+- Mouse operation for Label / Assignee / CustomField pickers and detail sidebar sections
+- Custom commands defined in `config.toml` via `[[command]]`, runnable from a `:` command palette or a bound key (#88)
+
+### Fixed
+
+- Incorrect usage description in the `card` skill subcommand
+
 ## [1.3.0] - 2026-04-28
 
 ### Added
@@ -127,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Wide character bleeding through detail modal left border
 
+[1.4.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.4.0
 [1.3.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.3.0
 [1.2.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.2.0
 [1.1.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.1.0
