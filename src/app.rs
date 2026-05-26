@@ -676,18 +676,28 @@ impl App {
             Command::RunCustomCommand {
                 name,
                 command_line,
+                post_command_line,
                 interactive,
+                pause_after,
             } => {
                 if interactive {
                     self.pending_custom_command = Some(PendingCustomCommand {
                         name,
                         command_line,
+                        post_command_line,
+                        pause_after,
                     });
                 } else {
+                    // background 実行。post_command は `&&` で連結し、command が
+                    // 成功 (exit 0) したときのみ実行されるようにする。
+                    let line = match post_command_line {
+                        Some(post) => format!("{command_line} && {post}"),
+                        None => command_line,
+                    };
                     tokio::spawn(async move {
                         let _ = tokio::process::Command::new("sh")
                             .arg("-c")
-                            .arg(&command_line)
+                            .arg(&line)
                             .stdin(std::process::Stdio::null())
                             .stdout(std::process::Stdio::null())
                             .stderr(std::process::Stdio::null())
@@ -704,6 +714,10 @@ impl App {
 pub struct PendingCustomCommand {
     pub name: String,
     pub command_line: String,
+    /// `command_line` が成功した後に foreground 実行する後処理 (option)。
+    pub post_command_line: Option<String>,
+    /// 実行完了後にキー入力を待ってから TUI へ復帰するか。
+    pub pause_after: bool,
 }
 
 /// AppState 処理後に App が行うキャッシュ操作。`handle_event` で event を消費する前に

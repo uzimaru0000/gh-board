@@ -136,10 +136,16 @@ impl AppState {
             .or_else(|| self.selected_card_ref());
         let project = self.current_project.as_ref();
         let command_line = expand_placeholders(&cfg.command, card, project);
+        let post_command_line = cfg
+            .post_command
+            .as_ref()
+            .map(|c| expand_placeholders(c, card, project));
         Command::RunCustomCommand {
             name: cfg.name.clone(),
             command_line,
+            post_command_line,
             interactive: cfg.interactive,
+            pause_after: cfg.pause_after,
         }
     }
 

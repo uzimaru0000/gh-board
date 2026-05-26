@@ -184,26 +184,24 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg
 
             let status = run_custom_command(&pending.command_line);
 
+            // command が成功した場合のみ post_command を続けて foreground 実行する (cleanup)。
+            let post_status = match (&status, &pending.post_command_line) {
+                (Ok(s), Some(post)) if s.success() => Some(run_custom_command(post)),
+                _ => None,
+            };
+
+            // pause_after が指定されていれば、出力を残したままキー入力を待つ。
+            // この時点では raw mode 無効 + 通常画面なのでコマンド出力が見えている。
+            if pending.pause_after {
+                wait_for_key()?;
+            }
+
             enable_raw_mode()?;
             crossterm::execute!(std::io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
             terminal.clear()?;
             events.resume();
 
-            match status {
-                Ok(status) if status.success() => {
-                    app.state.toast = Some(format!("✓ {}", pending.name));
-                }
-                Ok(status) => {
-                    app.state.toast = Some(format!(
-                        "✗ {} (exit {})",
-                        pending.name,
-                        status.code().unwrap_or(-1)
-                    ));
-                }
-                Err(e) => {
-                    app.state.toast = Some(format!("✗ {}: {e}", pending.name));
-                }
-            }
+            app.state.toast = Some(custom_command_toast(&pending.name, status, post_status));
         }
 
         if app.state.should_quit {
@@ -211,6 +209,50 @@ async fn run(terminal: &mut DefaultTerminal, github: GitHubClient, cli: Cli, cfg
         }
     }
 
+    Ok(())
+}
+
+/// custom command (+ post_command) の実行結果から status line に出す toast を組み立てる。
+/// post_command が失敗した場合は command 成功でも警告を出す。
+fn custom_command_toast(
+    name: &str,
+    status: std::io::Result<std::process::ExitStatus>,
+    post_status: Option<std::io::Result<std::process::ExitStatus>>,
+) -> String {
+    match status {
+        Ok(s) if s.success() => match post_status {
+            Some(Ok(p)) if p.success() => format!("✓ {name}"),
+            Some(Ok(p)) => format!("✗ {name}: post-command failed (exit {})", p.code().unwrap_or(-1)),
+            Some(Err(e)) => format!("✗ {name}: post-command error: {e}"),
+            None => format!("✓ {name}"),
+        },
+        Ok(s) => format!("✗ {name} (exit {})", s.code().unwrap_or(-1)),
+        Err(e) => format!("✗ {name}: {e}"),
+    }
+}
+
+/// custom command の出力を残したまま、ユーザのキー入力を1つ待つ。
+/// 呼び出し時点では raw mode は無効・通常画面の想定。一時的に raw mode を有効化して
+/// 1 キー押下まで待ち、元に戻す (呼び出し元が直後に enable_raw_mode を行う)。
+fn wait_for_key() -> std::io::Result<()> {
+    use std::io::Write;
+
+    print!("\r\n\x1b[1;36m[gh-board]\x1b[0m Press any key to return to the board...");
+    std::io::stdout().flush()?;
+
+    enable_raw_mode()?;
+    // Key 押下イベントが来るまで待つ (Resize/Mouse 等は無視)。
+    loop {
+        match crossterm::event::read() {
+            Ok(crossterm::event::Event::Key(_)) => break,
+            Ok(_) => continue,
+            Err(e) => {
+                let _ = disable_raw_mode();
+                return Err(e);
+            }
+        }
+    }
+    disable_raw_mode()?;
     Ok(())
 }
 

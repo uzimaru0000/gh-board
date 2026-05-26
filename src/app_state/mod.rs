@@ -8373,8 +8373,10 @@ mod tests {
         crate::config::CustomCommandConfig {
             name: name.into(),
             command: command.into(),
+            post_command: None,
             key: key.map(String::from),
             interactive: true,
+            pause_after: false,
             description: None,
         }
     }
@@ -8415,7 +8417,9 @@ mod tests {
             Command::RunCustomCommand {
                 name: "Resolve".into(),
                 command_line: "echo 42 widget".into(),
+                post_command_line: None,
                 interactive: true,
+                pause_after: false,
             }
         );
     }
@@ -8465,7 +8469,9 @@ mod tests {
             Command::RunCustomCommand {
                 name: "Second".into(),
                 command_line: "echo second-42".into(),
+                post_command_line: None,
                 interactive: true,
+                pause_after: false,
             }
         );
         // 元の Board モードに戻っている
@@ -8491,6 +8497,38 @@ mod tests {
         // パレットは開かない
         assert_eq!(state.mode, ViewMode::Board);
         assert!(state.toast.is_some());
+    }
+
+    #[test]
+    fn run_custom_command_expands_post_command() {
+        let commands = vec![crate::config::CustomCommandConfig {
+            name: "Resolve".into(),
+            command: "claude '{url}'".into(),
+            post_command: Some("git worktree remove ../resolve-{number} --force".into()),
+            key: Some("C-r".into()),
+            interactive: true,
+            pause_after: false,
+            description: None,
+        }];
+        let mut state = make_state_with_issue_card_and_commands(commands);
+
+        let cmd = state.handle_event(AppEvent::Key(key_with_mod(
+            KeyCode::Char('r'),
+            KeyModifiers::CONTROL,
+        )));
+
+        assert_eq!(
+            cmd,
+            Command::RunCustomCommand {
+                name: "Resolve".into(),
+                command_line: "claude 'https://github.com/acme/widget/issues/42'".into(),
+                post_command_line: Some(
+                    "git worktree remove ../resolve-42 --force".into()
+                ),
+                interactive: true,
+                pause_after: false,
+            }
+        );
     }
 
     #[test]
@@ -8525,7 +8563,9 @@ mod tests {
             Command::RunCustomCommand {
                 name: "X".into(),
                 command_line: "echo 100".into(),
+                post_command_line: None,
                 interactive: true,
+                pause_after: false,
             }
         );
     }

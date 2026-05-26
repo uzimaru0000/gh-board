@@ -45,18 +45,29 @@ fn default_true() -> bool {
 /// ユーザ定義のシェルコマンド。
 /// `command` は `sh -c <command>` で実行され、現在選択中のカードから次の placeholder が展開される:
 /// `{number}` `{title}` `{url}` `{owner}` `{repo}` `{name_with_owner}` `{id}` `{item_id}` `{body}` `{project_number}` `{project_title}` `{project_url}`.
+/// `post_command` を指定すると、`command` が成功した後に同じ context で展開して実行する。
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct CustomCommandConfig {
     /// パレットや status line に表示する名前。
     pub name: String,
     /// `sh -c` に渡すコマンド文字列。placeholder を含められる。
     pub command: String,
+    /// `command` が成功 (exit 0) した後に実行する後処理コマンド (option)。
+    /// placeholder は `command` と同じ context で展開される。
+    /// worktree の作成 → 作業 → 削除のような cleanup 用途を想定。
+    #[serde(default)]
+    pub post_command: Option<String>,
     /// 任意のキーバインド (例: "C-r")。指定時は global keymap に登録され、Board/Detail から即時起動できる。
     #[serde(default)]
     pub key: Option<String>,
     /// true の場合は TUI を一時停止して foreground 実行する ($EDITOR と同様)。default: true。
     #[serde(default = "default_true")]
     pub interactive: bool,
+    /// true の場合、interactive 実行の完了後に "Press any key" でキー入力を待ってから
+    /// TUI に復帰する。echo や cleanup など出力を確認したいコマンド向け。default: false。
+    /// `interactive = false` (background) では無視される。
+    #[serde(default)]
+    pub pause_after: bool,
     /// パレットや status line に表示する説明 (option)。
     #[serde(default)]
     pub description: Option<String>,
@@ -600,6 +611,56 @@ description = "Spawn claude inside a new worktree"
         assert_eq!(
             config.commands[0].description.as_deref(),
             Some("Spawn claude inside a new worktree")
+        );
+    }
+
+    #[test]
+    fn test_parse_command_post_command_default_none() {
+        let toml = r#"
+[[command]]
+name = "Print number"
+command = "echo {number}"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.commands[0].post_command, None);
+    }
+
+    #[test]
+    fn test_parse_command_pause_after_default_false() {
+        let toml = r#"
+[[command]]
+name = "Print number"
+command = "echo {number}"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.commands[0].pause_after);
+    }
+
+    #[test]
+    fn test_parse_command_with_pause_after() {
+        let toml = r#"
+[[command]]
+name = "Print number"
+command = "echo {number}"
+pause_after = true
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.commands[0].pause_after);
+    }
+
+    #[test]
+    fn test_parse_command_with_post_command() {
+        let toml = r#"
+[[command]]
+name = "Resolve with Claude"
+command = "git worktree add ../resolve-{number} -b resolve-{number} && cd ../resolve-{number} && claude '{url}'"
+post_command = "git worktree remove ../resolve-{number} --force"
+key = "C-r"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.commands[0].post_command.as_deref(),
+            Some("git worktree remove ../resolve-{number} --force")
         );
     }
 

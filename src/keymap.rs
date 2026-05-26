@@ -1092,22 +1092,28 @@ mod tests {
             crate::config::CustomCommandConfig {
                 name: "First".into(),
                 command: "echo a".into(),
+                post_command: None,
                 key: Some("C-r".into()),
                 interactive: true,
+                pause_after: false,
                 description: None,
             },
             crate::config::CustomCommandConfig {
                 name: "Second".into(),
                 command: "echo b".into(),
+                post_command: None,
                 key: None, // 未指定なので無視
                 interactive: true,
+                pause_after: false,
                 description: None,
             },
             crate::config::CustomCommandConfig {
                 name: "Third".into(),
                 command: "echo c".into(),
+                post_command: None,
                 key: Some("C-t".into()),
                 interactive: true,
+                pause_after: false,
                 description: None,
             },
         ];
@@ -1132,8 +1138,10 @@ mod tests {
         let commands = vec![crate::config::CustomCommandConfig {
             name: "X".into(),
             command: "echo".into(),
+            post_command: None,
             key: Some("C-r".into()),
             interactive: true,
+            pause_after: false,
             description: None,
         }];
         let keymap = Keymap::default_keymap().register_custom_commands(&commands);
@@ -1148,8 +1156,10 @@ mod tests {
         let commands = vec![crate::config::CustomCommandConfig {
             name: "Bad".into(),
             command: "echo".into(),
+            post_command: None,
             key: Some("totally-bogus".into()),
             interactive: true,
+            pause_after: false,
             description: None,
         }];
         let keymap = Keymap::default_keymap().register_custom_commands(&commands);
