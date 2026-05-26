@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-05-26
+
+### Added
+
+- `post_command` and `pause_after` options for custom commands: run a cleanup step after a successful command, and wait for a key press before returning to the TUI (#90)
+
 ## [1.4.0] - 2026-05-25
 
 ### Added
@@ -139,6 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Wide character bleeding through detail modal left border
 
+[1.5.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.5.0
 [1.4.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.4.0
 [1.3.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.3.0
 [1.2.0]: https://github.com/uzimaru0000/gh-board/releases/tag/v1.2.0
