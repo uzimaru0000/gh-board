@@ -149,10 +149,14 @@ pub enum Command {
     /// ユーザ定義のシェルコマンドを実行する。
     /// `command_line` は placeholder 展開済みの文字列で、`sh -c <command_line>` として渡される。
     /// `interactive = true` の場合は TUI を一時停止して foreground 実行する。
+    /// `post_command_line` があれば `command_line` の成功後に同じモードで実行する (cleanup 用)。
+    /// `pause_after = true` の場合、interactive 実行の完了後にキー入力を待ってから TUI へ復帰する。
     RunCustomCommand {
         name: String,
         command_line: String,
+        post_command_line: Option<String>,
         interactive: bool,
+        pause_after: bool,
     },
 }
 

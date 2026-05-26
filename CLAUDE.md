@@ -216,7 +216,9 @@ assert_eq!(cmd, Command::MoveCard { ... });
 
 ### カスタムコマンド (`[[command]]`)
 - `~/.config/gh-board/config.toml` の `[[command]]` で定義した shell snippet を、選択中のカードを context にして実行する
-- 各 entry: `name` / `command` / `key`(任意) / `interactive`(default true) / `description`(任意)
+- 各 entry: `name` / `command` / `post_command`(任意) / `key`(任意) / `interactive`(default true) / `pause_after`(default false) / `description`(任意)
+- `post_command` は `command` が成功 (exit 0) した後に同じ placeholder context で展開して実行する後処理 (cleanup 用)。worktree 作成 → 作業 → 削除のようなライフサイクルに使う。interactive メインでは TUI を止めたまま続けて foreground 実行し、background メインでは `command && post_command` として連結して spawn する
+- `pause_after = true` の場合、interactive 実行 (command + post_command) 完了後に `main.rs::wait_for_key` で "Press any key" のキー入力を1つ待ってから TUI へ復帰する。`echo` 等の出力を確認したいコマンド向け。`crossterm::event::read()` で Key イベントを待つ間は `events.pause()` 済みなので競合しない。`interactive = false` (background) では無視
 - `command` 内の `{number}` `{title}` `{url}` `{owner}` `{repo}` `{name_with_owner}` `{id}` `{content_id}` `{item_id}` `{body}` `{card_type}` `{project_number}` `{project_title}` `{project_url}` が `src/app_state/custom_command.rs::expand_placeholders` で展開される。未対応 key は `{...}` のまま残る (将来拡張に安全)
 - 発火経路:
   - `key` が登録されたエントリは `Keymap::register_custom_commands` で `global` に bind され、Board / Detail から直接発動

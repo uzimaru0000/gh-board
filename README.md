@@ -190,6 +190,7 @@ Define shell snippets in `~/.config/gh-board/config.toml` and run them against t
 [[command]]
 name = "Resolve with Claude"
 command = "git worktree add ../{repo}.resolve-{number} -b resolve-{number} && cd ../{repo}.resolve-{number} && claude 'https://github.com/{owner}/{repo}/issues/{number} を解決してください'"
+post_command = "git worktree remove ../{repo}.resolve-{number} --force"
 key = "C-r"
 description = "Spawn a worktree and launch claude inside"
 
@@ -197,6 +198,11 @@ description = "Spawn a worktree and launch claude inside"
 name = "Copy issue ref"
 command = "printf '#%s' '{number}' | pbcopy"
 interactive = false
+
+[[command]]
+name = "Show gh status"
+command = "gh pr checks {number}"
+pause_after = true
 ```
 
 Available placeholders (resolved from the selected card / current project):
@@ -216,6 +222,8 @@ Available placeholders (resolved from the selected card / current project):
 Notes:
 - `command` is executed via `sh -c`, so you can chain with `&&`, `|`, etc.
 - `interactive = true` (default) suspends the TUI like `$EDITOR` does — required for tools that take over the terminal (e.g. `claude`, `vim`). `interactive = false` runs the command in the background and discards its output.
+- `post_command` (optional) runs **after** `command` succeeds (exit 0), expanded with the same placeholders. Handy for cleanup such as removing a worktree once you are done. With an interactive `command` it runs in the same suspended-TUI session; with a background `command` it is chained as `command && post_command`. If `command` fails, `post_command` is skipped so you can inspect the leftover state.
+- `pause_after = true` (default `false`, interactive only) waits for a key press after the command (and `post_command`) finishes before returning to the board, so you can read the output of commands that don't take over the terminal (e.g. `echo`, `gh pr checks`).
 - Placeholders for fields the card does not have (e.g. `{number}` on a draft issue) expand to an empty string. Unknown placeholders are left intact so you can compose your own templates safely.
 - Commands without a `key` are still reachable via the `:` palette.
 
