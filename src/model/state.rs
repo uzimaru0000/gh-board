@@ -291,6 +291,9 @@ pub enum FilterCondition {
     Is(IsKind),
     /// `-<cond>` - 条件の否定
     Not(Box<FilterCondition>),
+    /// Any other `field:value` (e.g. `sprint:@current`, `status:"In Progress"`).
+    /// Only the server can evaluate these, so it is sent as-is and always matches locally.
+    Qualifier(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -338,11 +341,11 @@ impl FilterCondition {
             return FilterCondition::Not(Box::new(FilterCondition::parse_token(rest)));
         }
         if let Some(rest) = token.strip_prefix("label:") {
-            FilterCondition::Label(rest.to_string())
+            FilterCondition::Label(unquote(rest).to_string())
         } else if let Some(rest) = token.strip_prefix("assignee:") {
-            FilterCondition::Assignee(rest.to_string())
+            FilterCondition::Assignee(unquote(rest).to_string())
         } else if let Some(rest) = token.strip_prefix("milestone:") {
-            FilterCondition::Milestone(rest.to_string())
+            FilterCondition::Milestone(unquote(rest).to_string())
         } else if let Some(rest) = token.strip_prefix("no:") {
             FilterCondition::No(rest.to_string())
         } else if let Some(rest) = token.strip_prefix("is:") {
@@ -350,6 +353,8 @@ impl FilterCondition {
                 Some(kind) => FilterCondition::Is(kind),
                 None => FilterCondition::Text(token.to_string()),
             }
+        } else if is_qualifier(token) {
+            FilterCondition::Qualifier(token.to_string())
         } else {
             FilterCondition::Text(token.to_string())
         }
@@ -369,6 +374,7 @@ impl FilterCondition {
             FilterCondition::No(s) => format!("no:{}", quote_if_needed(s)),
             FilterCondition::Is(kind) => format!("is:{}", kind.as_query_value()),
             FilterCondition::Not(inner) => format!("-{}", inner.to_query_token()),
+            FilterCondition::Qualifier(s) => s.clone(),
         }
     }
 
@@ -440,7 +446,11 @@ impl FilterCondition {
                     matches!(card.card_type, super::project::CardType::DraftIssue)
                 }
             },
-            FilterCondition::Not(inner) => !inner.matches(card),
+            // The server already applied a negated qualifier, so it must not hide cards here.
+            FilterCondition::Not(inner) => {
+                matches!(**inner, FilterCondition::Qualifier(_)) || !inner.matches(card)
+            }
+            FilterCondition::Qualifier(_) => true,
         }
     }
 }
@@ -467,8 +477,8 @@ impl ActiveFilter {
         let groups: Vec<Vec<FilterCondition>> = input
             .split('|')
             .map(|group| {
-                group
-                    .split_whitespace()
+                tokenize(group)
+                    .into_iter()
                     .map(FilterCondition::parse_token)
                     .collect()
             })
@@ -502,6 +512,45 @@ impl ActiveFilter {
             })
             .collect()
     }
+}
+
+/// `key:value` where key is a plain field name and value is non-empty.
+fn is_qualifier(token: &str) -> bool {
+    token.split_once(':').is_some_and(|(key, value)| {
+        !key.is_empty()
+            && !value.is_empty()
+            && key.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    })
+}
+
+/// Splits on whitespace, keeping double-quoted spans together so
+/// `status:"In Progress"` stays one token.
+fn tokenize(input: &str) -> Vec<&str> {
+    let mut tokens = Vec::new();
+    let mut start = None;
+    let mut in_quotes = false;
+    for (i, c) in input.char_indices() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+        }
+        if c.is_whitespace() && !in_quotes {
+            if let Some(s) = start.take() {
+                tokens.push(&input[s..i]);
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(s) = start {
+        tokens.push(&input[s..]);
+    }
+    tokens
+}
+
+fn unquote(s: &str) -> &str {
+    s.strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(s)
 }
 
 fn quote_if_needed(s: &str) -> String {
@@ -918,6 +967,43 @@ mod tests {
         assert_eq!(
             FilterCondition::Not(Box::new(FilterCondition::Label("bug".into()))).to_query_token(),
             "-label:\"bug\""
+        );
+    }
+
+    #[test]
+    fn test_parse_unknown_qualifier_is_server_only() {
+        assert_eq!(
+            FilterCondition::parse_token("sprint:@current"),
+            FilterCondition::Qualifier("sprint:@current".into())
+        );
+        assert_eq!(
+            FilterCondition::parse_token("fix:"),
+            FilterCondition::Text("fix:".into())
+        );
+    }
+
+    #[test]
+    fn test_qualifier_matches_every_card_locally() {
+        let card = card_defaults();
+        let f = ActiveFilter::parse("sprint:@current -status:Done");
+        assert!(f.matches(&card));
+    }
+
+    #[test]
+    fn test_quoted_qualifier_stays_one_token() {
+        let f = ActiveFilter::parse(r#"assignee:alice status:"In Progress","Todo/Ready" sprint:@current"#);
+        assert_eq!(
+            f.to_server_queries(),
+            vec![r#"assignee:alice status:"In Progress","Todo/Ready" sprint:@current"#.to_string()]
+        );
+    }
+
+    #[test]
+    fn test_quoted_label_is_not_double_quoted() {
+        let f = ActiveFilter::parse(r#"label:"good first issue""#);
+        assert_eq!(
+            f.to_server_queries(),
+            vec![r#"label:"good first issue""#.to_string()]
         );
     }
 

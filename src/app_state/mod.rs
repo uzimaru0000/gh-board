@@ -2670,6 +2670,39 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_enter_unknown_qualifier_passes_through_to_server() {
+        let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "Card A")])]);
+        let mut state = make_state_with_board(board);
+
+        state.handle_event(AppEvent::Key(key(KeyCode::Char('/'))));
+        for c in r#"sprint:@current status:"In Progress""#.chars() {
+            state.handle_event(AppEvent::Key(key(KeyCode::Char(c))));
+        }
+
+        let cmd = state.handle_event(AppEvent::Key(key(KeyCode::Enter)));
+        assert_eq!(
+            cmd,
+            Command::LoadBoard {
+                project_id: "proj_1".into(),
+                preferred_grouping_field_name: None,
+                queries: vec![r#"sprint:@current status:"In Progress""#.into()],
+            }
+        );
+    }
+
+    #[test]
+    fn test_filtered_indices_unknown_qualifier_keeps_server_results() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![make_card("1", "Card A"), make_card("2", "Card B")],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("sprint:@current -status:Done"));
+        assert_eq!(state.filtered_card_indices(0), vec![0, 1]);
+    }
+
+    #[test]
     fn test_filter_enter_empty_emits_load_board_no_query() {
         let board = make_board(vec![("Todo", "opt_1", vec![make_card("1", "A")])]);
         let mut state = make_state_with_board(board);
