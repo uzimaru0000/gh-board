@@ -26,7 +26,7 @@ help:
     switch_project: "Switch project"
     change_grouping: "Change grouping field"
     toggle_layout: "Toggle layout (Board/Table/Roadmap)"
-    start_filter: "Filter (label: assignee: milestone: no: is: -:NOT |:OR)"
+    start_filter: "Filter (label: assignee: milestone: repo: no: is: -:NOT |:OR)"
     clear_filter: "Clear filter / view"
     refresh: "Refresh"
     show_help: "Toggle help"

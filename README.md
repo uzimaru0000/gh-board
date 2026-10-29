@@ -40,7 +40,7 @@ your flow, gh-board fills the gap.
 - **Grouping axis** — switch the kanban column grouping by SingleSelect or Iteration fields (`Ctrl+g`)
 - **Archive / Unarchive** — archive cards from the board or restore them from the archive list
 - **Comments** — post new comments and edit your own (`$EDITOR` integration)
-- **Filter** — free text, `label:`, `assignee:`, `milestone:`, compound `AND`/`OR`
+- **Filter** — free text, `label:`, `assignee:`, `milestone:`, `repo:`, compound `AND`/`OR`
 - **Fuzzy project selection** — quickly find projects with fuzzy matching
 - **Local board cache** — XDG-compliant on-disk cache with stale-while-revalidate for instant startup
 - **i18n** — help screen available in English and Japanese (auto-detects from `LANG` / `LC_ALL`)
@@ -135,6 +135,7 @@ Board responses are cached at `$XDG_CACHE_HOME/gh-board/board/` (e.g. `~/.cache/
 - `label:<name>`: filter by label
 - `assignee:<name>`: filter by assignee (`@` prefix supported)
 - `milestone:<name>`: filter by milestone
+- `repo:<owner>/<name>` or `repo:<name>`: filter by repository (partial match)
 - Compound: `label:bug AND assignee:me`, `label:bug OR label:feature`
 
 ## Configuration

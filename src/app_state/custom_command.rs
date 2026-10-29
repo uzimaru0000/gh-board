@@ -4,23 +4,10 @@ use crate::action::Action;
 use crate::command::Command;
 use crate::config::CustomCommandConfig;
 use crate::keymap::KeymapMode;
-use crate::model::project::{Card, CardType, ProjectSummary};
+use crate::model::project::{Card, CardType, ProjectSummary, parse_owner_repo_from_url};
 use crate::model::state::{Scene, ViewMode};
 
 use super::AppState;
-
-/// `https://github.com/<owner>/<repo>/issues/<n>` のような URL から (owner, repo) を抽出する。
-/// 形式に合致しない場合 None。
-pub(crate) fn parse_owner_repo_from_url(url: &str) -> Option<(String, String)> {
-    let rest = url.strip_prefix("https://github.com/")?;
-    let mut parts = rest.splitn(3, '/');
-    let owner = parts.next()?;
-    let repo = parts.next()?;
-    if owner.is_empty() || repo.is_empty() {
-        return None;
-    }
-    Some((owner.to_string(), repo.to_string()))
-}
 
 /// `command` 内の `{key}` placeholder を展開する。未対応の key は元の `{key}` 表記のまま残す。
 /// `card` が `None` の場合、カード関連 placeholder は空文字に展開される。

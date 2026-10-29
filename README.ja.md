@@ -40,7 +40,7 @@ gh board --owner <org> <num>   # 特定プロジェクトを直接開く
 - **グループ化軸の切替** — SingleSelect / Iteration フィールドでカンバンの列軸を切替 (`Ctrl+g`)
 - **アーカイブ / 復元** — ボードからカードをアーカイブ、アーカイブ一覧から復元
 - **コメント** — 新規コメント投稿・自分のコメント編集 (`$EDITOR` 連携)
-- **フィルタ** — フリーテキスト、`label:`、`assignee:`、`milestone:`、`AND`/`OR` 複合条件
+- **フィルタ** — フリーテキスト、`label:`、`assignee:`、`milestone:`、`repo:`、`AND`/`OR` 複合条件
 - **ファジープロジェクト選択** — ファジーマッチで素早くプロジェクトを検索
 - **ローカルボードキャッシュ** — XDG 準拠のディスクキャッシュで stale-while-revalidate による起動高速化
 - **i18n 対応** — ヘルプ画面は英語/日本語に対応 (`LANG` / `LC_ALL` から自動判定)
@@ -135,6 +135,7 @@ gh board --owner <org-or-user> <number>
 - `label:<name>`: ラベルで絞り込み
 - `assignee:<name>`: アサイニーで絞り込み (`@` プレフィックス対応)
 - `milestone:<name>`: マイルストーンで絞り込み
+- `repo:<owner>/<name>` または `repo:<name>`: リポジトリで絞り込み (部分一致)
 - 複合条件: `label:bug AND assignee:me`、`label:bug OR label:feature`
 
 ## 設定

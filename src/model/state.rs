@@ -284,6 +284,8 @@ pub enum FilterCondition {
     Label(String),
     Assignee(String),
     Milestone(String),
+    /// `repo:<owner>/<name>` - card URL から導出した `owner/name` に部分一致
+    Repo(String),
     /// `no:<field>` - 指定フィールドが未設定なカードにマッチ。
     /// field は label / assignee(s) / milestone / custom field 名 (Status など)
     No(String),
@@ -343,6 +345,8 @@ impl FilterCondition {
             FilterCondition::Assignee(rest.to_string())
         } else if let Some(rest) = token.strip_prefix("milestone:") {
             FilterCondition::Milestone(rest.to_string())
+        } else if let Some(rest) = token.strip_prefix("repo:") {
+            FilterCondition::Repo(rest.to_string())
         } else if let Some(rest) = token.strip_prefix("no:") {
             FilterCondition::No(rest.to_string())
         } else if let Some(rest) = token.strip_prefix("is:") {
@@ -357,8 +361,9 @@ impl FilterCondition {
 
     /// Projects V2 の query 構文に変換する。
     /// 値に空白が含まれる場合はダブルクオートで囲む。
-    pub fn to_query_token(&self) -> String {
-        match self {
+    /// サーバー側で表現できない条件 (client-side でのみ絞る条件) は None。
+    pub fn to_query_token(&self) -> Option<String> {
+        let token = match self {
             FilterCondition::Text(s) => quote_if_needed(s),
             FilterCondition::Label(s) => format!("label:\"{s}\""),
             FilterCondition::Assignee(s) => {
@@ -366,10 +371,15 @@ impl FilterCondition {
                 format!("assignee:{}", quote_if_needed(stripped))
             }
             FilterCondition::Milestone(s) => format!("milestone:\"{s}\""),
+            // サーバー側の repo: は `owner/name` の完全指定しか受け付けないため、
+            // name だけの指定は client-side の部分一致に任せる
+            FilterCondition::Repo(s) if s.contains('/') => format!("repo:{}", quote_if_needed(s)),
+            FilterCondition::Repo(_) => return None,
             FilterCondition::No(s) => format!("no:{}", quote_if_needed(s)),
             FilterCondition::Is(kind) => format!("is:{}", kind.as_query_value()),
-            FilterCondition::Not(inner) => format!("-{}", inner.to_query_token()),
-        }
+            FilterCondition::Not(inner) => format!("-{}", inner.to_query_token()?),
+        };
+        Some(token)
     }
 
     pub fn matches(&self, card: &super::project::Card) -> bool {
@@ -395,6 +405,15 @@ impl FilterCondition {
                 card.milestone
                     .as_ref()
                     .is_some_and(|m| m.to_lowercase().contains(&q))
+            }
+            FilterCondition::Repo(query) => {
+                let q = query.to_lowercase();
+                card.url
+                    .as_deref()
+                    .and_then(super::project::parse_owner_repo_from_url)
+                    .is_some_and(|(owner, repo)| {
+                        format!("{owner}/{repo}").to_lowercase().contains(&q)
+                    })
             }
             FilterCondition::No(field) => match field.to_ascii_lowercase().as_str() {
                 "label" | "labels" => card.labels.is_empty(),
@@ -490,17 +509,24 @@ impl ActiveFilter {
     /// Projects V2 の `items(query:)` 引数に渡す query 文字列を、
     /// OR グループごとに 1 個ずつ生成する。
     /// 空 vec の場合はサーバー側フィルタなし。
+    /// サーバーで表現できない条件は落とす (client-side の `matches` が最終的に絞る)。
+    /// いずれかの group がサーバー側無条件になる場合は全件取得と同じなので空 vec を返す。
     pub fn to_server_queries(&self) -> Vec<String> {
-        self.groups
+        let queries: Vec<String> = self
+            .groups
             .iter()
             .map(|group| {
                 group
                     .iter()
-                    .map(FilterCondition::to_query_token)
+                    .filter_map(FilterCondition::to_query_token)
                     .collect::<Vec<_>>()
                     .join(" ")
             })
-            .collect()
+            .collect();
+        if queries.iter().any(String::is_empty) {
+            return Vec::new();
+        }
+        queries
     }
 }
 
@@ -620,48 +646,122 @@ mod tests {
     #[test]
     fn test_to_query_token_text() {
         assert_eq!(
-            FilterCondition::Text("fix".into()).to_query_token(),
-            "fix"
+            FilterCondition::Text("fix".into())
+                .to_query_token()
+                .as_deref(),
+            Some("fix")
         );
     }
 
     #[test]
     fn test_to_query_token_text_with_space() {
         assert_eq!(
-            FilterCondition::Text("hello world".into()).to_query_token(),
-            "\"hello world\""
+            FilterCondition::Text("hello world".into())
+                .to_query_token()
+                .as_deref(),
+            Some("\"hello world\"")
         );
     }
 
     #[test]
     fn test_to_query_token_label() {
         assert_eq!(
-            FilterCondition::Label("bug".into()).to_query_token(),
-            "label:\"bug\""
+            FilterCondition::Label("bug".into())
+                .to_query_token()
+                .as_deref(),
+            Some("label:\"bug\"")
         );
     }
 
     #[test]
     fn test_to_query_token_assignee() {
         assert_eq!(
-            FilterCondition::Assignee("alice".into()).to_query_token(),
-            "assignee:alice"
+            FilterCondition::Assignee("alice".into())
+                .to_query_token()
+                .as_deref(),
+            Some("assignee:alice")
         );
     }
 
     #[test]
     fn test_to_query_token_assignee_strips_at_prefix() {
         assert_eq!(
-            FilterCondition::Assignee("@alice".into()).to_query_token(),
-            "assignee:alice"
+            FilterCondition::Assignee("@alice".into())
+                .to_query_token()
+                .as_deref(),
+            Some("assignee:alice")
+        );
+    }
+
+    #[test]
+    fn test_parse_single_repo() {
+        let f = ActiveFilter::parse("repo:acme/widget");
+        assert_eq!(
+            f,
+            ActiveFilter {
+                groups: vec![vec![FilterCondition::Repo("acme/widget".into())]]
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_negated_repo() {
+        assert_eq!(
+            FilterCondition::parse_token("-repo:acme/widget"),
+            FilterCondition::Not(Box::new(FilterCondition::Repo("acme/widget".into())))
+        );
+    }
+
+    #[test]
+    fn test_to_query_token_repo() {
+        assert_eq!(
+            FilterCondition::Repo("acme/widget".into())
+                .to_query_token()
+                .as_deref(),
+            Some("repo:acme/widget")
+        );
+    }
+
+    #[test]
+    fn test_to_query_token_repo_name_only_is_client_side_only() {
+        // owner を含まない repo: はサーバー側で解釈できない (完全指定が必要) ので
+        // サーバーには渡さず client-side の部分一致だけで絞る
+        assert_eq!(
+            FilterCondition::Repo("widget".into()).to_query_token(),
+            None
+        );
+        assert_eq!(
+            FilterCondition::Not(Box::new(FilterCondition::Repo("widget".into()))).to_query_token(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_to_server_queries_repo_name_only_keeps_other_tokens() {
+        let f = ActiveFilter::parse("repo:widget label:bug");
+        assert_eq!(f.to_server_queries(), vec!["label:\"bug\"".to_string()]);
+    }
+
+    #[test]
+    fn test_to_server_queries_repo_name_only_alone_means_no_server_filter() {
+        assert_eq!(
+            ActiveFilter::parse("repo:widget").to_server_queries(),
+            Vec::<String>::new()
+        );
+        // OR のいずれかの group が無条件なら全件取得と同じ
+        assert_eq!(
+            ActiveFilter::parse("repo:widget | label:bug").to_server_queries(),
+            Vec::<String>::new()
         );
     }
 
     #[test]
     fn test_to_query_token_milestone() {
         assert_eq!(
-            FilterCondition::Milestone("v1.0".into()).to_query_token(),
-            "milestone:\"v1.0\""
+            FilterCondition::Milestone("v1.0".into())
+                .to_query_token()
+                .as_deref(),
+            Some("milestone:\"v1.0\"")
         );
     }
 
@@ -880,6 +980,18 @@ mod tests {
     }
 
     #[test]
+    fn test_matches_repo_partial() {
+        let mut card = card_defaults();
+        card.url = Some("https://github.com/acme/widget/issues/1".into());
+        assert!(FilterCondition::Repo("widget".into()).matches(&card));
+        assert!(FilterCondition::Repo("ACME/widget".into()).matches(&card));
+        assert!(!FilterCondition::Repo("other".into()).matches(&card));
+
+        let no_url = card_defaults();
+        assert!(!FilterCondition::Repo("widget".into()).matches(&no_url));
+    }
+
+    #[test]
     fn test_matches_not_inverts() {
         let mut card = card_defaults();
         card.labels.push(ProjectLabel {
@@ -896,28 +1008,30 @@ mod tests {
     #[test]
     fn test_to_query_token_no() {
         assert_eq!(
-            FilterCondition::No("label".into()).to_query_token(),
-            "no:label"
+            FilterCondition::No("label".into())
+                .to_query_token()
+                .as_deref(),
+            Some("no:label")
         );
     }
 
     #[test]
     fn test_to_query_token_is() {
         assert_eq!(
-            FilterCondition::Is(IsKind::Open).to_query_token(),
-            "is:open"
+            FilterCondition::Is(IsKind::Open).to_query_token().as_deref(),
+            Some("is:open")
         );
         assert_eq!(
-            FilterCondition::Is(IsKind::Draft).to_query_token(),
-            "is:draft-issue"
+            FilterCondition::Is(IsKind::Draft).to_query_token().as_deref(),
+            Some("is:draft-issue")
         );
     }
 
     #[test]
     fn test_to_query_token_not() {
         assert_eq!(
-            FilterCondition::Not(Box::new(FilterCondition::Label("bug".into()))).to_query_token(),
-            "-label:\"bug\""
+            FilterCondition::Not(Box::new(FilterCondition::Label("bug".into()))).to_query_token().as_deref(),
+            Some("-label:\"bug\"")
         );
     }
 

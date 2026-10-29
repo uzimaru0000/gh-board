@@ -26,7 +26,7 @@ help:
     switch_project: "プロジェクト切替"
     change_grouping: "グループ化フィールド変更"
     toggle_layout: "レイアウト切替 (Board/Table/Roadmap)"
-    start_filter: "フィルタ (label: assignee: milestone: no: is: -:NOT |:OR)"
+    start_filter: "フィルタ (label: assignee: milestone: repo: no: is: -:NOT |:OR)"
     clear_filter: "フィルタ / ビュー解除"
     refresh: "リフレッシュ"
     show_help: "ヘルプ切替"

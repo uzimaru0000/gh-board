@@ -1816,6 +1816,13 @@ mod tests {
         }
     }
 
+    fn make_card_with_url(item_id: &str, title: &str, url: &str) -> Card {
+        Card {
+            url: Some(url.into()),
+            ..make_card(item_id, title)
+        }
+    }
+
     fn make_card_with_custom_fields(
         item_id: &str,
         title: &str,
@@ -5946,6 +5953,22 @@ mod tests {
         )]);
         let mut state = make_state_with_board(board);
         state.filter.active_filter = Some(ActiveFilter::parse("milestone:v1"));
+        assert_eq!(state.filtered_card_indices(0), vec![0]);
+    }
+
+    #[test]
+    fn test_filtered_indices_repo() {
+        let board = make_board(vec![(
+            "Todo",
+            "opt_1",
+            vec![
+                make_card_with_url("1", "Card 1", "https://github.com/acme/widget/issues/1"),
+                make_card_with_url("2", "Card 2", "https://github.com/acme/gadget/pull/2"),
+                make_card("3", "Card 3"), // example.com → repo 不明
+            ],
+        )]);
+        let mut state = make_state_with_board(board);
+        state.filter.active_filter = Some(ActiveFilter::parse("repo:acme/widget"));
         assert_eq!(state.filtered_card_indices(0), vec![0]);
     }
 

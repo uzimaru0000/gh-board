@@ -156,6 +156,7 @@ curl -L -o schema.graphql https://raw.githubusercontent.com/octokit/graphql-sche
 - フリーテキスト: カードタイトルの部分一致 (client-side)
 - `label:xxx`: ラベル名で部分一致
 - `assignee:xxx`: アサイニーで部分一致 (`@` プレフィックス対応)
+- `repo:xxx`: カード URL から導出した `owner/name` で部分一致 (URL のない DraftIssue は不一致)。サーバー側 `items(query:)` の `repo:` は `owner/name` 完全指定しか受け付けないため、`/` を含まない値は `to_query_token` が `None` を返してサーバーに渡さず client-side だけで絞る
 - フィルタ中の selected_card は表示インデックス。実カードへの変換は `real_card_index()` を使用
 
 ## アーキテクチャ: Functional Core / Imperative Shell

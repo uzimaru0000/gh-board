@@ -116,6 +116,19 @@ pub struct Card {
     pub sub_issues: Vec<SubIssueRef>,
 }
 
+/// `https://github.com/<owner>/<repo>/issues/<n>` のような URL から (owner, repo) を抽出する。
+/// 形式に合致しない場合 None。
+pub(crate) fn parse_owner_repo_from_url(url: &str) -> Option<(String, String)> {
+    let rest = url.strip_prefix("https://github.com/")?;
+    let mut parts = rest.splitn(3, '/');
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some((owner.to_string(), repo.to_string()))
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ParentIssueRef {
     pub id: String,
